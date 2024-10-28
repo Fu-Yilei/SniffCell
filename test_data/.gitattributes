@@ -1,3 +1,0 @@
-hapmap_smaht_ont_chr1_1000000_2000000.bam filter=lfs diff=lfs merge=lfs -text
-hapmap_smaht_ont_chr1_900000_2000000.bam filter=lfs diff=lfs merge=lfs -text
-test_data/hapmap_smaht_ont_chr1_900000_2000000.bam filter=lfs diff=lfs merge=lfs -text
