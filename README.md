@@ -24,10 +24,13 @@ options:
                         Minimum supporting reads requirement for a SV.
   -th THRESHHOLD, --threshhold THRESHHOLD
                         Threshold for determining nearby region is differently methylated or not
+  -tf TEST_FUNCTION, --test_function TEST_FUNCTION
+                        Statistical test function for determining methylation difference. Default: ttest. Other options: ranksum, fisher
   -b2 SECOND_BAM, --second_bam SECOND_BAM
                         Another BAM file that used for benchmarking.
   -v2 SECOND_VCF, --second_vcf SECOND_VCF
                         Another SV VCF file that used for benchmarking. No SV-supporting reads needed.
+  
 
 Required arguments:
   -b BAM, --bam BAM     Input BAM file.
