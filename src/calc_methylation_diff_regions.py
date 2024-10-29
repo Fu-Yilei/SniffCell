@@ -1,7 +1,7 @@
 import pysam, os, re
 from src.vcf_to_df import read_vcf_to_df
 from src.get_base_modification_dictionary import get_base_modification_dictionary_new_bam
-from src.statistic_tests import calculate_ttest
+from src.statistic_tests import calculate_ttest, calculate_ranksum, calculate_fisher
 from tqdm import tqdm
 
 
@@ -15,7 +15,10 @@ def filter_dict_with_sv(input_dict, sv_start, sv_end):
 
 def calculate_methylation_diff_region_bam(sv_vcf, input_bam, reference_genome, 
                                           output_bam_folder, output_bam=True, 
-                                          min_supporting_read_num = 5, sv_discovery_range=1000):
+                                          min_supporting_read_num = 5, 
+                                          sv_discovery_range=1000,
+                                            test_function = 'ttest'):
+    
     hapmap_ref_file = pysam.AlignmentFile(input_bam)
     referece_sequence = pysam.Fastafile(reference_genome)
     filtered_mosaic_sv = pysam.VariantFile(sv_vcf)
@@ -28,7 +31,16 @@ def calculate_methylation_diff_region_bam(sv_vcf, input_bam, reference_genome,
                                                              chromosome=test_sv.chr, 
                                                              phase_region=(int(test_sv.ref_start)-sv_discovery_range, int(test_sv.ref_end)+sv_discovery_range), 
                                                              sv_supporting_reads=test_sv.supporting_reads, sv_id=test_sv.id, output_bam_folder=output_bam_folder, output_bam=output_bam)
-        ranksum_dict = calculate_ttest(modification_dict) # nan if list length is 0
+        if test_function == 'ttest':
+            ranksum_dict = calculate_ttest(modification_dict)
+        elif test_function == 'ranksum':
+            ranksum_dict = calculate_ranksum(modification_dict)
+        elif test_function == 'fisher':
+            ranksum_dict = calculate_fisher(modification_dict)
+        else:
+            ranksum_dict = calculate_ttest(modification_dict)
+
+        # ranksum_dict = calculate_ttest(modification_dict) # nan if list length is 0
         ranksum_dict = filter_dict_with_sv(ranksum_dict, int(test_sv.ref_start), int(test_sv.ref_end))
         cpg_diff_locs = {i: p_value for i, p_value in ranksum_dict.items() if p_value < 0.05}
         cpg_same_locs = {i: p_value for i, p_value in ranksum_dict.items() if p_value > 0.05}

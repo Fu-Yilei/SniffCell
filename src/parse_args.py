@@ -85,6 +85,14 @@ def parse_args(argv):
     )
 
     parser.add_argument(
+        "-tf",
+        "--test_function",
+        type=str,
+        default='ttest',
+        help="Statistical test function for determining methylation difference. Default: ttest. Other options: ranksum, fisher",
+    )
+
+    parser.add_argument(
         "-b2",
         "--second_bam",
         type=str,
