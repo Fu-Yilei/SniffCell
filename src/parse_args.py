@@ -100,13 +100,6 @@ def parse_args(argv):
         help="Another BAM file that used for benchmarking.",
     )
 
-    parser.add_argument(
-        "-v2",
-        "--second_vcf",
-        type=str,
-        default=None,
-        help="Another SV VCF file that used for benchmarking. No SV-supporting reads needed.",
-    )
 
     if len(argv) == 0:
         parser.print_help(sys.stderr)

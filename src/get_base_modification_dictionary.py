@@ -181,10 +181,11 @@ def get_base_modification_dictionary_basic_supporting_reads(
     output_bam = os.path.join(output_bam_folder, f"{sv_id}.bam")
     with pysam.AlignmentFile(output_bam, "wb", header=bam_file.header) as outfile:
         for reads in phased_block_alignment:
-            if reads.query_name in sv_supporting_reads:
-                reads.set_tag("RG", "sv_reads")
-            else:
-                reads.set_tag("RG", "non_sv_reads")
+            if sv_supporting_reads is not None:
+                if reads.query_name in sv_supporting_reads:
+                    reads.set_tag("RG", "sv_reads")
+                else:
+                    reads.set_tag("RG", "non_sv_reads")
             outfile.write(reads)
             if not reads.is_secondary and not reads.is_supplementary:
                 read_base_ref_loc = reads.get_reference_positions(full_length=True)  
@@ -204,7 +205,7 @@ def get_base_modification_dictionary_basic_supporting_reads(
                                 mm_ref_loc = read_base_ref_loc[i[0]]
                             if mm_ref_loc in hp_myth_dict.keys():                       
                                 modification_chance = i[1]  # 0 - 255 base d
-                                if reads.query_name in sv_supporting_reads:
+                                if sv_supporting_reads is None or reads.query_name in sv_supporting_reads:
                                     hp_myth_dict[mm_ref_loc][0].append(modification_chance)
                                     hp_myth_dict[mm_ref_loc][1] += 1 
     return hp_myth_dict
