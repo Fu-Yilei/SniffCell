@@ -91,6 +91,7 @@ def calculate_methylation_diff_region_benchmark(input_bam, input_vcf, reference_
                 sv_supporting_reads=None, sv_id=test_sv.id, output_bam_folder=output)
         input_bam_sv_methylation_dict = src.smoothing.smoothing_basic(input_bam_sv_methylation_dict, key_diff_threshold=smoothing)
         benchmark_second_bam_sv_methylation_dict = src.smoothing.smoothing_basic(benchmark_second_bam_sv_methylation_dict, key_diff_threshold=smoothing)
+        
         if test_function == 'ttest':
             ranksum_dict = src.statistic_tests.calculate_ttest(input_bam_sv_methylation_dict, benchmark_second_bam_sv_methylation_dict)
         elif test_function == 'ranksum':
