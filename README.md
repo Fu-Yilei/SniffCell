@@ -1,6 +1,7 @@
 # SniffMeth
 ### Sniffing DNA methylation changes aound (Mosaic) structural variations. 
 
+Although no need to do filtering, but SniffMeth can only process primary alignments for now. 
 
 Usage:
 
@@ -42,8 +43,6 @@ Required arguments:
 
 Version 0.1
 ```
-
-Now only works in single thread. 
 
 Output:
 - SV BAM file: Each BAM file contains a SV candidate with supporting reads and other reads in different read groups. This can help the user to visulize DNA methylation differences in IGV.

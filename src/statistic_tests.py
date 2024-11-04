@@ -16,14 +16,14 @@ def calculate_ranksum(data_dict):
         result[i] = p_value
     return result
 
-def calculate_ranksum_basic(data_dict):
+def calculate_ranksum_basic(data_dict, data_dict2):
     """
         for single list dict. 
     """
     result = {}
     for i, values in data_dict.items():
         list1 = values[0]
-        list2 = values[2]
+        list2 = data_dict2[i][0]
         # Perform ranksum test but remove the warning 
         if len(list1) >= 2 and len(list2) >= 2:
             _, p_value = ranksums(list1, list2)
@@ -46,14 +46,14 @@ def calculate_ttest(data_dict):
         result[i] = p_value
     return result
 
-def calculate_ttest_basic(data_dict):
+def calculate_ttest_basic(data_dict, data_dict2):
     """
         for single list dict. 
     """
     result = {}
     for i, values in data_dict.items():
         list1 = values[0]
-        list2 = values[2]
+        list2 = data_dict2[i][0]
         if len(list1) >= 2 and len(list2) >= 2:
             _, p_value = scipy.stats.ttest_ind(list1, list2, equal_var=False)
         else:
@@ -78,14 +78,14 @@ def calculate_fisher(data_dict):
         result[i] = p_value
     return result
 
-def calculate_fisher_basic(data_dict):
+def calculate_fisher_basic(data_dict, data_dict2):
     """
         for single list dict. 
     """
     result = {}
     for i, values in data_dict.items():
         list1 = values[0]
-        list2 = values[2]
+        list2 = data_dict2[i][0]
         if len(list1) >= 2 and len(list2) >= 2:
             methylated_list1 = sum(1 for x in list1 if x > 0.66 * 255)
             unmethylated_list1 = sum(1 for x in list1 if x < 0.33 * 255)

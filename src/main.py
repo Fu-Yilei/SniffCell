@@ -23,10 +23,10 @@ def main(argv):
     if benchmark_second_bam:
         benchmarking_sv_df = src.calc_methylation_diff_regions.calculate_methylation_diff_region_benchmark(input_bam, 
                                                            input_vcf, reference_genome, 
-                                                           output, sv_discovery_interval, 
-                                                           benchmark_second_bam, min_supporting_reads, 
-                                                           test_function, smoothing=smoothing, 
-                                                           threads=threads)
+                                                           output, sv_discovery_interval = sv_discovery_interval, 
+                                                           benchmark_second_bam=benchmark_second_bam, min_supporting_reads=min_supporting_reads, 
+                                                           test_function=test_function, smoothing=smoothing, 
+                                                           threads=threads, output_bam=output_bam)
         benchmarking_sv_df.to_csv(os.path.join(output, "benchmarking_sv_df.csv"))
 
     else:
