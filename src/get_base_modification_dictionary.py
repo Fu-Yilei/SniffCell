@@ -112,6 +112,9 @@ def get_base_modification_dictionary_new_bam(
                 else:
                     reads.set_tag("RG", "non_sv_reads")
                 outfile.write(reads)
+    phased_block_alignment = bam_file.fetch(
+        chromosome, phase_region[0], phase_region[1], multiple_iterators=True
+    )
     for reads in phased_block_alignment:
         if not reads.is_secondary and not reads.is_supplementary:
             read_base_ref_loc = reads.get_reference_positions(full_length=True)  

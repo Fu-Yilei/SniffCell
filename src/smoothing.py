@@ -25,9 +25,7 @@ def smoothing_comp(data_dict, key_diff_threshold=10):
             # Merge lists and sum numbers
             merged_value = [
                 merged_value[0] + data_dict[key][0],  # Concatenate first list
-                merged_value[1] + data_dict[key][1],  # Concatenate second list
-                merged_value[2] + data_dict[key][2],  # Sum num1
-                merged_value[3] + data_dict[key][3]   # Sum num2
+                merged_value[1] + data_dict[key][1],  # Sum num1
             ]
         else:
             merged_dict[merged_key] = merged_value
