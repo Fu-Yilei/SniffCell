@@ -1,7 +1,7 @@
 # SniffMeth
-### Sniffing DNA methylation changes aound (Mosaic) structural variations. 
+### Sniffing DNA methylation changes around (Mosaic) structural variations. 
 
-Although no need to do filtering, but SniffMeth can only process primary alignments for now. 
+Although no need to do BAM file filtering, but SniffMeth can only process primary alignments for now. A different threshold is suggested with fisher's exact test.
 
 Usage:
 
