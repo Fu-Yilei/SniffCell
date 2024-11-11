@@ -16,6 +16,8 @@ def smoothing_basic(data_dict, key_diff_threshold=10):
     return merged_dict
     
 def smoothing_comp(data_dict, key_diff_threshold=10):
+    if len(data_dict) < key_diff_threshold:
+        return data_dict
     merged_dict = {}
     sorted_keys = sorted(data_dict.keys())  # Sort keys to compare neighbors
     merged_key = sorted_keys[0]  # Start with the first key
