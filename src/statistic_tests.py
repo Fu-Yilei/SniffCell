@@ -97,3 +97,47 @@ def calculate_fisher_basic(data_dict, data_dict2):
             p_value = np.nan 
         result[i] = p_value
     return result
+
+
+def calculate_chi2(data_dict):
+    result = {}
+    for i, values in data_dict.items():
+        list1 = values[0]
+        list2 = values[1]
+        if len(list1) >= 2 and len(list2) >= 2:
+            methylated_list1 = sum(1 for x in list1 if x > 0.66 * 255)
+            unmethylated_list1 = sum(1 for x in list1 if x < 0.33 * 255)
+            methylated_list2 = sum(1 for x in list2 if x > 0.66 * 255)
+            unmethylated_list2 = sum(1 for x in list2 if x < 0.33 * 255)
+            contingency_table = [[methylated_list1, unmethylated_list1], [methylated_list2, unmethylated_list2]]
+            if all(all(cell > 0 for cell in row) for row in contingency_table):
+                _, p_value, _, _ = scipy.stats.chi2_contingency(contingency_table)
+            else:
+                p_value = np.nan
+        else:
+            p_value = np.nan 
+        result[i] = p_value
+    return result
+
+def calculate_chi2_basic(data_dict, data_dict2):
+    """
+        for single list dict. 
+    """
+    result = {}
+    for i, values in data_dict.items():
+        list1 = values[0]
+        list2 = data_dict2[i][0]
+        if len(list1) >= 2 and len(list2) >= 2:
+            methylated_list1 = sum(1 for x in list1 if x > 0.66 * 255)
+            unmethylated_list1 = sum(1 for x in list1 if x < 0.33 * 255)
+            methylated_list2 = sum(1 for x in list2 if x > 0.66 * 255)
+            unmethylated_list2 = sum(1 for x in list2 if x < 0.33 * 255)
+            contingency_table = [[methylated_list1, unmethylated_list1], [methylated_list2, unmethylated_list2]]
+            if all(all(cell > 0 for cell in row) for row in contingency_table):
+                _, p_value, _, _ = scipy.stats.chi2_contingency(contingency_table)
+            else:
+                p_value = np.nan        
+        else:
+            p_value = np.nan 
+        result[i] = p_value
+    return result

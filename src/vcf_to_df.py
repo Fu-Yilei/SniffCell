@@ -22,6 +22,7 @@ def read_vcf_to_df(vcf_file):
                 "supporting_reads": record.info.get("RNAMES", "NA"),
                 "stdev_len": record.info.get("STDEV_LEN", "NA"),
                 "stdev_pos": record.info.get("STDEV_POS", "NA"),
+                "vaf": record.info.get("VAF") if "VAF" in record.info else record.info.get("AF", "NA"),
             }
 
             stdev_pos = df_record["stdev_pos"]
@@ -35,7 +36,7 @@ def read_vcf_to_df(vcf_file):
 
             df_record.update({"ref_start": int(ref_start), "ref_end": int(ref_end)})
             records.append(df_record)
-    sv_df = pd.DataFrame(records, columns=["chr", "location", "id", "sv_len", "supporting_reads", "stdev_len", "stdev_pos", "ref_start", "ref_end"])
+    sv_df = pd.DataFrame(records, columns=["chr", "location", "id", "sv_len", "supporting_reads", "stdev_len", "stdev_pos", "ref_start", "ref_end", 'vaf'])
     return sv_df
 
 
