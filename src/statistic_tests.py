@@ -141,3 +141,30 @@ def calculate_chi2_basic(data_dict, data_dict2):
             p_value = np.nan 
         result[i] = p_value
     return result
+
+def calculate_mannwhitneyu(data_dict):
+    result = {}
+    for i, values in data_dict.items():
+        list1 = values[0]
+        list2 = values[1]
+        if len(list1) >= 2 and len(list2) >= 2:
+            _, p_value = scipy.stats.mannwhitneyu(list1, list2)
+        else:
+            p_value = np.nan 
+        result[i] = p_value
+    return result
+
+def calculate_mannwhitneyu_basic(data_dict, data_dict2):
+    """
+        for single list dict. 
+    """
+    result = {}
+    for i, values in data_dict.items():
+        list1 = values[0]
+        list2 = data_dict2[i][0]
+        if len(list1) >= 2 and len(list2) >= 2:
+            _, p_value = scipy.stats.mannwhitneyu(list1, list2)
+        else:
+            p_value = np.nan 
+        result[i] = p_value
+    return result

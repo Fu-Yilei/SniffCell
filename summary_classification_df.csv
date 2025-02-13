@@ -1,0 +1,2 @@
+,chr,start,end,total_reads,assigned_reads,cell_type_counts,cell_type_assignment
+0,chr7,128030416,128030582,332,54,[48.  6.  0.  0.],[0.35350014 0.12557422 0.32588218 0.19504346]

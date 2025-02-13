@@ -17,7 +17,7 @@ def main(argv):
     benchmark_second_bam = args.second_bam
     min_supporting_reads = args.min_supporting
     test_function = args.test_function
-
+    primary_only = args.primary_only
     os.makedirs(output, exist_ok=True)
     
     if benchmark_second_bam:

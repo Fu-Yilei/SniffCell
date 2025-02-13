@@ -1,11 +1,28 @@
-import pysam, os, re
+import pysam
+import os
+import re
 import src
 import src.smoothing
 from src.vcf_to_df import read_vcf_to_df
-from src.get_base_modification_dictionary import get_base_modification_dictionary_basic_supporting_reads, get_base_modification_dictionary_new_bam
-from src.statistic_tests import calculate_fisher_basic, calculate_ranksum_basic, calculate_ttest, calculate_ranksum, calculate_fisher, calculate_ttest_basic, calculate_chi2_basic, calculate_chi2
+from src.get_base_modification_dictionary import (
+    get_base_modification_dictionary_basic_supporting_reads,
+    get_base_modification_dictionary_new_bam
+)
+from src.statistic_tests import (
+    calculate_fisher_basic,
+    calculate_ranksum_basic,
+    calculate_ttest,
+    calculate_ranksum,
+    calculate_fisher,
+    calculate_ttest_basic,
+    calculate_chi2_basic,
+    calculate_chi2,
+    calculate_mannwhitneyu,
+    calculate_mannwhitneyu_basic
+)
 from tqdm import tqdm
 from multiprocessing import Pool
+import logging
 
 
 def filter_dict_with_sv(input_dict, sv_start, sv_end):
@@ -44,6 +61,8 @@ def process_individual_sv(sv, input_bam, reference_genome, output_bam_folder, ou
         ranksum_dict = calculate_fisher(modification_dict)
     elif test_function == 'chi2':
         ranksum_dict = calculate_chi2(modification_dict)
+    elif test_function == 'mannwhitneyu':
+        ranksum_dict = calculate_mannwhitneyu(modification_dict)
     else:
         ranksum_dict = calculate_ttest(modification_dict)
 
@@ -107,7 +126,10 @@ def process_individual_sv_benchmark(sv, input_bam, reference_genome, output_bam_
         ranksum_dict = calculate_fisher_basic(modification_dict, benchmark_second_bam_sv_methylation_dict)
     elif test_function == 'chi2':
         ranksum_dict = calculate_chi2_basic(modification_dict, benchmark_second_bam_sv_methylation_dict)
+    elif test_function == 'mannwhitneyu':
+        ranksum_dict = calculate_mannwhitneyu_basic(modification_dict, benchmark_second_bam_sv_methylation_dict)
     else:
+        logging.warning("No listed test function selected. Using t-test by default.")
         ranksum_dict = calculate_ttest_basic(modification_dict, benchmark_second_bam_sv_methylation_dict)
 
     # ranksum_dict = calculate_ttest(modification_dict) # nan if list length is 0

@@ -51,7 +51,14 @@ def parse_args(argv):
         default=True,
         help="Output SV-related BAM file for each processed SVs. Default: True",
     )
-
+    parser.add_argument(
+        "-p",
+        "--primary_only",
+        type=bool,
+        default=True,
+        help="Output BAM file only contains primary alignments. Default: True",
+    )
+    
     parser.add_argument(
         "-s",
         "--smoothing",
@@ -89,7 +96,7 @@ def parse_args(argv):
         "--test_function",
         type=str,
         default='ttest',
-        help="Statistical test function for determining methylation difference. Default: ttest. Other options: ranksum, fisher, chi2",
+        help="Statistical test function for determining methylation difference. Default: ttest. Other options: ranksum, fisher, chi2, mannwhitneyu",
     )
 
     parser.add_argument(

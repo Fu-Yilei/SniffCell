@@ -7,42 +7,47 @@ Usage:
 
 ```
 usage: SniffMeth [-h] -b BAM -v VCF -r REFERENCE -o OUTPUT [-t THREADS] [-ob OUTPUT_BAM] [-s SMOOTHING] [-i INTERVAL] [-m MIN_SUPPORTING] [-th THRESHHOLD]
-                 [-b2 SECOND_BAM] [-v2 SECOND_VCF]
+         [-b2 SECOND_BAM] [-v2 SECOND_VCF]
 
-Sniffing CpG methylaiton changed around a (Mosaic) SV
+Sniffing CpG methylation changes around a (Mosaic) SV
 
 options:
   -h, --help            show this help message and exit
   -t THREADS, --threads THREADS
-                        Number of threads, default 1
+            Number of threads, default 1
   -ob OUTPUT_BAM, --output_bam OUTPUT_BAM
-                        Output SV-related BAM file for each processed SVs. Default: True
+            Output SV-related BAM file for each processed SVs. Default: True
   -s SMOOTHING, --smoothing SMOOTHING
-                        Enable smoothing, which consider neighboring [input] bps' CpG as an unit. Default: 0 (no smoothing)
+            Enable smoothing, which consider neighboring [input] bps' CpG as an unit. Default: 0 (no smoothing)
   -i INTERVAL, --interval INTERVAL
-                        Inverval for checking methylation changes around a SV.
+            Interval for checking methylation changes around a SV.
   -m MIN_SUPPORTING, --min_supporting MIN_SUPPORTING
-                        Minimum supporting reads requirement for a SV.
+            Minimum supporting reads requirement for a SV.
   -th THRESHHOLD, --threshhold THRESHHOLD
-                        Threshold for determining nearby region is differently methylated or not
+            Threshold for determining nearby region is differently methylated or not
   -tf TEST_FUNCTION, --test_function TEST_FUNCTION
-                        Statistical test function for determining methylation difference. Default: ttest. Other options: ranksum, fisher
+            Statistical test function for determining methylation difference. Default: ttest. Other options: ranksum, fisher
   -b2 SECOND_BAM, --second_bam SECOND_BAM
-                        Another BAM file that used for benchmarking.
+            Another BAM file that used for benchmarking.
   -v2 SECOND_VCF, --second_vcf SECOND_VCF
-                        Another SV VCF file that used for benchmarking. No SV-supporting reads needed.
+            Another SV VCF file that used for benchmarking. No SV-supporting reads needed.
   
 
 Required arguments:
   -b BAM, --bam BAM     Input BAM file.
   -v VCF, --vcf VCF     Input SV VCF file (supporting reads needed).
   -r REFERENCE, --reference REFERENCE
-                        Reference genome
+            Reference genome
   -o OUTPUT, --output OUTPUT
-                        Output directory
+            Output directory
 
 Version 0.1
 ```
+__Note 1: Test function recommendations:__
+- t-test: Most general
+- Mann-Whitney U: Most conservative
+- Ranksum test, chi2, and Fisher's exact: Very variable when the two comparison lists do not have the same size (SV supporting reads vs. other reads)
+
 
 Output:
 - SV BAM file: Each BAM file contains a SV candidate with supporting reads and other reads in different read groups. This can help the user to visulize DNA methylation differences in IGV.

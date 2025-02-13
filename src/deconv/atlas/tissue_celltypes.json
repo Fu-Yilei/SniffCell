@@ -1,0 +1,36 @@
+{
+  "brain_cereb": {
+	"name": "brain_cereb",
+	"cell_type": ["neuron", "oligodendrocyte"]
+  },
+  "brain_cortex": {
+    "name": "brain_cortex",
+    "cell_type": ["neuron", "oligodendrocyte", "endothelial_cell", "monocyte"]
+  },
+  "whole_blood": {
+    "name": "whole_blood",
+    "cell_type": ["monocyte", "T-cell", "B-cell", "NK-cell"]
+  },
+    "liver": {
+        "name": "liver",
+        "cell_type": ["hepatocyte", "endothelial_cell", "monocyte"]
+    },  
+    "lung": {
+        "name": "lung",
+        "cell_type": ["lung_epithelial", "endothelial_cell", "monocyte"]
+    },
+  "all": {
+    "name": "all",
+    "cell_type": [
+      "adipocyte", "endothelial_cell", "colon_fibroblasts", "heart_fibroblasts", "dermal_fibroblast", 
+      "skeletal_muscle", "smooth_muscle", "heart_cardiomyocyte", "bone_osteoblast", "oligodendrocyte", 
+      "neuron", "hepatocyte", "pancreas_duct", "pancreas_acinar", "pancreas_delta", "pancreas_beta", 
+      "pancreas_alpha", "kidney_epithelial", "thyroid_epithelial", "fallopian_epithelial", 
+      "ovary_epithelial", "erythrocyte_progenitor", "T-cell", "NK-cell", "monocyte", "granulocyte", 
+      "B-cell", "epiderminal_keratinocyte", "head_neck_epithelial", "lung_epithelial", "prostate_epithelial", 
+      "bladder_epithelial", "breast_luminal", "breast_basal", "lung_alveolar_epithelial", "gallbladder", 
+      "gastric_epithelial", "colon_epithelial", "small_int_epithelial"
+    ]
+  }
+
+}
