@@ -1,6 +1,7 @@
 from scipy.stats import ranksums
 import numpy as np
 import scipy
+import warnings
 
 def calculate_ranksum(data_dict):
     result = {}
@@ -36,14 +37,45 @@ def calculate_ranksum_basic(data_dict, data_dict2):
 
 def calculate_ttest(data_dict):
     result = {}
+
     for i, values in data_dict.items():
-        list1 = values[0]
-        list2 = values[1]
+        list1 = np.array(values[0])
+        list2 = np.array(values[1])
+
+        # Ensure there are at least 2 values in each list
         if len(list1) >= 2 and len(list2) >= 2:
-            _, p_value = scipy.stats.ttest_ind(list1, list2, equal_var=False)
+            # Compute variance to check for near-identical data
+            var1, var2 = np.var(list1), np.var(list2)
+
+            if var1 < 1e-10 and var2 < 1e-10:
+                result[i] = 1  # No meaningful difference, assign p=1
+                continue
+
+            try:
+                # Suppress warnings inside the try block
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", category=RuntimeWarning)
+                    
+                    # Run Welch’s t-test (handles unequal variance)
+                    _, p_value = scipy.stats.ttest_ind(list1, list2, equal_var=False, nan_policy='omit')
+
+                # If precision loss is suspected (very low p-value or NaN), switch to Mann-Whitney U test
+                if np.isnan(p_value) or p_value < 1e-300:
+                    _, p_value = scipy.stats.mannwhitneyu(list1, list2, alternative='two-sided')
+
+            except RuntimeWarning:
+                # If catastrophic cancellation occurs, add small noise (jitter) and retry t-test
+                list1 += np.random.normal(0, 1e-10, size=list1.shape)
+                list2 += np.random.normal(0, 1e-10, size=list2.shape)
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore", category=RuntimeWarning)
+                    _, p_value = scipy.stats.ttest_ind(list1, list2, equal_var=False, nan_policy='omit')
+
         else:
-            p_value = np.nan 
+            p_value = np.nan  # Not enough data points
+        
         result[i] = p_value
+
     return result
 
 def calculate_ttest_basic(data_dict, data_dict2):

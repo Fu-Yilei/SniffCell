@@ -1,4 +1,5 @@
 import re, pysam, os
+os.environ["HTS_LOG_LEVEL"] = "error"
 
 def get_base_modification_dictionary(
     bam_file, ref_seq, chromosome, phase_region, sv_supporting_reads
@@ -112,6 +113,8 @@ def get_base_modification_dictionary_new_bam(
                 else:
                     reads.set_tag("RG", "non_sv_reads")
                 outfile.write(reads)
+        pysam.index(output_bam_file)
+
     phased_block_alignment = bam_file.fetch(
         chromosome, phase_region[0], phase_region[1], multiple_iterators=True
     )
@@ -190,6 +193,7 @@ def get_base_modification_dictionary_basic_supporting_reads(
                 else:
                     reads.set_tag("RG", "non_sv_reads")
                 outfile.write(reads)
+        pysam.index(output_bam_file)
     phased_block_alignment = bam_file.fetch(
         chromosome, phase_region[0], phase_region[1], multiple_iterators=True
     )

@@ -102,8 +102,7 @@ def assign_read_to_readgroup(location, cell_types, classification_df, input_bam_
     chromosome = location.chr
     phase_region = [location.start, location.end]
     phased_block_alignment = input_bam_file.fetch(
-    chromosome, phase_region[0], phase_region[1], multiple_iterators=True
-)   
+    chromosome, phase_region[0], phase_region[1], multiple_iterators=True)
     cell_types_list = np.zeros(len(cell_types))
     assigned_read_count = 0
     output_bam_file = pysam.AlignmentFile(f"{output_bam_folder}/{chromosome}_{phase_region[0]}_{ phase_region[1]}.bam", "wb", template=input_bam_file)
