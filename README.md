@@ -6,42 +6,56 @@ Although no need to do BAM file filtering, but SniffMeth can only process primar
 Usage:
 
 ```
-usage: SniffMeth [-h] -b BAM -v VCF -r REFERENCE -o OUTPUT [-t THREADS] [-ob OUTPUT_BAM] [-s SMOOTHING] [-i INTERVAL] [-m MIN_SUPPORTING] [-th THRESHHOLD]
-         [-b2 SECOND_BAM] [-v2 SECOND_VCF]
+usage: SniffMeth [-h] [-t THREADS] -b BAM -v VCF -r REFERENCE -o OUTPUT [-d] [-a ATLAS] [-c TISSUE] [-n REGION_NUMBER] [-me METHOD] [-vb] [-conf CONFIDENCE] [-ob] [-p] [-s SMOOTHING] [-i INTERVAL] [-m MIN_SUPPORTING]
+                 [-th THRESHOLD] [-tf TEST_FUNCTION] [-b2 SECOND_BAM]
 
 Sniffing CpG methylation changes around a (Mosaic) SV
 
 options:
   -h, --help            show this help message and exit
   -t THREADS, --threads THREADS
-            Number of threads, default 1
-  -ob OUTPUT_BAM, --output_bam OUTPUT_BAM
-            Output SV-related BAM file for each processed SVs. Default: True
-  -s SMOOTHING, --smoothing SMOOTHING
-            Enable smoothing, which consider neighboring [input] bps' CpG as an unit. Default: 0 (no smoothing)
-  -i INTERVAL, --interval INTERVAL
-            Interval for checking methylation changes around a SV.
-  -m MIN_SUPPORTING, --min_supporting MIN_SUPPORTING
-            Minimum supporting reads requirement for a SV.
-  -th THRESHHOLD, --threshhold THRESHHOLD
-            Threshold for determining nearby region is differently methylated or not
-  -tf TEST_FUNCTION, --test_function TEST_FUNCTION
-            Statistical test function for determining methylation difference. Default: ttest. Other options: ranksum, fisher
-  -b2 SECOND_BAM, --second_bam SECOND_BAM
-            Another BAM file that used for benchmarking.
-  -v2 SECOND_VCF, --second_vcf SECOND_VCF
-            Another SV VCF file that used for benchmarking. No SV-supporting reads needed.
-  
+                        Number of threads, default 1.
 
 Required arguments:
   -b BAM, --bam BAM     Input BAM file.
   -v VCF, --vcf VCF     Input SV VCF file (supporting reads needed).
   -r REFERENCE, --reference REFERENCE
-            Reference genome
+                        Reference genome.
   -o OUTPUT, --output OUTPUT
-            Output directory
+                        Output directory. Default: /stornext/snfs130/fritz/Yilei/SniffMeth
+  -d, --deconv          Run deconvolution if specified.
 
-Version 0.1
+SniffMeth deconvolution optional arguments:
+  -a ATLAS, --atlas ATLAS
+                        Cell type atlas location. Default: /stornext/snfs130/fritz/Yilei/SniffMeth/src/atlas/39Bisulfite.tsv
+  -c TISSUE, --tissue TISSUE
+                        JSON file with potential cell types. Default: /stornext/snfs130/fritz/Yilei/SniffMeth/src/atlas/tissue_celltypes.json, brain_cereb.
+  -n REGION_NUMBER, --region_number REGION_NUMBER
+                        Number of regions to be selected, default 300.
+  -me METHOD, --method METHOD
+                        Region selection method: std or diff, default diff. Diff selects the regions with certain cell type as low methylation while all other cell types have high methylation. std selects regions with
+                        highest methylation value std in all cell types.
+  -vb, --verbose        Enable verbose mode.
+  -conf CONFIDENCE, --confidence CONFIDENCE
+                        Minimum confidence threshold for EM algorithm. Default 0.9.
+
+SniffMeth optional arguments:
+  -ob, --output_bam     Output SV-related BAM file.
+  -p, --primary_only    Keep only primary alignments in BAM.
+  -s SMOOTHING, --smoothing SMOOTHING
+                        Enable smoothing (0 = no smoothing). default 0.
+  -i INTERVAL, --interval INTERVAL
+                        Interval for checking methylation changes. default +-1000.
+  -m MIN_SUPPORTING, --min_supporting MIN_SUPPORTING
+                        Minimum supporting reads for SV. default 3.
+  -th THRESHOLD, --threshold THRESHOLD
+                        Threshold for differentially methylated regions. default 0.2.
+  -tf TEST_FUNCTION, --test_function TEST_FUNCTION
+                        Statistical test function. default ttest.
+  -b2 SECOND_BAM, --second_bam SECOND_BAM
+                        Benchmark BAM file. If provided, benchmarking will be performed.
+
+Version 0.2
 ```
 __Note 1: Test function recommendations:__
 - t-test: Most general
