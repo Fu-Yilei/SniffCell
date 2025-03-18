@@ -98,7 +98,7 @@ def main(argv):
         deconv_confidence = args.confidence
         deconv_verbose = args.verbose
 
-        deconv_output_location = os.path.join(output, "deconv_output")
+        deconv_output_location = os.path.join(output, "deconv_bam_output")
         os.makedirs(deconv_output_location, exist_ok=True)
         input_vcf_filename = os.path.basename(input_vcf).split(".")[0]
 
@@ -116,9 +116,9 @@ def main(argv):
             summary_classification_series = list(tqdm(p.imap(process_individual_region_wrapper, args_list), total=len(args_list), desc="Processing SVs"))
         for summary_classification in summary_classification_series:
             summary_classification_df = pd.concat([summary_classification_df, summary_classification], ignore_index=True)
-        summary_classification_df.to_csv(f"{deconv_output_location}/summary_classification.tsv", sep='\t', index=False)
+        summary_classification_df.to_csv(f"{output}/summary_classification.csv", sep='\t', index=False)
         logging.info("Processing complete. Summary classification saved.")
-        deconv_output_vcf = os.path.join(deconv_output_location, f"{input_vcf_filename}.celltype_annotated.vcf")
+        deconv_output_vcf = os.path.join(output, f"{input_vcf_filename}.celltype_annotated.vcf")
         
         estimate_celltype_assignment(input_vcf, sv_methylation_df, summary_classification_df, celltypes, deconv_output_vcf)
         logging.info("VCF file annotated with cell type assignment.")

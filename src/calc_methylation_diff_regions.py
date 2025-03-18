@@ -55,7 +55,7 @@ def process_individual_sv(sv, input_bam, reference_genome, output_bam_folder, ou
     modification_dict = get_base_modification_dictionary_new_bam(bam_file=hapmap_ref_file,
                                                              ref_seq=referece_sequence,
                                                              chromosome=sv.chr,
-                                                             phase_region=(int(sv.ref_start)-sv_discovery_range, int(sv.ref_end)+sv_discovery_range), 
+                                                             phase_region=(max(1, (int(sv.ref_start)-sv_discovery_range)), int(sv.ref_end)+sv_discovery_range), 
                                                              sv_supporting_reads=sv.supporting_reads, sv_id=sv.id, output_bam_folder=output_bam_folder, output_bam=output_bam)
     modification_dict = src.smoothing.smoothing_comp(modification_dict, key_diff_threshold=smoothing)
     if test_function == 'ttest':
@@ -117,13 +117,13 @@ def process_individual_sv_benchmark(sv, input_bam, reference_genome, output_bam_
     modification_dict = get_base_modification_dictionary_basic_supporting_reads(bam_file=hapmap_ref_file, 
                                                              ref_seq=referece_sequence, 
                                                              chromosome=sv.chr, 
-                                                             phase_region=(int(sv.ref_start)-sv_discovery_range, int(sv.ref_end)+sv_discovery_range),
+                                                             phase_region=(max(1, int(sv.ref_start)-sv_discovery_range), int(sv.ref_end)+sv_discovery_range),
                                                              sv_supporting_reads=sv.supporting_reads, sv_id=sv.id, output_bam_folder=output_bam_folder, output_bam=output_bam)
     modification_dict = src.smoothing.smoothing_comp(modification_dict, key_diff_threshold=smoothing)
     benchmark_second_bam_sv_methylation_dict = get_base_modification_dictionary_basic_supporting_reads(bam_file=benchmark_second_bam, 
                                                              ref_seq=referece_sequence, 
                                                              chromosome=sv.chr, 
-                                                             phase_region=(int(sv.ref_start)-sv_discovery_range, int(sv.ref_end)+sv_discovery_range),
+                                                             phase_region=(max(1, int(sv.ref_start)-sv_discovery_range), int(sv.ref_end)+sv_discovery_range),
                                                              sv_supporting_reads=None, sv_id=sv.id, output_bam_folder=output_bam_folder, output_bam=False)
     benchmark_second_bam_sv_methylation_dict = src.smoothing.smoothing_comp(benchmark_second_bam_sv_methylation_dict, key_diff_threshold=smoothing)
     if test_function == 'ttest':
