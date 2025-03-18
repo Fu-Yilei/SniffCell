@@ -15,3 +15,4 @@ env/
 dataset/
 sniffmeth_deconv_output/
 notebooks/
+.vscode/
