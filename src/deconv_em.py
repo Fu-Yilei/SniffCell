@@ -175,3 +175,118 @@ def em_k_cluster_methylation(
     df_out["gamma"] = gamma_series_out
 
     return alpha, p, df_out
+
+
+
+def em_k_cluster_methylation_avg(
+    df,
+    alpha_init,  # array-like of shape (K,) for initial mixing proportions
+    p_init,      # array-like of shape (K,) for initial methylation probabilities
+    max_iter=100,
+    tol=1e-6,
+    random_state=42,
+    fix_alpha=False,
+    fix_p=False,
+    drop_na=2,
+):
+    """
+    EM for a K-component mixture of beta-like distributions on average methylation values.
+    
+    Instead of treating each CpG site separately, this version **averages methylation per read**.
+    This reduces dimensionality and assumes a single probability per read rather than per CpG site.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Rows = reads, columns = CpG sites, values in [0,1] or NaN.
+    alpha_init : array-like, shape (K,)
+        Initial mixing proportions for K cell types/clusters.
+    p_init : array-like, shape (K,)
+        Initial methylation probabilities per cluster.
+    max_iter : int
+        Maximum EM iterations.
+    tol : float
+        Convergence threshold for log-likelihood.
+    random_state : int
+        For reproducibility.
+    fix_alpha : bool
+        If True, do NOT update alpha in the M-step.
+    fix_p : bool
+        If True, do NOT update the cluster probabilities in the M-step.
+    drop_na : int or None
+        If an integer d>0, drop any read that has more than d NaNs for EM.
+        If 0 or None, do not drop any rows.
+    
+    Returns
+    -------
+    alpha : np.ndarray, shape (K,)
+        The final (or fixed) mixing proportions.
+    p : np.ndarray, shape (K,)
+        The final (or fixed) probabilities for each cluster.
+    df_out : pd.DataFrame
+        A **copy** of the original df with an added 'gamma' column containing
+        the posterior probability of the most probable cluster for each read.
+    """
+    np.random.seed(random_state)
+    df_out = df.copy()
+
+    # Drop rows with excessive NaNs if specified
+    if drop_na and drop_na > 0:
+        df_em = df_out.dropna(thresh=df.shape[1] - drop_na, axis=0)
+    else:
+        df_em = df_out
+    
+    # Compute mean methylation per read
+    avg_meth = df_em.mean(axis=1, skipna=True).values  # shape=(num_reads,)
+    num_reads = avg_meth.shape[0]
+    
+    # Convert inputs to numpy arrays
+    alpha = np.array(alpha_init, dtype=float)
+    p = np.array(p_init, dtype=float)
+    K = alpha.shape[0]
+    
+    if p.shape[0] != K:
+        raise ValueError("p_init must have length K.")
+    
+    # Log-likelihood function for average methylation
+    def log_likelihood(i, k_):
+        eps = 1e-12  # Avoid log(0)
+        pk = np.clip(p[k_], eps, 1 - eps)
+        x = avg_meth[i]
+        return x * np.log(pk) + (1 - x) * np.log(1 - pk)
+    
+    prev_log_lik = None
+    for iteration in range(max_iter):
+        # ===== E STEP =====
+        log_resp = np.zeros((num_reads, K))
+        for i in range(num_reads):
+            for k_ in range(K):
+                log_resp[i, k_] = np.log(alpha[k_]) + log_likelihood(i, k_)
+
+        max_log = np.max(log_resp, axis=1, keepdims=True)
+        resp = np.exp(log_resp - max_log)
+        row_sums = np.sum(resp, axis=1, keepdims=True)
+        gamma = resp / row_sums
+
+        # ===== M STEP =====
+        if not fix_alpha:
+            N_k = np.sum(gamma, axis=0)
+            alpha = N_k / num_reads
+        
+        if not fix_p:
+            for k_ in range(K):
+                numerator = np.sum(gamma[:, k_] * avg_meth)
+                denominator = np.sum(gamma[:, k_])
+                if denominator > 0:
+                    p[k_] = numerator / denominator
+        
+        # Check for convergence
+        total_ll = np.sum(gamma * (np.log(alpha) + log_resp))
+        if prev_log_lik is not None and abs(total_ll - prev_log_lik) < tol:
+            break
+        prev_log_lik = total_ll
+    
+    # Store gamma in df_out
+    df_out['gamma'] = pd.Series(np.max(gamma, axis=1), index=df_em.index)
+    
+    return alpha, p, df_out

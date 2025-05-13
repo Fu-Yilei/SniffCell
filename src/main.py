@@ -17,7 +17,7 @@ from src.deconv_em import em_k_cluster_methylation
 from src.deconv_estimate import estimate_celltype_assignment
 os.environ["HTS_LOG_LEVEL"] = "error"
 
-def process_individual_region(filtered_regions, celltypes, bam_file_path, output, ref_seq_path, threshold, verbose=False):
+def process_individual_region(filtered_regions, celltypes, bam_file_path, output, ref_seq_path, threshold, celltype_prior, verbose=False):
     process = multiprocessing.current_process()
     process.name = f"SniffMeth"
     chromosome = filtered_regions.chr
@@ -32,7 +32,10 @@ def process_individual_region(filtered_regions, celltypes, bam_file_path, output
         return None
 
     p_init_region = filtered_regions[celltypes]
-    alpha_init = 1 / len(celltypes) * np.ones(len(celltypes))
+    if celltype_prior:
+        alpha_init = celltype_prior
+    else:
+        alpha_init = 1 / len(celltypes) * np.ones(len(celltypes))
     alpha_final, _, gamma_final = em_k_cluster_methylation(
         df=reads_methylation_df, alpha_init=alpha_init, p_init=p_init_region,
         max_iter=100, tol=1e-5, random_state=42
@@ -107,11 +110,13 @@ def main(argv):
         with open(os.path.join(deconv_folder, "tissue_celltypes.json"), 'r', encoding='utf-8') as tissue_celltypes:
             celltype_dict = json.load(tissue_celltypes)
         celltypes = celltype_dict[deconv_tissue]["cell_type"]
-        logging.info("Parameters - BAM: %s, Reference: %s, Tissue: %s, Atlas: %s, Output: %s, Threads: %s, Verbose: %s, Region number: %s, Threshold: %s, Methods: %s", 
-                     input_bam, reference_genome, deconv_tissue, deconv_atlas, deconv_output_location, threads, deconv_verbose, deconv_region_number, deconv_confidence, deconv_method)
+        celltypes_prior = celltype_dict[deconv_tissue]["prior"]
+        
+        logging.info("Parameters - BAM: %s, Reference: %s, Tissue: %s, Atlas: %s, Output: %s, Threads: %s, Verbose: %s, Region number: %s, Threshold: %s, Methods: %s, Using prior: %s", 
+                     input_bam, reference_genome, deconv_tissue, deconv_atlas, deconv_output_location, threads, deconv_verbose, deconv_region_number, deconv_confidence, deconv_method, celltypes_prior)
         filtered_regions_df = filter_cell_type_regions(celltypes, deconv_atlas, deconv_region_number, by=deconv_method)
         summary_classification_df = pd.DataFrame(columns=["chr", "start", "end", "total_reads", "assigned_reads", "cell_type_reads_counts", "cell_type_prob_em"])
-        args_list = [(filtered_regions, celltypes, input_bam, deconv_output_location, reference_genome, deconv_confidence, deconv_verbose) for _, filtered_regions in filtered_regions_df.iterrows()]
+        args_list = [(filtered_regions, celltypes, input_bam, deconv_output_location, reference_genome, deconv_confidence, celltypes_prior, deconv_verbose) for _, filtered_regions in filtered_regions_df.iterrows()]
         with Pool(threads) as p:
             summary_classification_series = list(tqdm(p.imap(process_individual_region_wrapper, args_list), total=len(args_list), desc="Processing SVs"))
         for summary_classification in summary_classification_series:
