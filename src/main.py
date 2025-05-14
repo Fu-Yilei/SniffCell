@@ -110,7 +110,7 @@ def main(argv):
         with open(os.path.join(deconv_folder, "tissue_celltypes.json"), 'r', encoding='utf-8') as tissue_celltypes:
             celltype_dict = json.load(tissue_celltypes)
         celltypes = celltype_dict[deconv_tissue]["cell_type"]
-        celltypes_prior = celltype_dict[deconv_tissue]["prior"]
+        celltypes_prior = celltype_dict[deconv_tissue].get("prior", None)
         
         logging.info("Parameters - BAM: %s, Reference: %s, Tissue: %s, Atlas: %s, Output: %s, Threads: %s, Verbose: %s, Region number: %s, Threshold: %s, Methods: %s, Using prior: %s", 
                      input_bam, reference_genome, deconv_tissue, deconv_atlas, deconv_output_location, threads, deconv_verbose, deconv_region_number, deconv_confidence, deconv_method, celltypes_prior)

@@ -11,7 +11,7 @@ def parse_args(argv):
     )
     
     parser.add_argument("-t", "--threads", type=int, default=1, help="Number of threads, default 1.")
-
+    
 
     required_args = parser.add_argument_group("Required arguments")
     required_args.add_argument("-b", "--bam", type=str, required=True, help="Input BAM file.")
@@ -26,7 +26,7 @@ def parse_args(argv):
     json_file_file_path = os.path.join(script_dir, "atlas", "tissue_celltypes.json")
     # optional_args.add_argument("-od", "--deconv_output", type=str, help="Output directory for deconvolution results. default: <output>/deconv_output")
     optional_args.add_argument("-a", "--atlas", type=str, default=atlas_celltypes_file_path, help=f"Cell type atlas location. Default: {atlas_celltypes_file_path}")
-    optional_args.add_argument("-c", "--tissue", type=str, default="brain_cereb", help=f"JSON file with potential cell types. Default: {json_file_file_path}, brain_cereb.")
+    optional_args.add_argument("-c", "--tissue", type=str, default="brain_cereb", help=f"Tissue type in {json_file_file_path}, need to update based on atlas. Default: brain_cereb.")
     optional_args.add_argument("-n", "--region_number", type=int, default=300, help="Number of regions to be selected, default 300.")
     optional_args.add_argument("-me", "--method", type=str, default="diff", help="Region selection method: std or diff, default diff. Diff selects the regions with certain cell type as low methylation while all other cell types have high methylation. std selects regions with highest methylation value std in all cell types.")
     optional_args.add_argument("-vb", "--verbose", action="store_true", help="Enable verbose mode.")

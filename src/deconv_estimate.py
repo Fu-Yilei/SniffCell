@@ -99,7 +99,7 @@ def assign_variant_with_cell_type_names(df, cell_type_names, epsilon=1e-6):
 def annotate_vcf_by_id_copy(vcf_path, annotated_df, output_vcf_path):
     logging.info(f"Annotating VCF file: {vcf_path}")
     vcf_in = pysam.VariantFile(vcf_path, "r")
-    
+    annotated_df = annotated_df.dropna(subset=["id"]) # Solve the issue of empty id
     header = vcf_in.header.copy()
     header.add_line('##INFO=<ID=CELLTYPE,Number=1,Type=String,Description="Predicted cell type for the variant">')
     header.add_line('##INFO=<ID=CONF,Number=1,Type=Float,Description="Confidence score of cell type assignment">')

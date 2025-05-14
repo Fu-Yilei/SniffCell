@@ -94,7 +94,7 @@ def calculate_methylation_diff_region_bam(sv_vcf, input_bam, reference_genome,
     
     filtered_mosaic_sv = pysam.VariantFile(sv_vcf)
     filtered_mosaic_sv_df = read_vcf_to_df(filtered_mosaic_sv)
-    filtered_mosaic_sv_df_filtered = filtered_mosaic_sv_df[filtered_mosaic_sv_df.supporting_reads.apply(len) >= min_supporting_read_num]
+    filtered_mosaic_sv_df_filtered = filtered_mosaic_sv_df[filtered_mosaic_sv_df.supporting_reads.apply(len) >= min_supporting_read_num].copy()
     output_bam_folder = os.path.join(output_bam_folder, "methylation_sv_bam")
     os.makedirs(output_bam_folder, exist_ok=True)
     args_list = [(test_sv, input_bam, reference_genome, output_bam_folder, output_bam, sv_discovery_range, smoothing, test_function) 
