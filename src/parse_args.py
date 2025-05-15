@@ -5,9 +5,9 @@ import os
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(
-        prog="SniffMeth",
-        description="Sniffing CpG methylation changes around a (Mosaic) SV",
-        epilog="Version 0.2",
+        prog="sniffcell",
+        description="Annotating mosaic structural variants (SVs) with cell type-specific methylation information.",
+        epilog="Version 0.2.1",
     )
     
     parser.add_argument("-t", "--threads", type=int, default=1, help="Number of threads, default 1.")
