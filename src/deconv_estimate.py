@@ -37,7 +37,6 @@ def assign_variant_with_cell_type_names(df, cell_type_names, epsilon=1e-6):
 
     for _, row in df.iterrows():
         try:
-
             cell_type_probs = row["closest_cell_type_prob_em"]           
             # Check if cell_type_probs is a list or array
             if not isinstance(cell_type_probs, (list, np.ndarray)):

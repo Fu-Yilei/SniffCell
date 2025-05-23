@@ -185,7 +185,7 @@ def em_k_cluster_methylation_avg(
     max_iter=100,
     tol=1e-6,
     random_state=42,
-    fix_alpha=False,
+    fix_alpha=True,
     fix_p=False,
     drop_na=2,
 ):

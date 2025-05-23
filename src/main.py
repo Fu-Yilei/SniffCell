@@ -19,7 +19,7 @@ os.environ["HTS_LOG_LEVEL"] = "error"
 
 def process_individual_region(filtered_regions, celltypes, bam_file_path, output, ref_seq_path, threshold, celltype_prior, verbose=False):
     process = multiprocessing.current_process()
-    process.name = f"SniffMeth"
+    process.name = f"sniffcell"
     chromosome = filtered_regions.chr
     phase_region = [filtered_regions.start, filtered_regions.end]
 
@@ -71,7 +71,7 @@ def main(argv):
     min_supporting_reads = args.min_supporting
     test_function = args.test_function
     primary_only = args.primary_only
-
+    outlier_thresold = args.outlier_thresold
     # Create output directory if it doesn't exist
     os.makedirs(output, exist_ok=True)
     # sniffmeth_output_bam_folder = os.path.join(output, "methylation_sv_bam")
@@ -121,6 +121,19 @@ def main(argv):
             summary_classification_series = list(tqdm(p.imap(process_individual_region_wrapper, args_list), total=len(args_list), desc="Processing SVs"))
         for summary_classification in summary_classification_series:
             summary_classification_df = pd.concat([summary_classification_df, summary_classification], ignore_index=True)
+        
+        probs_array = np.stack(summary_classification_df["cell_type_prob_em"].values)
+        # Identify and remove rows with NaNs
+        nan_mask = np.isnan(probs_array).any(axis=1)
+        summary_classification_df_clean = summary_classification_df[~nan_mask].copy()
+        probs_array_clean = probs_array[~nan_mask]
+        # Compute mean profile and deviation
+        mean_profile_clean = probs_array_clean.mean(axis=0)
+        summary_classification_df_clean["deviation_from_mean"] = np.linalg.norm(probs_array_clean - mean_profile_clean, axis=1)
+        # Optionally remove top 5% most deviant rows
+        threshold = summary_classification_df_clean["deviation_from_mean"].quantile(outlier_thresold)
+        summary_classification_df_filtered = summary_classification_df_clean[summary_classification_df_clean["deviation_from_mean"] <= threshold].copy()
+        summary_classification_df = summary_classification_df_filtered
         summary_classification_df.to_csv(f"{output}/summary_classification.csv", sep='\t', index=False)
         logging.info("Processing complete. Summary classification saved.")
         deconv_output_vcf = os.path.join(output, f"{input_vcf_filename}.celltype_annotated.vcf")

@@ -23,7 +23,12 @@
     },
    "hapmap_mix": {
     "name": "hapmap_mix",
-    "cell_type": ["HG005", "HG02622", "HG002", "HG02257", "HG02486", "HG00438"]
+    "cell_type": ["HG005", "HG02622", "HG002", "HG02257", "HG02486", "HG00438"],
+    "prior": [0.835, 0.1, 0.02, 0.02, 0.02, 0.005]
+    },
+    "hapmap_mix_2": {
+    "name": "hapmap_mix_2",
+    "cell_type": ["HG005", "HG02622"]
     },
   "all": {
     "name": "all",

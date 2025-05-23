@@ -50,8 +50,12 @@ def process_individual_sv(sv, input_bam, reference_genome, output_bam_folder, ou
     process.name = f"SniffMeth"
     hapmap_ref_file = pysam.AlignmentFile(input_bam)
     referece_sequence = pysam.Fastafile(reference_genome)
-    # output_bam_folder = os.path.join(output_bam_folder, "methylation_sv_bam")
-    # os.makedirs(output_bam_folder, exist_ok=True)
+
+    # Check if sv.chr exists in the reference genome
+    if sv.chr not in referece_sequence.references:
+        logging.warning(f"Chromosome {sv.chr} not found in reference genome. Skipping SV {sv.id}.")
+        return None
+
     modification_dict = get_base_modification_dictionary_new_bam(bam_file=hapmap_ref_file,
                                                              ref_seq=referece_sequence,
                                                              chromosome=sv.chr,
