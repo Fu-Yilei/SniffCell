@@ -63,7 +63,7 @@ def main(argv):
     reference_genome = args.reference
     output = args.output
     threads = args.threads
-    output_bam = args.output_bam
+    output_bam = args.output_bam if args.output_bam else False
     smoothing = args.smoothing  # int
     sv_discovery_interval = args.interval
     region_decide_threshold = args.threshold
@@ -74,7 +74,6 @@ def main(argv):
     outlier_thresold = args.outlier_thresold
     # Create output directory if it doesn't exist
     os.makedirs(output, exist_ok=True)
-    # sniffmeth_output_bam_folder = os.path.join(output, "methylation_sv_bam")
     # Benchmarking mode
     if benchmark_second_bam:
         benchmarking_sv_df = src.calc_methylation_diff_regions.calculate_methylation_diff_region_benchmark(
@@ -94,26 +93,65 @@ def main(argv):
 
     # Deconvolution mode
     if args.deconv:
-        deconv_atlas = args.atlas
+        print(args.atlas)
+        deconv_atlas = os.path.abspath(args.atlas)
         deconv_tissue = args.tissue
         deconv_region_number = args.region_number
         deconv_method = args.method
         deconv_confidence = args.confidence
         deconv_verbose = args.verbose
+        wgbs_tools_uxm_OFF = args.wgbs_tools_uxm_OFF
 
+        # Set output location for deconvolution
         deconv_output_location = os.path.join(output, "deconv_bam_output")
         os.makedirs(deconv_output_location, exist_ok=True)
+
+        # Parse input VCF filename
         input_vcf_filename = os.path.basename(input_vcf).split(".")[0]
 
-
+        print(f"Deconvolution Atlas: {deconv_atlas}")
         deconv_folder = os.path.dirname(os.path.abspath(deconv_atlas))
         with open(os.path.join(deconv_folder, "tissue_celltypes.json"), 'r', encoding='utf-8') as tissue_celltypes:
             celltype_dict = json.load(tissue_celltypes)
         celltypes = celltype_dict[deconv_tissue]["cell_type"]
-        celltypes_prior = celltype_dict[deconv_tissue].get("prior", None)
-        
-        logging.info("Parameters - BAM: %s, Reference: %s, Tissue: %s, Atlas: %s, Output: %s, Threads: %s, Verbose: %s, Region number: %s, Threshold: %s, Methods: %s, Using prior: %s", 
-                     input_bam, reference_genome, deconv_tissue, deconv_atlas, deconv_output_location, threads, deconv_verbose, deconv_region_number, deconv_confidence, deconv_method, celltypes_prior)
+
+        # Handle prior settings for EM algorithm
+        if wgbs_tools_uxm_OFF:
+            logging.info("Using WGBS tools and UXM to set prior for EM algorithm.")
+            wgbs_tools_path = args.wgbs_path
+            uxm_path = args.uxm_path
+            from src.wgbs_uxm import run_wgbstools, run_uxm, get_uxm_prior
+
+            # Run WGBS tools and UXM
+            run_wgbstools(wgbs_tools_path, input_bam, output, deconv_atlas, threads)
+            uxm_output = run_uxm(uxm_path, output, threads, deconv_atlas)
+
+            # Get prior probabilities for cell types
+            celltypes_prior = get_uxm_prior(uxm_output, selected_cell_types=celltypes)
+        else:
+            celltypes_prior = celltype_dict[deconv_tissue].get("prior", None)
+ # Assuming celltypes are defined elsewhere
+        logging.info(
+            "Deconvolution Parameters:\n"
+            "  BAM File: %s\n"
+            "  Reference Genome: %s\n"
+            "  Tissue: %s\n"
+            "  Atlas: %s\n"
+            "  Output Directory: %s\n"
+            "  Threads: %d\n"
+            "  Verbose: %s\n"
+            "  Region Number: %d\n"
+            "  Confidence Threshold: %.2f\n"
+            "  Method: %s\n"
+            "  Using Prior: %s\n"
+            "  WGBS Tools Path: %s\n"
+            "  UXM Path: %s",
+            input_bam, reference_genome, deconv_tissue, deconv_atlas, deconv_output_location,
+            threads, deconv_verbose, deconv_region_number, deconv_confidence, deconv_method, celltypes_prior,
+            args.wgbs_path if not wgbs_tools_uxm_OFF else "Not Used",
+            args.uxm_path if not wgbs_tools_uxm_OFF else "Not Used"
+        )
+
         filtered_regions_df = filter_cell_type_regions(celltypes, deconv_atlas, deconv_region_number, by=deconv_method)
         summary_classification_df = pd.DataFrame(columns=["chr", "start", "end", "total_reads", "assigned_reads", "cell_type_reads_counts", "cell_type_prob_em"])
         args_list = [(filtered_regions, celltypes, input_bam, deconv_output_location, reference_genome, deconv_confidence, celltypes_prior, deconv_verbose) for _, filtered_regions in filtered_regions_df.iterrows()]
@@ -121,7 +159,6 @@ def main(argv):
             summary_classification_series = list(tqdm(p.imap(process_individual_region_wrapper, args_list), total=len(args_list), desc="Processing SVs"))
         for summary_classification in summary_classification_series:
             summary_classification_df = pd.concat([summary_classification_df, summary_classification], ignore_index=True)
-        
         probs_array = np.stack(summary_classification_df["cell_type_prob_em"].values)
         # Identify and remove rows with NaNs
         nan_mask = np.isnan(probs_array).any(axis=1)
@@ -137,6 +174,5 @@ def main(argv):
         summary_classification_df.to_csv(f"{output}/summary_classification.csv", sep='\t', index=False)
         logging.info("Processing complete. Summary classification saved.")
         deconv_output_vcf = os.path.join(output, f"{input_vcf_filename}.celltype_annotated.vcf")
-        
         estimate_celltype_assignment(input_vcf, sv_methylation_df, summary_classification_df, celltypes, deconv_output_vcf)
         logging.info("VCF file annotated with cell type assignment.")

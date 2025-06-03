@@ -46,8 +46,9 @@ def filter_dict_with_sv(input_dict, sv_start, sv_end):
 
 
 def process_individual_sv(sv, input_bam, reference_genome, output_bam_folder, output_bam, sv_discovery_range, smoothing, test_function):
+    print(f"Processing SV {sv.id} on chromosome {sv.chr} from {input_bam} with discovery range {sv_discovery_range} and smoothing {smoothing}.")
     process = multiprocessing.current_process()
-    process.name = f"SniffMeth"
+    process.name = f"SniffCell"
     hapmap_ref_file = pysam.AlignmentFile(input_bam)
     referece_sequence = pysam.Fastafile(reference_genome)
 
@@ -55,7 +56,7 @@ def process_individual_sv(sv, input_bam, reference_genome, output_bam_folder, ou
     if sv.chr not in referece_sequence.references:
         logging.warning(f"Chromosome {sv.chr} not found in reference genome. Skipping SV {sv.id}.")
         return None
-
+    # print(output_bam)
     modification_dict = get_base_modification_dictionary_new_bam(bam_file=hapmap_ref_file,
                                                              ref_seq=referece_sequence,
                                                              chromosome=sv.chr,
@@ -91,20 +92,25 @@ def process_sv_wrapper(args):
     return process_individual_sv(*args)
 
 def calculate_methylation_diff_region_bam(sv_vcf, input_bam, reference_genome, 
-                                          output_bam_folder, smoothing, threads, output_bam=True, 
+                                          output_bam_folder, smoothing, threads, output_bam, 
                                           min_supporting_read_num=5, 
                                           sv_discovery_range=1000,
                                           test_function='ttest'):
-    
+    # print(output_bam)
     filtered_mosaic_sv = pysam.VariantFile(sv_vcf)
     filtered_mosaic_sv_df = read_vcf_to_df(filtered_mosaic_sv)
     filtered_mosaic_sv_df_filtered = filtered_mosaic_sv_df[filtered_mosaic_sv_df.supporting_reads.apply(len) >= min_supporting_read_num].copy()
+    if len(filtered_mosaic_sv_df_filtered) == 0:
+        raise ValueError("No SVs with sufficient supporting reads found in the VCF file. Have you enabled --output_rnames in sniffles?")
+    
     output_bam_folder = os.path.join(output_bam_folder, "methylation_sv_bam")
     os.makedirs(output_bam_folder, exist_ok=True)
+    # print(output_bam)
     args_list = [(test_sv, input_bam, reference_genome, output_bam_folder, output_bam, sv_discovery_range, smoothing, test_function) 
                  for _, test_sv in filtered_mosaic_sv_df_filtered.iterrows()]
 
     with Pool(threads) as pool:
+        # print(f"Processing {len(args_list)} SVs with {threads} threads.")
         cpg_diff_percentages = list(tqdm(pool.imap(process_sv_wrapper, args_list), total=len(args_list), desc="Processing SVs"))
 
     filtered_mosaic_sv_df_filtered.loc[:, 'cpg_diff_percentage'] = cpg_diff_percentages

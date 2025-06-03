@@ -73,7 +73,7 @@ def get_base_modification_dictionary_new_bam(
     bam_file, ref_seq, chromosome, phase_region, sv_supporting_reads, sv_id, output_bam_folder, output_bam
 ):
     """
-        output BAM file with SV supporting reads as a new read group
+        output BAM file with SV supporting reads as a new read group (Now optional)
          Return value: a dictionary that contains cpg location and its haplotype related base modification score
     """
     methylation_identifier_0 = ('C', 0, 'm') # We only care about 5mc!!!
@@ -114,7 +114,7 @@ def get_base_modification_dictionary_new_bam(
                     reads.set_tag("RG", "non_sv_reads")
                 outfile.write(reads)
         pysam.index(output_bam_file)
-
+    # print(output_bam)
     phased_block_alignment = bam_file.fetch(
         chromosome, phase_region[0], phase_region[1], multiple_iterators=True
     )
