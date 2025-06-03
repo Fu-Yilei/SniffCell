@@ -46,7 +46,7 @@ def filter_dict_with_sv(input_dict, sv_start, sv_end):
 
 
 def process_individual_sv(sv, input_bam, reference_genome, output_bam_folder, output_bam, sv_discovery_range, smoothing, test_function):
-    print(f"Processing SV {sv.id} on chromosome {sv.chr} from {input_bam} with discovery range {sv_discovery_range} and smoothing {smoothing}.")
+    # print(f"Processing SV {sv.id} on chromosome {sv.chr} from {input_bam} with discovery range {sv_discovery_range} and smoothing {smoothing}.")
     process = multiprocessing.current_process()
     process.name = f"SniffCell"
     hapmap_ref_file = pysam.AlignmentFile(input_bam)

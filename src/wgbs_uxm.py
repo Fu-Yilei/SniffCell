@@ -29,6 +29,7 @@ def run_wgbstools(wgbs_path, bam_file_path, output_dir, atlas_tsv_path, threads)
             name = columns[5]
             bed_file.write(f"{chrom}\t{start}\t{end}\t{name}\t.\t.\n")
     # output_pat_path = os.path.join(output_dir, "wgbstools.pat.gz")
+    logging.log(logging.INFO, f"Running wgbstools command: {wgbs_path} bam2pat -np -L {atlas_bed} -@ {threads} --genome hg38 --force --no_beta -T {output_dir} --out_dir {output_dir} {bam_file_path}")
     subprocess.run(
         [
             wgbs_path, "bam2pat", "-np",
@@ -52,6 +53,7 @@ def run_uxm(uxm_path, file_folder, threads, atlas_file):
     """
     pat_file_path = glob.glob(os.path.join(file_folder, "*.pat.gz"))[0]
     output_uxm_path = os.path.join(file_folder, "uxm_output.tsv")
+    logging.log(logging.INFO, f"Running uxm command: {uxm_path} deconv --atlas {atlas_file} --output {output_uxm_path} --threads {threads} {pat_file_path}")
     subprocess.run(
         [
             uxm_path, "deconv",

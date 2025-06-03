@@ -101,7 +101,6 @@ def main(argv):
         deconv_confidence = args.confidence
         deconv_verbose = args.verbose
         wgbs_tools_uxm_OFF = args.wgbs_tools_uxm_OFF
-
         # Set output location for deconvolution
         deconv_output_location = os.path.join(output, "deconv_bam_output")
         os.makedirs(deconv_output_location, exist_ok=True)
@@ -120,11 +119,13 @@ def main(argv):
             logging.info("Using WGBS tools and UXM to set prior for EM algorithm.")
             wgbs_tools_path = args.wgbs_path
             uxm_path = args.uxm_path
+            uxm_atlas = args.uxm_atlas
+
             from src.wgbs_uxm import run_wgbstools, run_uxm, get_uxm_prior
 
             # Run WGBS tools and UXM
-            run_wgbstools(wgbs_tools_path, input_bam, output, deconv_atlas, threads)
-            uxm_output = run_uxm(uxm_path, output, threads, deconv_atlas)
+            run_wgbstools(wgbs_tools_path, input_bam, output, uxm_atlas, threads)
+            uxm_output = run_uxm(uxm_path, output, threads, uxm_atlas)
 
             # Get prior probabilities for cell types
             celltypes_prior = get_uxm_prior(uxm_output, selected_cell_types=celltypes)
