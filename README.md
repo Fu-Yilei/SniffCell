@@ -1,4 +1,6 @@
 # sniffcell
+
+![Sniffcell Workflow](./img/workflow.png)
 ### Sniffing DNA methylation changes around (Mosaic) structural variations. 
 
 Although no need to do BAM file filtering, but sniffcell can only process primary alignments for now. A different threshold is suggested with fisher's exact test.
