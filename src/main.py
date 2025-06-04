@@ -76,20 +76,28 @@ def main(argv):
     os.makedirs(output, exist_ok=True)
     # Benchmarking mode
     if benchmark_second_bam:
-        benchmarking_sv_df = src.calc_methylation_diff_regions.calculate_methylation_diff_region_benchmark(
-            input_bam, input_vcf, reference_genome, output, sv_discovery_interval=sv_discovery_interval,
-            benchmark_second_bam=benchmark_second_bam, min_supporting_reads=min_supporting_reads,
-            test_function=test_function, smoothing=smoothing, threads=threads, output_bam=output_bam
-        )
-        benchmarking_sv_df.to_csv(os.path.join(output, "benchmarking_sv_df.csv"))
+        if os.path.exists(os.path.join(output, "benchmarking_sv_df.csv")):
+            benchmarking_sv_df = pd.read_csv(os.path.join(output, "benchmarking_sv_df.csv"))
+            print("Benchmarking results already exist. Skipping benchmarking.")
+        else:
+            benchmarking_sv_df = src.calc_methylation_diff_regions.calculate_methylation_diff_region_benchmark(
+                input_bam, input_vcf, reference_genome, output, sv_discovery_interval=sv_discovery_interval,
+                benchmark_second_bam=benchmark_second_bam, min_supporting_reads=min_supporting_reads,
+                test_function=test_function, smoothing=smoothing, threads=threads, output_bam=output_bam
+            )
+            benchmarking_sv_df.to_csv(os.path.join(output, "benchmarking_sv_df.csv"))
     else:
         # Normal mode
-        sv_methylation_df = src.calc_methylation_diff_regions.calculate_methylation_diff_region_bam(
-            sv_vcf=input_vcf, input_bam=input_bam, reference_genome=reference_genome, output_bam_folder=output,
-            smoothing=smoothing, output_bam=output_bam, min_supporting_read_num=min_supporting_reads,
-            sv_discovery_range=sv_discovery_interval, test_function=test_function, threads=threads
-        )
-        sv_methylation_df.to_csv(os.path.join(output, "sv_methylation_df.csv"))
+        if os.path.exists(os.path.join(output, "sv_methylation_df.csv")):
+            sv_methylation_df = pd.read_csv(os.path.join(output, "sv_methylation_df.csv"))
+            print("SV methylation data already exists. Skipping calculation.")
+        else:
+            sv_methylation_df = src.calc_methylation_diff_regions.calculate_methylation_diff_region_bam(
+                sv_vcf=input_vcf, input_bam=input_bam, reference_genome=reference_genome, output_bam_folder=output,
+                smoothing=smoothing, output_bam=output_bam, min_supporting_read_num=min_supporting_reads,
+                sv_discovery_range=sv_discovery_interval, test_function=test_function, threads=threads
+            )
+            sv_methylation_df.to_csv(os.path.join(output, "sv_methylation_df.csv"))
 
     # Deconvolution mode
     if args.deconv:
@@ -100,7 +108,7 @@ def main(argv):
         deconv_method = args.method
         deconv_confidence = args.confidence
         deconv_verbose = args.verbose
-        wgbs_tools_uxm_OFF = args.wgbs_tools_uxm_OFF
+        wgbs_tools_uxm = args.wgbs_tools_uxm
         # Set output location for deconvolution
         deconv_output_location = os.path.join(output, "deconv_bam_output")
         os.makedirs(deconv_output_location, exist_ok=True)
@@ -115,7 +123,7 @@ def main(argv):
         celltypes = celltype_dict[deconv_tissue]["cell_type"]
 
         # Handle prior settings for EM algorithm
-        if wgbs_tools_uxm_OFF:
+        if wgbs_tools_uxm:
             logging.info("Using WGBS tools and UXM to set prior for EM algorithm.")
             wgbs_tools_path = args.wgbs_path
             uxm_path = args.uxm_path
@@ -126,9 +134,9 @@ def main(argv):
             # Run WGBS tools and UXM
             run_wgbstools(wgbs_tools_path, input_bam, output, uxm_atlas, threads)
             uxm_output = run_uxm(uxm_path, output, threads, uxm_atlas)
-
-            # Get prior probabilities for cell types
-            celltypes_prior = get_uxm_prior(uxm_output, selected_cell_types=celltypes)
+            with open(os.path.join(deconv_folder, "column_mapping.json"), 'r', encoding='utf-8') as column_mapping_f:
+                column_mapping = json.load(column_mapping_f)            # Get prior probabilities for cell types
+            celltypes_prior = get_uxm_prior(uxm_output, column_mapping, selected_cell_types=celltypes)
         else:
             celltypes_prior = celltype_dict[deconv_tissue].get("prior", None)
  # Assuming celltypes are defined elsewhere
@@ -149,15 +157,15 @@ def main(argv):
             "  UXM Path: %s",
             input_bam, reference_genome, deconv_tissue, deconv_atlas, deconv_output_location,
             threads, deconv_verbose, deconv_region_number, deconv_confidence, deconv_method, celltypes_prior,
-            args.wgbs_path if not wgbs_tools_uxm_OFF else "Not Used",
-            args.uxm_path if not wgbs_tools_uxm_OFF else "Not Used"
+            args.wgbs_path if not wgbs_tools_uxm else "Not Used",
+            args.uxm_path if not wgbs_tools_uxm else "Not Used"
         )
 
         filtered_regions_df = filter_cell_type_regions(celltypes, deconv_atlas, deconv_region_number, by=deconv_method)
         summary_classification_df = pd.DataFrame(columns=["chr", "start", "end", "total_reads", "assigned_reads", "cell_type_reads_counts", "cell_type_prob_em"])
         args_list = [(filtered_regions, celltypes, input_bam, deconv_output_location, reference_genome, deconv_confidence, celltypes_prior, deconv_verbose) for _, filtered_regions in filtered_regions_df.iterrows()]
         with Pool(threads) as p:
-            summary_classification_series = list(tqdm(p.imap(process_individual_region_wrapper, args_list), total=len(args_list), desc="Processing SVs"))
+            summary_classification_series = list(tqdm(p.imap(process_individual_region_wrapper, args_list), total=len(args_list), desc="Processing methylation informative regions", unit="region"))
         for summary_classification in summary_classification_series:
             summary_classification_df = pd.concat([summary_classification_df, summary_classification], ignore_index=True)
         probs_array = np.stack(summary_classification_df["cell_type_prob_em"].values)

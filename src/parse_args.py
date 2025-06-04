@@ -38,7 +38,7 @@ def parse_args(argv):
     optional_args.add_argument("-vb", "--verbose", action="store_true", help="Enable verbose mode.")
     optional_args.add_argument("-ot", "--outlier_thresold", type=float, default=0.8, help="deviation threshold for filtering out wrongly deconvoluted regions. Default 0.8.")
     optional_args.add_argument("-conf", "--confidence", type=float, default=0.9, help="Minimum confidence threshold for EM algorithm. Default 0.9.")
-    optional_args.add_argument("-wuoff",  "--wgbs_tools_uxm_OFF",  action="store_false", default=True, help="Use WGBS tools and UXM to set prior for EM algorithm. Default is True, but can be turned off. ADD THIS when you want to use your own prior or not standard tissue")
+    optional_args.add_argument("-wuoff",  "--wgbs_tools_uxm",  action="store_false", default=False, help="Use WGBS tools and UXM to set prior for EM algorithm. Default is False, but can be turned on.")
     uxm_atlas = os.path.join(script_dir, "atlas", "Atlas.U25.l4.hg38.full.tsv")
     optional_args.add_argument("-wgbs", "--wgbs_path", type=str, default="wgbstools", help="Path to WGBS tools. Default is 'wgbstools'.")
     optional_args.add_argument("-uxm", "--uxm_path", type=str, default="uxm", help="Path to UXM. Default is 'uxm'.")

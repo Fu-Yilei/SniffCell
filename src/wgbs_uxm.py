@@ -66,8 +66,10 @@ def run_uxm(uxm_path, file_folder, threads, atlas_file):
     )
     return output_uxm_path
 
-def get_uxm_prior(uxm_output_path, selected_cell_types):
-    uxm_df = pd.read_csv(uxm_output_path,  index_col="CellType")
+def get_uxm_prior(uxm_output_path, column_mapping, selected_cell_types):
+    uxm_df = pd.read_csv(uxm_output_path)
+    uxm_df["mapped_celltype"] = uxm_df["CellType"].map(column_mapping)
+    uxm_df = uxm_df[["mapped_celltype", uxm_df.columns[0]]].set_index("mapped_celltype")
     celltype_proportion_dict = dict(zip(uxm_df.index, uxm_df[uxm_df.columns[0]]))
     proportion_selected_celltypes = {ct: celltype_proportion_dict[ct] for ct in selected_cell_types if ct in celltype_proportion_dict}
     if not proportion_selected_celltypes:
