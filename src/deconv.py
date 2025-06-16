@@ -13,7 +13,7 @@ def get_base_modification_dictionary_basic_supporting_reads(
     bam_file, ref_seq, chromosome, phase_region,
 ):
     """
-        _basic means for single list data structure
+        basic means for single list data structure
         Return value: a dictionary that contains cpg location and its haplotype related base modification score
     """
     methylation_identifier_0 = ('C', 0, 'm') # We only care about 5mc!!!
@@ -40,31 +40,45 @@ def get_base_modification_dictionary_basic_supporting_reads(
     phased_block_alignment = bam_file.fetch(
         chromosome, phase_region[0], phase_region[1], multiple_iterators=True
     )
-    rows = {}
+    read_names = []
+    haplotypes = []
+    read_rows = []
     for reads in phased_block_alignment:
         if not reads.is_secondary and not reads.is_supplementary:
             read_base_ref_loc = reads.get_reference_positions(full_length=True)  
-            # use full_length=True or the positions won't match
             mm = (reads.modified_bases)
-            # mm is a dictionary that contains {score type: [(location, score)]}. score is 255-based
-            if (mm != -1) and (mm != {}):  # update base modification scores list
+            if (mm != -1) and (mm != {}):
                 if methylation_identifier_0 in list(mm.keys()):
                     methylation_identifier = methylation_identifier_0
                 elif methylation_identifier_1 in list(mm.keys()):
                     methylation_identifier = methylation_identifier_1
+                else:
+                    continue
                 read_row = {loc: np.nan for loc in hp_myth_dict.columns}
-                for i in mm[methylation_identifier]:  # Iterate through methylation scores
-                    ref_loc = read_base_ref_loc[i[0]]  # i[0]: position, i[1]: score
+                for i in mm[methylation_identifier]:
+                    ref_loc = read_base_ref_loc[i[0]]
                     if ref_loc:
                         if reads.is_forward:
                             mm_ref_loc = ref_loc + 1
                         else:
                             mm_ref_loc = ref_loc
-
                         if mm_ref_loc in hp_myth_dict.columns:
-                            modification_chance = i[1]  # Score (0-255)
+                            modification_chance = i[1]
                             read_row[mm_ref_loc] = modification_chance/255
-                hp_myth_dict.loc[reads.query_name] = read_row
+                # Get HP tag if present
+                try:
+                    hp_value = reads.get_tag('HP')
+                except (KeyError, AttributeError):
+                    hp_value = 0
+                read_names.append(reads.query_name)
+                haplotypes.append(hp_value)
+                read_rows.append(read_row)
+    # Build DataFrame with MultiIndex
+    if read_rows:
+        hp_myth_dict = pd.DataFrame(read_rows, columns=hp_myth_dict.columns)
+        hp_myth_dict.index = pd.MultiIndex.from_arrays([read_names, haplotypes], names=["read_name", "haplotype"])
+    else:
+        hp_myth_dict = pd.DataFrame(columns=hp_myth_dict.columns)
 
     return hp_myth_dict
 
@@ -108,8 +122,10 @@ def assign_read_to_readgroup(location, cell_types, classification_df, input_bam_
     output_bam_file = pysam.AlignmentFile(f"{output_bam_folder}/{chromosome}_{phase_region[0]}_{ phase_region[1]}.bam", "wb", template=input_bam_file)
     for reads in phased_block_alignment:
         if reads.query_name in classification_df.index:
-            gamma = classification_df.loc[reads.query_name].gamma
-            if (type(gamma) == list):
+            gamma = classification_df.loc[(reads.query_name, slice(None)), 'gamma'].values[0]
+            # print(gamma)
+            if isinstance(gamma, np.ndarray) and len(gamma) == len(cell_types):
+                print(gamma, max(gamma))
                 if (max(gamma) > gamma_max_confidence):
                     cell_type = cell_types[np.argmax(gamma)]
                     cell_types_list[np.argmax(gamma)] += 1
@@ -122,6 +138,7 @@ def assign_read_to_readgroup(location, cell_types, classification_df, input_bam_
         else:
             reads.set_tag("RG", "unassigned")
             output_bam_file.write(reads)
+    # print(assigned_read_count)
     output_bam_file.close()
     pysam.index(f"{output_bam_folder}/{chromosome}_{phase_region[0]}_{ phase_region[1]}.bam")
     return assigned_read_count, cell_types_list

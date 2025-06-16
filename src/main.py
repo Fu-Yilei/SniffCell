@@ -13,7 +13,7 @@ import numpy as np
 from multiprocessing import Pool
 import multiprocessing
 from src.deconv import get_base_modification_dictionary_basic_supporting_reads, filter_cell_type_regions, assign_read_to_readgroup
-from src.deconv_em import em_k_cluster_methylation
+from src.deconv_em import em_k_cluster_methylation, em_haplotype_and_combined
 from src.deconv_estimate import estimate_celltype_assignment
 os.environ["HTS_LOG_LEVEL"] = "error"
 
@@ -36,20 +36,49 @@ def process_individual_region(filtered_regions, celltypes, bam_file_path, output
         alpha_init = celltype_prior
     else:
         alpha_init = 1 / len(celltypes) * np.ones(len(celltypes))
-    alpha_final, _, gamma_final = em_k_cluster_methylation(
+    # alpha_final, _, gamma_final = em_k_cluster_methylation(
+    #     df=reads_methylation_df, alpha_init=alpha_init, p_init=p_init_region,
+    #     max_iter=100, tol=1e-5, random_state=42
+    # )
+    # em_on_haplotypes_and_harmonize
+    alphas, _, gamma_df = em_haplotype_and_combined(
         df=reads_methylation_df, alpha_init=alpha_init, p_init=p_init_region,
-        max_iter=100, tol=1e-5, random_state=42
+        max_iter=100, tol=1e-5, random_state=42,
     )
+    max_distance = None
+    if alphas[0] is None and alphas[1] is None:
+        logging.info(f"{chromosome}:{phase_region[0]}-{phase_region[1]} is unphased. Using the HP 0 for deconvolution.")
+        # print(alphas)
+        alpha_final = alphas[2]
+        gamma_final = gamma_df.copy()
+        gamma_final['gamma'] = gamma_df["gamma_list"].apply(lambda x: x[0] if isinstance(x, list) and len(x) > 0 else None)
+        # print(alpha_final, gamma_final)
+    elif len(alphas) == 3:
+        # logging.info(f"This region is phased. Using the HP 1, 2 and both for deconvolution: {chromosome}:{phase_region[0]}-{phase_region[1]}")
+        alpha_final_0 = alphas[0]
+        alpha_final_1 = alphas[1]
+        alpha_final_2 = alphas[2]
+        alpha_final = np.mean(list(i for i in alphas if i is not None), axis=0)
+        gamma_final = gamma_df.copy()
+        gamma_final['gamma'] = gamma_df["gamma_list"].apply(lambda x: np.mean(list(i for i in x if i is not None), axis=0))
+        # print(gamma_final)
+        if alpha_final_0 is not None and alpha_final_1 is not None: 
+            max_distance = max(np.linalg.norm(alpha_final_0 - alpha_final_1), np.linalg.norm(alpha_final_0 - alpha_final_2), np.linalg.norm(alpha_final_1 - alpha_final_2))
+            if max_distance > 0.3: # 0.3 is a magic number with some simulation in chatGPT. It basically shows vector are 10% different.
+                logging.info("The cell type profiles for 3 haplotypes are significantly different. Max distance: %.4f. This may indicate the pattern in the region %s:%d-%d is confounded by allele specific methylation.", max_distance, chromosome, phase_region[0], phase_region[1])
+    else:
+        alpha_final = None
     # print(alpha_final)
     if verbose:
         gamma_final.to_csv(f"{output}/{chromosome}_{phase_region[0]}_{phase_region[1]}.tsv", sep='\t')
+    # print(gamma_final)
     assigned_reads_count, cell_types_list = assign_read_to_readgroup(
         filtered_regions, celltypes, gamma_final, bam_file, output, gamma_max_confidence=threshold
     )
     return pd.DataFrame([{
         "chr": chromosome, "start": phase_region[0], "end": phase_region[1],
         "total_reads": reads_methylation_df.shape[0], "assigned_reads": assigned_reads_count,
-        "cell_type_reads_counts": cell_types_list, "cell_type_prob_em": alpha_final
+        "cell_type_reads_counts": cell_types_list, "cell_type_prob_em": alpha_final, 'max_distance': max_distance
     }])
 
 def process_individual_region_wrapper(args):
@@ -101,7 +130,7 @@ def main(argv):
 
     # Deconvolution mode
     if args.deconv:
-        print(args.atlas)
+        # print(args.atlas)
         deconv_atlas = os.path.abspath(args.atlas)
         deconv_tissue = args.tissue
         deconv_region_number = args.region_number

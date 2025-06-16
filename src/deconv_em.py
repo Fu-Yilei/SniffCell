@@ -290,3 +290,156 @@ def em_k_cluster_methylation_avg(
     df_out['gamma'] = pd.Series(np.max(gamma, axis=1), index=df_em.index)
     
     return alpha, p, df_out
+
+
+def em_on_haplotypes_and_harmonize(df, alpha_init, p_init, **em_kwargs):
+    """
+    Run EM on each haplotype (HP) cluster in a MultiIndex DataFrame, then harmonize gamma values across haplotypes.
+    If only haplotype 0 is present, run standard EM on all data.
+    If haplotypes 1 and 2 are present, run EM only on 1 and 2, harmonize, and assign to all (including 0 if present).
+    Returns alpha, p, and a DataFrame with a single 'gamma' column (harmonized, as a list per row),
+    indexed by (read_name, haplotype), matching the output format of em_k_cluster_methylation.
+    """
+    # Ensure MultiIndex with 'read_name' and 'haplotype'
+    if not isinstance(df.index, pd.MultiIndex) or df.index.names != ["read_name", "haplotype"]:
+        raise ValueError("Input DataFrame must have MultiIndex with ['read_name', 'haplotype'].")
+
+    hps = set(df.index.get_level_values('haplotype').unique())
+    hps_int = set([int(h) if str(h).isdigit() else h for h in hps])
+
+    # If only haplotype 0, run standard EM
+    if hps_int == {0}:
+        alpha, p, df_em = em_k_cluster_methylation(df, alpha_init, p_init, **em_kwargs)
+        return alpha, p, df_em[["gamma"]]
+
+    # Otherwise, run EM on haplotypes 1 and 2 only
+    em_results = {}
+    alpha_last = None
+    p_last = None
+    for hp in [1, 2]:
+        if hp in hps_int:
+            df_hp = df.xs(hp, level='haplotype', drop_level=False)
+            alpha, p, df_em = em_k_cluster_methylation(df_hp.drop(columns=['gamma'], errors='ignore'), alpha_init, p_init, **em_kwargs)
+            em_results[hp] = df_em[['gamma']]
+            alpha_last = alpha
+            p_last = p
+
+    # Concatenate results for 1 and 2
+    gamma_concat = pd.concat(em_results.values(), keys=em_results.keys(), names=['haplotype'])
+    gamma_concat = gamma_concat.reset_index(level=0).sort_index()
+
+    # Harmonize: average gamma for each read_name across haplotypes 1 and 2
+    gamma_lists = gamma_concat.groupby('read_name')['gamma'].apply(list)
+    # Average each cluster's gamma across haplotypes
+    def avg_gamma_lists(gamma_list_of_lists):
+        # gamma_list_of_lists: list of lists (one per haplotype)
+        arr = np.array(gamma_list_of_lists)
+        return arr.mean(axis=0).tolist()
+    gamma_harmonized = gamma_lists.apply(avg_gamma_lists)
+
+    # Assign harmonized gamma back to all (read_name, haplotype) pairs in a new DataFrame
+    gamma_df = pd.DataFrame(index=df.index)
+    gamma_df['gamma'] = df.index.get_level_values('read_name').map(gamma_harmonized)
+
+    return alpha_last, p_last, gamma_df
+
+
+def em_haplotype_and_combined(df, alpha_init, p_init, **em_kwargs):
+    """
+    Run the Expectation-Maximization (EM) algorithm on haplotype-specific and combined data.
+
+    This function performs the EM algorithm three times:
+    1. On data corresponding to haplotype 1.
+    2. On data corresponding to haplotype 2.
+    3. On all data combined, ignoring haplotype information.
+
+    For each read, it stores a list of gamma vectors from each run (or a single value if only one run applies).
+
+    Args:
+        df (pd.DataFrame): Input DataFrame with a MultiIndex of ['read_name', 'haplotype'].
+                           The DataFrame should contain methylation data for clustering.
+        alpha_init (np.ndarray): Initial alpha values for the EM algorithm.
+        p_init (np.ndarray): Initial p values for the EM algorithm.
+        **em_kwargs: Additional keyword arguments to pass to the `em_k_cluster_methylation` function.
+
+    Returns:
+        tuple:
+            - alphas (list): A list of up to 3 alpha arrays (one for each EM run: haplotype 1, haplotype 2, and combined).
+                             Each alpha array is of shape (K,), where K is the number of clusters.
+            - ps (list): A list of up to 3 p arrays (one for each EM run: haplotype 1, haplotype 2, and combined).
+                         Each p array is of shape (K, num_sites) for site-specific probabilities.
+            - gamma_df (pd.DataFrame): A DataFrame with the same index as the input `df` and a column 'gamma_list',
+                                       which contains a list of gamma vectors for each read (or a single value if only one run applies).
+                                       The structure of the 'gamma_list' column is as follows:
+                                       - If only one EM run applies to a read, the column contains a single gamma vector (list of floats).
+                                       - If multiple EM runs apply, the column contains a list of gamma vectors (one per run).
+
+    Raises:
+        ValueError: If the input DataFrame does not have a MultiIndex with ['read_name', 'haplotype'].
+
+    Notes:
+        - The function checks for the presence of haplotype 1 and haplotype 2 in the input data.
+          If a haplotype is not present, the corresponding alpha and p values will be `None`.
+        - The `gamma_list` column in the output `gamma_df` contains gamma values from each EM run.
+          If only one non-None gamma value exists for a read, it is stored directly; otherwise, a list of gamma values is stored.
+    """
+    if not isinstance(df.index, pd.MultiIndex) or df.index.names != ["read_name", "haplotype"]:
+        raise ValueError("Input DataFrame must have MultiIndex with ['read_name', 'haplotype'].")
+
+    # Prepare outputs
+    alphas = []
+    ps = []
+    gamma_dicts = [None, None, None]  # To store gamma dictionaries for each haplotype and combined
+    # 1. EM on haplotype 1
+    phased_flag = False
+    if 1 in set([int(h) if str(h).isdigit() else h for h in df.index.get_level_values('haplotype').unique()]):
+        phased_flag = True
+        df_h1 = df.xs(1, level='haplotype', drop_level=False)
+        alpha1, p1, df_em1 = em_k_cluster_methylation(df_h1.drop(columns=['gamma_list', 'gamma'], errors='ignore'), alpha_init, p_init, **em_kwargs)
+        alphas.append(alpha1)
+        ps.append(p1)
+        gamma_dicts[0] = df_em1['gamma'].to_dict()
+    else:
+        alphas.append(None)
+        ps.append(None)
+        gamma_dicts[0] = {}
+
+    # 2. EM on haplotype 2
+    if 2 in set([int(h) if str(h).isdigit() else h for h in df.index.get_level_values('haplotype').unique()]):
+        phased_flag = True
+        df_h2 = df.xs(2, level='haplotype', drop_level=False)
+        alpha2, p2, df_em2 = em_k_cluster_methylation(df_h2.drop(columns=['gamma_list', 'gamma'], errors='ignore'), alpha_init, p_init, **em_kwargs)
+        alphas.append(alpha2)
+        ps.append(p2)
+        gamma_dicts[1] = df_em2['gamma'].to_dict()
+    else:
+        alphas.append(None)
+        ps.append(None)
+        gamma_dicts[1] = {}
+
+    # 3. EM on all data (ignore haplotype)
+    df_all = df.copy()
+    alpha_all, p_all, df_em_all = em_k_cluster_methylation(df_all.drop(columns=['gamma_list', 'gamma'], errors='ignore'), alpha_init, p_init, **em_kwargs)
+    alphas.append(alpha_all)
+    ps.append(p_all)
+    gamma_dicts[2] = df_em_all['gamma'].to_dict()
+
+
+
+    # For each row in the original df, collect gamma from each run (or None if not present)
+    gamma_list_col = []
+    for idx in df.index:
+        gammas = []
+        for d in gamma_dicts:
+            gammas.append(d.get(idx, None))
+        # # If only one non-None, return just that; else, return list
+        # if phased_flag:
+        #     gamma_list_col.append(gammas)
+        # else:
+        #     non_none = [g for g in gammas if g is not None]
+        #     gamma_list_col.append(non_none[0])
+        gamma_list_col.append(gammas)
+
+    gamma_df = pd.DataFrame(index=df.index)
+    gamma_df['gamma_list'] = gamma_list_col
+    return alphas, ps, gamma_df,  # return sizes of each haplotype and combined data

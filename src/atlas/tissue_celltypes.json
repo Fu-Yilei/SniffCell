@@ -7,7 +7,7 @@
   "brain_cortex": {
     "name": "brain_cortex",
     "cell_type": ["neuron", "oligodendrocyte", "endothelial_cell", "monocyte"],
-    "prior": [0.25, 0.6, 0.1, 0.05]
+    "prior": [0.25, 0.25, 0.25, 0.25]
   },
   "whole_blood": {
     "name": "whole_blood",
