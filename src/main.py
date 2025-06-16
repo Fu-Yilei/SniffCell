@@ -17,6 +17,7 @@ from src.deconv_em import em_k_cluster_methylation, em_haplotype_and_combined
 from src.deconv_estimate import estimate_celltype_assignment
 os.environ["HTS_LOG_LEVEL"] = "error"
 
+
 def process_individual_region(filtered_regions, celltypes, bam_file_path, output, ref_seq_path, threshold, celltype_prior, verbose=False):
     process = multiprocessing.current_process()
     process.name = f"sniffcell"
