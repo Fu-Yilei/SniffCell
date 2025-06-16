@@ -21,6 +21,10 @@
         "name": "lung",
         "cell_type": ["lung_epithelial", "endothelial_cell", "monocyte"]
     },
+    "heart": {
+        "name": "heart",
+        "cell_type": ["heart_cardiomyocyte", "heart_fibroblasts", "endothelial_cell"]
+    },
    "hapmap_mix": {
     "name": "hapmap_mix",
     "cell_type": ["HG005", "HG02622", "HG002", "HG02257", "HG02486", "HG00438"],
