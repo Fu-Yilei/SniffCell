@@ -95,8 +95,8 @@ def filter_cell_type_regions(cell_types, atlas, top_x=300, by='std'):
         top_regions = atlas_cell_types.nlargest(top_x, 'std')
         # print(top_regions)
         filtered_atlas_df = top_regions
-        return top_regions
-    else:
+        return filtered_atlas_df
+    elif by =='diff':
         filtered_atlas_df = pd.DataFrame(columns=atlas_cell_types.columns).dropna(how='all')
         region_number_for_each_celltype = top_x // len(cell_types)
         for cell_type in cell_types:
@@ -106,6 +106,8 @@ def filter_cell_type_regions(cell_types, atlas, top_x=300, by='std'):
             top_regions = top_regions.dropna(how='all')
             filtered_atlas_df = pd.concat([filtered_atlas_df, top_regions])
         return filtered_atlas_df
+    else: 
+        raise ValueError("Invalid catalog selection parameter. Use 'std' or 'diff'.")
     
 def assign_read_to_readgroup(location, cell_types, classification_df, input_bam_file, output_bam_folder, gamma_max_confidence = 0.9):
     """
@@ -125,7 +127,7 @@ def assign_read_to_readgroup(location, cell_types, classification_df, input_bam_
             gamma = classification_df.loc[(reads.query_name, slice(None)), 'gamma'].values[0]
             # print(gamma)
             if isinstance(gamma, np.ndarray) and len(gamma) == len(cell_types):
-                print(gamma, max(gamma))
+                # print(gamma, max(gamma))
                 if (max(gamma) > gamma_max_confidence):
                     cell_type = cell_types[np.argmax(gamma)]
                     cell_types_list[np.argmax(gamma)] += 1

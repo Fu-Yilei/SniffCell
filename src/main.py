@@ -64,8 +64,8 @@ def process_individual_region(filtered_regions, celltypes, bam_file_path, output
         # print(gamma_final)
         if alpha_final_0 is not None and alpha_final_1 is not None: 
             max_distance = max(np.linalg.norm(alpha_final_0 - alpha_final_1), np.linalg.norm(alpha_final_0 - alpha_final_2), np.linalg.norm(alpha_final_1 - alpha_final_2))
-            if max_distance > 0.3: # 0.3 is a magic number with some simulation in chatGPT. It basically shows vector are 10% different.
-                logging.info("The cell type profiles for 3 haplotypes are significantly different. Max distance: %.4f. This may indicate the pattern in the region %s:%d-%d is confounded by allele specific methylation.", max_distance, chromosome, phase_region[0], phase_region[1])
+            # if max_distance > 0.3: # 0.3 is a magic number with some simulation in chatGPT. It basically shows vector are 10% different.
+            #     logging.info("The cell type profiles for 3 haplotypes are significantly different. Max distance: %.4f. This may indicate the pattern in the region %s:%d-%d is confounded by allele specific methylation.", max_distance, chromosome, phase_region[0], phase_region[1])
     else:
         alpha_final = None
     # print(alpha_final)
@@ -119,7 +119,7 @@ def main(argv):
         # Normal mode
         if os.path.exists(os.path.join(output, "sv_methylation_df.csv")):
             sv_methylation_df = pd.read_csv(os.path.join(output, "sv_methylation_df.csv"))
-            print("SV methylation data already exists. Skipping calculation.")
+            logging.info("SV methylation data already exists. Skipping calculation.")
         else:
             sv_methylation_df = src.calc_methylation_diff_regions.calculate_methylation_diff_region_bam(
                 sv_vcf=input_vcf, input_bam=input_bam, reference_genome=reference_genome, output_bam_folder=output,
@@ -138,7 +138,7 @@ def main(argv):
         deconv_confidence = args.confidence
         deconv_verbose = args.verbose
         wgbs_tools_uxm = args.wgbs_tools_uxm
-        # Set output location for deconvolution
+        min_hp_distance = args.hp_distance
         deconv_output_location = os.path.join(output, "deconv_bam_output")
         os.makedirs(deconv_output_location, exist_ok=True)
 
@@ -186,8 +186,8 @@ def main(argv):
             "  UXM Path: %s",
             input_bam, reference_genome, deconv_tissue, deconv_atlas, deconv_output_location,
             threads, deconv_verbose, deconv_region_number, deconv_confidence, deconv_method, celltypes_prior,
-            args.wgbs_path if not wgbs_tools_uxm else "Not Used",
-            args.uxm_path if not wgbs_tools_uxm else "Not Used"
+            args.wgbs_path if wgbs_tools_uxm else "Not Used",
+            args.uxm_path if wgbs_tools_uxm else "Not Used"
         )
 
         filtered_regions_df = filter_cell_type_regions(celltypes, deconv_atlas, deconv_region_number, by=deconv_method)
@@ -197,6 +197,10 @@ def main(argv):
             summary_classification_series = list(tqdm(p.imap(process_individual_region_wrapper, args_list), total=len(args_list), desc="Processing methylation informative regions", unit="region"))
         for summary_classification in summary_classification_series:
             summary_classification_df = pd.concat([summary_classification_df, summary_classification], ignore_index=True)
+        summary_classification_df = summary_classification_df[summary_classification_df.max_distance <= min_hp_distance]
+        if deconv_method == "diff":
+            region_num_for_each_celltype = deconv_region_number // len(celltypes)
+        
         probs_array = np.stack(summary_classification_df["cell_type_prob_em"].values)
         # Identify and remove rows with NaNs
         nan_mask = np.isnan(probs_array).any(axis=1)
@@ -212,5 +216,5 @@ def main(argv):
         summary_classification_df.to_csv(f"{output}/summary_classification.csv", sep='\t', index=False)
         logging.info("Processing complete. Summary classification saved.")
         deconv_output_vcf = os.path.join(output, f"{input_vcf_filename}.celltype_annotated.vcf")
-        estimate_celltype_assignment(input_vcf, sv_methylation_df, summary_classification_df, celltypes, deconv_output_vcf)
+        estimate_celltype_assignment(input_vcf, sv_methylation_df, summary_classification_df, celltypes, deconv_output_vcf, assignment_method=deconv_method)
         logging.info("VCF file annotated with cell type assignment.")
