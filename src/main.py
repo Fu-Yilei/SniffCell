@@ -198,7 +198,9 @@ def main(argv):
             summary_classification_series = list(tqdm(p.imap(process_individual_region_wrapper, args_list), total=len(args_list), desc="Processing methylation informative regions", unit="region"))
         for summary_classification in summary_classification_series:
             summary_classification_df = pd.concat([summary_classification_df, summary_classification], ignore_index=True)
-        summary_classification_df = summary_classification_df[summary_classification_df.max_distance <= min_hp_distance]
+        summary_classification_df = summary_classification_df[
+            (summary_classification_df.max_distance <= min_hp_distance) | (summary_classification_df.max_distance.isna())
+        ]
         if deconv_method == "diff":
             region_num_for_each_celltype = deconv_region_number // len(celltypes)
         

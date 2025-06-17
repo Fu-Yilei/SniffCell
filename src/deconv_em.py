@@ -432,12 +432,6 @@ def em_haplotype_and_combined(df, alpha_init, p_init, **em_kwargs):
         gammas = []
         for d in gamma_dicts:
             gammas.append(d.get(idx, None))
-        # # If only one non-None, return just that; else, return list
-        # if phased_flag:
-        #     gamma_list_col.append(gammas)
-        # else:
-        #     non_none = [g for g in gammas if g is not None]
-        #     gamma_list_col.append(non_none[0])
         gamma_list_col.append(gammas)
 
     gamma_df = pd.DataFrame(index=df.index)

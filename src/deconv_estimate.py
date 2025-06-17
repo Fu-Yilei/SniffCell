@@ -111,6 +111,9 @@ def annotate_vcf_by_id_copy(vcf_path, annotated_df, output_vcf_path):
     vcf_in = pysam.VariantFile(vcf_path, "r")
     annotated_df = annotated_df.dropna(subset=["id"]) # Solve the issue of empty id
     header = vcf_in.header.copy()
+    header.add_line('##source=SniffCell V3.0')
+    header.add_line('##command=')
+
     header.add_line('##INFO=<ID=CELLTYPE,Number=1,Type=String,Description="Predicted cell type for the variant">')
     header.add_line('##INFO=<ID=CONF,Number=1,Type=Float,Description="Confidence score of cell type assignment">')
     header.add_line('##INFO=<ID=HET_STATUS,Number=1,Type=String,Description="Heterozygous (0/1) or Homozygous (1/1) status">')
