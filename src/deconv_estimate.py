@@ -14,6 +14,7 @@ def find_closest_blocks(vcf_df, deconv_df, global_proportions):
     for _, row in vcf_df.iterrows():
         chr_match = deconv_df[deconv_df["chr"] == row["chr"]].copy()  # Ensure it's a new DataFrame
         # print(chr_match)
+        
         if chr_match.empty:
             closest_blocks.append({
                 'chr': 'global',
@@ -21,7 +22,7 @@ def find_closest_blocks(vcf_df, deconv_df, global_proportions):
                 'end': None,
                 'total_reads': None,
                 'assigned_reads': None,
-                'cell_type_reads_counts': np.array([0., 0., 0., 0.]),
+                'cell_type_reads_counts': np.zeros(len(global_proportions)),
                 'cell_type_prob_em': global_proportions,
                 'max_distance': None,
                 'deviation_from_mean': None,
@@ -160,7 +161,7 @@ def calculate_global_celltype_proportion(deconv_df, deconv_region_number, cell_t
     if assignment_method == 'std':
         cell_type_proportions = np.mean(deconv_df['cell_type_prob_em'], axis=0)
     elif assignment_method == "diff":
-        region_num_for_each_celltype = deconv_region_number // len(cell_type_list)
+        region_num_for_each_celltype = deconv_region_number // len(cell_type_list) #TODO: need to only access one cell type for the diff method
         cell_type_proportions = np.mean(deconv_df['cell_type_prob_em'], axis=0)
     else:
         raise ValueError(f"Unknown assignment method: {assignment_method}")
@@ -170,14 +171,11 @@ def calculate_global_celltype_proportion(deconv_df, deconv_region_number, cell_t
 def estimate_celltype_assignment(vcf_file, sv_methylation_df, deconv_df, cell_type_list, output_vcf, assignment_method="std"):
     logging.info("Starting cell type assignment estimation...")
     global_proportions = calculate_global_celltype_proportion(deconv_df, len(deconv_df), cell_type_list, assignment_method)
-    
-    # vcf_file_df = read_vcf_to_df(pysam.VariantFile(vcf_file))
     closest_blocks = find_closest_blocks(sv_methylation_df, deconv_df, global_proportions=global_proportions)
     closest_blocks = [block if block is not None else {} for block in closest_blocks]
     closest_df = pd.DataFrame(closest_blocks)
     closest_df = closest_df.add_prefix("closest_")
     merged_df = pd.concat([sv_methylation_df, closest_df], axis=1)
-
     updated_df = assign_variant_with_cell_type_names(merged_df, cell_type_list, global_proportions=global_proportions, epsilon=1e-6)
     updated_df.to_csv(os.path.join(os.path.dirname(output_vcf), "sv_methylation_celltype_estimation.csv"))
     annotate_vcf_by_id_copy(vcf_file, updated_df, output_vcf)

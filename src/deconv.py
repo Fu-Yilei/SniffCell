@@ -125,9 +125,7 @@ def assign_read_to_readgroup(location, cell_types, classification_df, input_bam_
     for reads in phased_block_alignment:
         if reads.query_name in classification_df.index:
             gamma = classification_df.loc[(reads.query_name, slice(None)), 'gamma'].values[0]
-            # print(gamma)
-            if isinstance(gamma, np.ndarray) and len(gamma) == len(cell_types):
-                # print(gamma, max(gamma))
+            if isinstance(gamma, (np.ndarray, list)) and len(gamma) == len(cell_types):
                 if (max(gamma) > gamma_max_confidence):
                     cell_type = cell_types[np.argmax(gamma)]
                     cell_types_list[np.argmax(gamma)] += 1
@@ -142,5 +140,5 @@ def assign_read_to_readgroup(location, cell_types, classification_df, input_bam_
             output_bam_file.write(reads)
     # print(assigned_read_count)
     output_bam_file.close()
-    pysam.index(f"{output_bam_folder}/{chromosome}_{phase_region[0]}_{ phase_region[1]}.bam")
+    pysam.index(f"{output_bam_folder}/{chromosome}_{phase_region[0]}_{phase_region[1]}.bam")
     return assigned_read_count, cell_types_list

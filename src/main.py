@@ -52,7 +52,8 @@ def process_individual_region(filtered_regions, celltypes, bam_file_path, output
         # print(alphas)
         alpha_final = alphas[2]
         gamma_final = gamma_df.copy()
-        gamma_final['gamma'] = gamma_df["gamma_list"].apply(lambda x: x[0] if isinstance(x, list) and len(x) > 0 else None)
+        # print(gamma_df)
+        gamma_final['gamma'] = gamma_df["gamma_list"].apply(lambda x: x[-1] if isinstance(x, list) and len(x) > 0 else None)
         # print(alpha_final, gamma_final)
     elif len(alphas) == 3:
         # logging.info(f"This region is phased. Using the HP 1, 2 and both for deconvolution: {chromosome}:{phase_region[0]}-{phase_region[1]}")
@@ -140,6 +141,7 @@ def main(argv):
         deconv_verbose = args.verbose
         wgbs_tools_uxm = args.wgbs_tools_uxm
         min_hp_distance = args.hp_distance
+        read_fraction_threshold = args.assigned_read_fraction
         deconv_output_location = os.path.join(output, "deconv_bam_output")
         os.makedirs(deconv_output_location, exist_ok=True)
 
@@ -183,10 +185,11 @@ def main(argv):
             "  Confidence Threshold: %.2f\n"
             "  Method: %s\n"
             "  Using Prior: %s\n"
+            "  Read Fraction Threshold: %.2f\n"
             "  WGBS Tools Path: %s\n"
             "  UXM Path: %s",
             input_bam, reference_genome, deconv_tissue, deconv_atlas, deconv_output_location,
-            threads, deconv_verbose, deconv_region_number, deconv_confidence, deconv_method, celltypes_prior,
+            threads, deconv_verbose, deconv_region_number, deconv_confidence, deconv_method, celltypes_prior, read_fraction_threshold,
             args.wgbs_path if wgbs_tools_uxm else "Not Used",
             args.uxm_path if wgbs_tools_uxm else "Not Used"
         )
@@ -201,6 +204,8 @@ def main(argv):
         summary_classification_df = summary_classification_df[
             (summary_classification_df.max_distance <= min_hp_distance) | (summary_classification_df.max_distance.isna())
         ]
+        summary_classification_df = summary_classification_df[
+            (summary_classification_df.assigned_reads >= read_fraction_threshold * summary_classification_df.total_reads)]  
         if deconv_method == "diff":
             region_num_for_each_celltype = deconv_region_number // len(celltypes)
         

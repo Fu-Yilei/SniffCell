@@ -47,6 +47,8 @@ def get_base_modification_dictionary(
                 methylation_identifier = methylation_identifier_0
             elif methylation_identifier_1 in list(mm.keys()):
                 methylation_identifier = methylation_identifier_1
+            else:
+                continue
             for i in mm[methylation_identifier]:  # Remora only output one type of score: c 1 m/c 0 m, but this part can be improved for other methlyation callers
                 if read_base_ref_loc[i[0]]:  # i format: (loc, score)
                     if reads.is_forward:  # cg/gc on forward and reverse reads
@@ -210,6 +212,8 @@ def get_base_modification_dictionary_basic_supporting_reads(
                     methylation_identifier = methylation_identifier_0
                 elif methylation_identifier_1 in list(mm.keys()):
                     methylation_identifier = methylation_identifier_1
+                else:
+                    continue
                 for i in mm[methylation_identifier]:  # Remora only output one type of score: c 1 m/c 0 m, but this part can be improved for other methlyation callers
                     if read_base_ref_loc[i[0]]:  # i format: (loc, score)
                         if reads.is_forward:  # cg/gc on forward and reverse reads

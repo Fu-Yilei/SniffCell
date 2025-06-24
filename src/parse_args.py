@@ -45,6 +45,7 @@ def parse_args(argv):
     optional_args.add_argument("-uxm", "--uxm_path", type=str, default="uxm", help="Path to UXM. Default is 'uxm'.")
     optional_args.add_argument("-ua", "--uxm_atlas", type=str, default=uxm_atlas, help=f"Atlas file for UXM. Default is {uxm_atlas}. HIGHLY RECOMMENDED to not change this")
     optional_args.add_argument("-dis", "--hp_distance", type=float, default=0.3, help="Minimum distance of celltype probablity vector among hp1, hp2 and all hp. Default is 0.3. If the value is too large it means this region is confounded by allele specific methylation, hence discarded.")
+    optional_args.add_argument("-rf", "--assigned_read_fraction", type=float, default=0.8, help="Minimum fraction of assigned reads inside a ctDMR (based on gemma value from EM algorithm). If this value is too low, it means the ctDMR is not reliable, hence discarded. Default is 0.8.")
 
     sniffmeth_args = parser.add_argument_group("SniffCell optional arguments")
     sniffmeth_args.add_argument("-ob", "--output_bam", action="store_true", help="Output SV-related BAM file.")
