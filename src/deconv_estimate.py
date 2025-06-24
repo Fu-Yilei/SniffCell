@@ -12,9 +12,7 @@ def find_closest_blocks(vcf_df, deconv_df, global_proportions):
     closest_blocks = []
     
     for _, row in vcf_df.iterrows():
-        chr_match = deconv_df[deconv_df["chr"] == row["chr"]].copy()  # Ensure it's a new DataFrame
-        # print(chr_match)
-        
+        chr_match = deconv_df[deconv_df["chr"] == row["chr"]].copy()  # Ensure it's a new DataFrame        
         if chr_match.empty:
             closest_blocks.append({
                 'chr': 'global',
