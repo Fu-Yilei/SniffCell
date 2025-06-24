@@ -2,12 +2,14 @@
 import argparse
 import sys
 import os
+from src.__init__ import __version__ as version
+
 
 def parse_args(argv):
     parser = argparse.ArgumentParser(
         prog="sniffcell",
         description="Annotating mosaic structural variants (SVs) with cell type-specific methylation information.",
-        epilog="Version 0.2.2",
+        epilog=f"Version {version}",
     )
     
     parser.add_argument("-t", "--threads", type=int, default=1, help="Number of threads, default 1.")

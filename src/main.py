@@ -16,6 +16,7 @@ from src.deconv import (
 from src.deconv_em import em_haplotype_and_combined
 from src.deconv_estimate import estimate_celltype_assignment
 from src.figures import assign_variant_with_cell_type_names, plot_cell_type_box_distributions
+from src.__init__ import __version__ as version
 
 os.environ["HTS_LOG_LEVEL"] = "error"
 
@@ -197,9 +198,12 @@ def main(argv):
         plot_cell_type_box_distributions(cell_type_dicts, f"{output}/celltype_prediction_distributions.png")
         logging.info(f"Cell type proportion estimation figure saved to {output}/celltype_prediction_distributions.png")
 
+        sniffcell_version = version
+        sniffcell_command = " ".join(sys.argv)
+
         estimate_celltype_assignment(
             input_vcf, sv_methylation_df, summary_classification_df, celltypes,
-            os.path.join(output, f"{os.path.basename(input_vcf).split('.')[0]}.celltype_annotated.vcf"),
+            os.path.join(output, f"{os.path.basename(input_vcf).split('.')[0]}.celltype_annotated.vcf"), cmd_info=(sniffcell_version, sniffcell_command),
             assignment_method=deconv_method
         )
         logging.info("VCF file annotated with cell type assignment.")

@@ -105,13 +105,15 @@ def assign_variant_with_cell_type_names(df, cell_type_names, global_proportions,
     logging.info("Finished assigning cell type names.")
     return df
 
-def annotate_vcf_by_id_copy(vcf_path, annotated_df, output_vcf_path):
+def annotate_vcf_by_id_copy(vcf_path, annotated_df, output_vcf_path, cmd_info):
     logging.info(f"Annotating VCF file: {vcf_path}")
     vcf_in = pysam.VariantFile(vcf_path, "r")
     annotated_df = annotated_df.dropna(subset=["id"]) # Solve the issue of empty id
     header = vcf_in.header.copy()
-    header.add_line('##source=SniffCell V3.0')
-    header.add_line('##command=')
+    sniffcell_version = cmd_info[0]
+    command_line = cmd_info[1]
+    header.add_line(f'##source=SniffCell {sniffcell_version}')
+    header.add_line(f'##command={command_line}')
 
     header.add_line('##INFO=<ID=CELLTYPE,Number=1,Type=String,Description="Predicted cell type for the variant">')
     header.add_line('##INFO=<ID=CONF,Number=1,Type=Float,Description="Confidence score of cell type assignment">')
@@ -166,7 +168,7 @@ def calculate_global_celltype_proportion(deconv_df, deconv_region_number, cell_t
     return cell_type_proportions
 
 
-def estimate_celltype_assignment(vcf_file, sv_methylation_df, deconv_df, cell_type_list, output_vcf, assignment_method="std"):
+def estimate_celltype_assignment(vcf_file, sv_methylation_df, deconv_df, cell_type_list, output_vcf, cmd_info, assignment_method="std"):
     logging.info("Starting cell type assignment estimation...")
     global_proportions = calculate_global_celltype_proportion(deconv_df, len(deconv_df), cell_type_list, assignment_method)
     closest_blocks = find_closest_blocks(sv_methylation_df, deconv_df, global_proportions=global_proportions)
@@ -176,5 +178,5 @@ def estimate_celltype_assignment(vcf_file, sv_methylation_df, deconv_df, cell_ty
     merged_df = pd.concat([sv_methylation_df, closest_df], axis=1)
     updated_df = assign_variant_with_cell_type_names(merged_df, cell_type_list, global_proportions=global_proportions, epsilon=1e-6)
     updated_df.to_csv(os.path.join(os.path.dirname(output_vcf), "sv_methylation_celltype_estimation.csv"))
-    annotate_vcf_by_id_copy(vcf_file, updated_df, output_vcf)
+    annotate_vcf_by_id_copy(vcf_file, updated_df, output_vcf, cmd_info)
     logging.info("Finished cell type assignment estimation.")
