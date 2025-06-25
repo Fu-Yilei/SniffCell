@@ -13,45 +13,49 @@ SniffCell is a tool designed to analyze DNA methylation changes associated with 
 
 **SniffCell can be re-run on previous runs. It will automatically read sv-methylation correlation file (sv_methylation_df.csv) and re-estimate the cell type based on the updated proportion estimation - this part usually takes less than 10 minutes per human genome.**
 
-Example usage: `sniffcell -b BAM_FILE -v VCF_FILE -t 20 -r REFERENCE -c TISSUE_TYPE -o OUTPUT`
+Example usage: `sniffcell -b BAM_FILE -v VCF_FILE -t THREADS -r REFERENCE -c TISSUE_TYPE -o OUTPUT`
 
 Run SniffCell using the following command:
 
 ```bash
-sniffcell [-h] [-t THREADS] -b BAM -v VCF -r REFERENCE -o OUTPUT [-d] [-a ATLAS] [-c TISSUE] [-n REGION_NUMBER] [-me METHOD] [-vb] [-ot OUTLIER_THRESHOLD] [-conf CONFIDENCE] [-nc N_CLOSEST] [-wuoff] [-wgbs WGBS_PATH] [-uxm UXM_PATH] [-ua UXM_ATLAS]
-      [-dis HP_DISTANCE] [-rf ASSIGNED_READ_FRACTION] [-ob] [-p] [-s SMOOTHING] [-i INTERVAL] [-m MIN_SUPPORTING] [-th THRESHOLD] [-tf TEST_FUNCTION] [-b2 SECOND_BAM]
+```bash
+sniffcell [-h] [-t THREADS] -b BAM -v VCF -r REFERENCE -o OUTPUT [-a ATLAS] -c TISSUE [-n REGION_NUMBER] [-me METHOD] [-vb] [-ot OUTLIER_THRESHOLD] [-conf CONFIDENCE] [-nc N_CLOSEST] [-wuoff] [-wgbs WGBS_PATH] [-uxm UXM_PATH] [-ua UXM_ATLAS]
+                    [-dis HP_DISTANCE] [-rf ASSIGNED_READ_FRACTION] [-ob] [-p] [-s SMOOTHING] [-i INTERVAL] [-m MIN_SUPPORTING] [-th THRESHOLD] [-tf TEST_FUNCTION] [-b2 SECOND_BAM]
 ```
 
 ### Required Arguments:
 - `-b, --bam`: Input BAM file.
-- `-v, --vcf`: Input SV VCF file (requires supporting reads).
+- `-v, --vcf`: Input SV VCF file (supporting reads needed).
 - `-r, --reference`: Reference genome.
-- `-o, --output`: Output directory (default: ).
+- `-o, --output`: Output directory.
 
-### Optional Arguments:
-- `-t, --threads`: Number of threads (default: 1).
-- `-d, --deconv`: Enable deconvolution for cell type-specific methylation analysis.
-
-#### Deconvolution-Specific Options:
-- `-a, --atlas`: Path to the cell type atlas file (default: ).
-- `-c, --tissue`: Tissue type (default: `brain_cereb`). Required if `-d` is specified.
-- `-n, --region_number`: Number of regions to select (default: 300).
-- `-me, --method`: Region selection method (`std` or `diff`, default: `diff`).
-- `-ot, --outlier_threshold`: Threshold for filtering out unreliable regions (default: 0.8).
-- `-conf, --confidence`: Minimum confidence threshold for the EM algorithm (default: 0.9).
+### Deconvolution-Specific Options:
+- `-a, --atlas`: Cell type atlas file location.
+- `-c, --tissue`: Tissue type in `tissue_celltypes.json`. Required.
+- `-n, --region_number`: Number of regions to select. Default: 300.
+- `-me, --method`: Region selection method (`std` or `diff`). Default: `diff`.
+- `-vb, --verbose`: Enable verbose mode.
+- `-ot, --outlier_threshold`: Threshold for filtering unreliable regions. Default: 0.8.
+- `-conf, --confidence`: Minimum confidence threshold for EM algorithm. Default: 0.9.
 - `-nc, --n_closest`: Number of closest methylation-informative regions for proportion estimation.
+- `-wuoff, --wgbs_tools_uxm`: Use WGBS tools and UXM for EM algorithm. Default: `False`.
+- `-wgbs, --wgbs_path`: Path to WGBS tools.
+- `-uxm, --uxm_path`: Path to UXM.
+- `-ua, --uxm_atlas`: Atlas file for UXM.
+- `-dis, --hp_distance`: Minimum distance of cell type probability vector. Default: 0.3.
+- `-rf, --assigned_read_fraction`: Minimum fraction of assigned reads inside a ctDMR. Default: 0.8.
 
-#### General Options:
+### General Options:
 - `-ob, --output_bam`: Output SV-related BAM file.
-- `-p, --primary_only`: Retain only primary alignments in the BAM file.
-- `-s, --smoothing`: Enable smoothing (default: 0, no smoothing).
-- `-i, --interval`: Interval for checking methylation changes (default: ±1000).
-- `-m, --min_supporting`: Minimum supporting reads for SV (default: 3).
-- `-th, --threshold`: Threshold for differentially methylated regions (default: 0.2).
-- `-tf, --test_function`: Statistical test function (default: `ttest`).
+- `-p, --primary_only`: Keep only primary alignments in BAM.
+- `-s, --smoothing`: Enable smoothing. Default: 0.
+- `-i, --interval`: Interval for checking methylation changes. Default: +-1000.
+- `-m, --min_supporting`: Minimum supporting reads for SV. Default: 3.
+- `-th, --threshold`: Threshold for differentially methylated regions. Default: 0.2.
+- `-tf, --test_function`: Statistical test function. Default: `ttest`.
 - `-b2, --second_bam`: Benchmark BAM file for comparison.
 
----
+**Version:** v0.3
 
 ## Statistical Test Recommendations
 - **t-test**: General-purpose test.
