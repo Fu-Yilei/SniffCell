@@ -124,86 +124,85 @@ def main(argv):
             )
             sv_methylation_df.to_csv(sv_file)
 
-    if args.deconv:
-        deconv_output_location = os.path.join(output, "deconv_bam_output")
-        os.makedirs(deconv_output_location, exist_ok=True)
+    deconv_output_location = os.path.join(output, "deconv_bam_output")
+    os.makedirs(deconv_output_location, exist_ok=True)
 
-        deconv_atlas, deconv_tissue = os.path.abspath(args.atlas), args.tissue
-        deconv_region_number, deconv_method = args.region_number, args.method
-        deconv_confidence, deconv_verbose = args.confidence, args.verbose
-        min_hp_distance, read_fraction_threshold = args.hp_distance, args.assigned_read_fraction
+    deconv_atlas, deconv_tissue = os.path.abspath(args.atlas), args.tissue
+    deconv_region_number, deconv_method = args.region_number, args.method
+    deconv_confidence, deconv_verbose = args.confidence, args.verbose
+    min_hp_distance, read_fraction_threshold = args.hp_distance, args.assigned_read_fraction
 
-        with open(os.path.join(os.path.dirname(deconv_atlas), "tissue_celltypes.json"), "r", encoding="utf-8") as f:
-            celltype_dict = json.load(f)
-        celltypes = celltype_dict[deconv_tissue]["cell_type"]
+    with open(os.path.join(os.path.dirname(deconv_atlas), "tissue_celltypes.json"), "r", encoding="utf-8") as f:
+        celltype_dict = json.load(f)
+    celltypes = celltype_dict[deconv_tissue]["cell_type"]
 
-        celltypes_prior = None
-        if args.wgbs_tools_uxm:
-            from src.wgbs_uxm import run_wgbstools, run_uxm, get_uxm_prior
+    celltypes_prior = None
+    if args.wgbs_tools_uxm:
+        from src.wgbs_uxm import run_wgbstools, run_uxm, get_uxm_prior
 
-            run_wgbstools(args.wgbs_path, input_bam, output, args.uxm_atlas, threads)
-            uxm_output = run_uxm(args.uxm_path, output, threads, args.uxm_atlas)
-            with open(os.path.join(os.path.dirname(deconv_atlas), "column_mapping.json"), "r", encoding="utf-8") as f:
-                column_mapping = json.load(f)
-            celltypes_prior = get_uxm_prior(uxm_output, column_mapping, selected_cell_types=celltypes)
-        else:
-            celltypes_prior = celltype_dict[deconv_tissue].get("prior", None)
+        run_wgbstools(args.wgbs_path, input_bam, output, args.uxm_atlas, threads)
+        uxm_output = run_uxm(args.uxm_path, output, threads, args.uxm_atlas)
+        with open(os.path.join(os.path.dirname(deconv_atlas), "column_mapping.json"), "r", encoding="utf-8") as f:
+            column_mapping = json.load(f)
+        celltypes_prior = get_uxm_prior(uxm_output, column_mapping, selected_cell_types=celltypes)
+    else:
+        celltypes_prior = celltype_dict[deconv_tissue].get("prior", None)
 
-        filtered_regions_df = filter_cell_type_regions(celltypes, deconv_atlas, deconv_region_number, by=deconv_method)
-        summary_classification_df = pd.DataFrame(
-            columns=["chr", "start", "end", "total_reads", "assigned_reads", "cell_type_reads_counts", "cell_type_prob_em"]
+    filtered_regions_df = filter_cell_type_regions(celltypes, deconv_atlas, deconv_region_number, by=deconv_method)
+    summary_classification_df = pd.DataFrame(
+        columns=["chr", "start", "end", "total_reads", "assigned_reads", "cell_type_reads_counts", "cell_type_prob_em"]
+    )
+
+    args_list = [
+        (
+            filtered_regions, celltypes, input_bam, deconv_output_location, reference_genome,
+            deconv_confidence, celltypes_prior, deconv_verbose
+        )
+        for _, filtered_regions in filtered_regions_df.iterrows()
+    ]
+
+    with Pool(threads) as p:
+        summary_classification_series = list(
+            tqdm(p.imap(process_individual_region_wrapper, args_list), total=len(args_list),
+                    desc="Processing methylation informative regions", unit="region")
         )
 
-        args_list = [
-            (
-                filtered_regions, celltypes, input_bam, deconv_output_location, reference_genome,
-                deconv_confidence, celltypes_prior, deconv_verbose
-            )
-            for _, filtered_regions in filtered_regions_df.iterrows()
-        ]
+    for summary_classification in summary_classification_series:
+        summary_classification_df = pd.concat([summary_classification_df, summary_classification], ignore_index=True)
 
-        with Pool(threads) as p:
-            summary_classification_series = list(
-                tqdm(p.imap(process_individual_region_wrapper, args_list), total=len(args_list),
-                     desc="Processing methylation informative regions", unit="region")
-            )
+    summary_classification_df = summary_classification_df[
+        (summary_classification_df.max_distance <= min_hp_distance) | (summary_classification_df.max_distance.isna())
+    ]
+    summary_classification_df = summary_classification_df[
+        (summary_classification_df.assigned_reads >= read_fraction_threshold * summary_classification_df.total_reads)
+    ]
 
-        for summary_classification in summary_classification_series:
-            summary_classification_df = pd.concat([summary_classification_df, summary_classification], ignore_index=True)
+    probs_array = np.stack(summary_classification_df["cell_type_prob_em"].values)
+    nan_mask = np.isnan(probs_array).any(axis=1)
+    summary_classification_df_clean = summary_classification_df[~nan_mask].copy()
+    probs_array_clean = probs_array[~nan_mask]
+    mean_profile_clean = probs_array_clean.mean(axis=0)
+    summary_classification_df_clean["deviation_from_mean"] = np.linalg.norm(
+        probs_array_clean - mean_profile_clean, axis=1
+    )
+    threshold = summary_classification_df_clean["deviation_from_mean"].quantile(outlier_thresold)
+    summary_classification_df_filtered = summary_classification_df_clean[
+        summary_classification_df_clean["deviation_from_mean"] <= threshold
+    ].copy()
 
-        summary_classification_df = summary_classification_df[
-            (summary_classification_df.max_distance <= min_hp_distance) | (summary_classification_df.max_distance.isna())
-        ]
-        summary_classification_df = summary_classification_df[
-            (summary_classification_df.assigned_reads >= read_fraction_threshold * summary_classification_df.total_reads)
-        ]
+    summary_classification_df = summary_classification_df_filtered
+    summary_classification_df.to_csv(f"{output}/summary_classification.csv", sep="\t", index=False)
 
-        probs_array = np.stack(summary_classification_df["cell_type_prob_em"].values)
-        nan_mask = np.isnan(probs_array).any(axis=1)
-        summary_classification_df_clean = summary_classification_df[~nan_mask].copy()
-        probs_array_clean = probs_array[~nan_mask]
-        mean_profile_clean = probs_array_clean.mean(axis=0)
-        summary_classification_df_clean["deviation_from_mean"] = np.linalg.norm(
-            probs_array_clean - mean_profile_clean, axis=1
-        )
-        threshold = summary_classification_df_clean["deviation_from_mean"].quantile(outlier_thresold)
-        summary_classification_df_filtered = summary_classification_df_clean[
-            summary_classification_df_clean["deviation_from_mean"] <= threshold
-        ].copy()
+    cell_type_dicts = assign_variant_with_cell_type_names(summary_classification_df, celltypes)
+    plot_cell_type_box_distributions(cell_type_dicts, f"{output}/celltype_prediction_distributions.png")
+    logging.info(f"Cell type proportion estimation figure saved to {output}/celltype_prediction_distributions.png")
 
-        summary_classification_df = summary_classification_df_filtered
-        summary_classification_df.to_csv(f"{output}/summary_classification.csv", sep="\t", index=False)
+    sniffcell_version = version
+    sniffcell_command = " ".join(sys.argv)
 
-        cell_type_dicts = assign_variant_with_cell_type_names(summary_classification_df, celltypes)
-        plot_cell_type_box_distributions(cell_type_dicts, f"{output}/celltype_prediction_distributions.png")
-        logging.info(f"Cell type proportion estimation figure saved to {output}/celltype_prediction_distributions.png")
-
-        sniffcell_version = version
-        sniffcell_command = " ".join(sys.argv)
-
-        estimate_celltype_assignment(
-            input_vcf, sv_methylation_df, summary_classification_df, celltypes,
-            os.path.join(output, f"{os.path.basename(input_vcf).split('.')[0]}.celltype_annotated.vcf"), cmd_info=(sniffcell_version, sniffcell_command),
-            assignment_method=deconv_method
-        )
-        logging.info("VCF file annotated with cell type assignment.")
+    estimate_celltype_assignment(
+        input_vcf, sv_methylation_df, summary_classification_df, celltypes,
+        os.path.join(output, f"{os.path.basename(input_vcf).split('.')[0]}.celltype_annotated.vcf"), cmd_info=(sniffcell_version, sniffcell_command),
+        assignment_method=deconv_method
+    )
+    logging.info("VCF file annotated with cell type assignment.")

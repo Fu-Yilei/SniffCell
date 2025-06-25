@@ -20,7 +20,7 @@ def parse_args(argv):
     required_args.add_argument("-v", "--vcf", type=str, required=True, help="Input SV VCF file (supporting reads needed).")
     required_args.add_argument("-r", "--reference", type=str, required=True, help="Reference genome.")
     required_args.add_argument("-o", "--output", type=str, required=True, default=f"{os.path.abspath("./")}", help=f"Output directory. Default: {os.path.abspath('./')}")
-    required_args.add_argument("-d", "--deconv", action="store_true", help="Run deconvolution if specified.")
+    # required_args.add_argument("-d", "--deconv", action="store_true", help="Run deconvolution if specified.")
 
     optional_args = parser.add_argument_group("SniffCell deconvolution optional arguments")
     script_dir = os.path.abspath(os.path.dirname(__file__))
@@ -31,9 +31,9 @@ def parse_args(argv):
         "-c", 
         "--tissue", 
         type=str, 
-        default="brain_cereb", 
-        required="-d" in sys.argv or "--deconv" in sys.argv, 
-        help=f"Tissue type in {json_file_file_path}, need to update based on atlas. Default: brain_cereb. Required if -d is specified."
+        default="brain_cereb",  
+        required=True,
+        help=f"Tissue type in {json_file_file_path}, need to update based on atlas. Default: brain_cereb. Required."
     )
     optional_args.add_argument("-n", "--region_number", type=int, default=300, help="Number of regions to be selected, default 300.")
     optional_args.add_argument("-me", "--method", type=str, default="diff", help="Region selection method: std or diff, default diff. Diff selects the regions with certain cell type as low methylation while all other cell types have high methylation. std selects regions with highest methylation value std in all cell types.")

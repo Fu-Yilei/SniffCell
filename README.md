@@ -11,6 +11,10 @@ SniffCell is a tool designed to analyze DNA methylation changes associated with 
 
 ## Usage
 
+**SniffCell can be re-run on previous runs. It will automatically read sv-methylation correlation file (sv_methylation_df.csv) and re-estimate the cell type based on the updated proportion estimation - this part usually takes less than 10 minutes per human genome.**
+
+Example usage: `sniffcell -b BAM_FILE -v VCF_FILE -t 20 -r REFERENCE -c TISSUE_TYPE -o OUTPUT`
+
 Run SniffCell using the following command:
 
 ```bash
