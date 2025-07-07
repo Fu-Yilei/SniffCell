@@ -3,102 +3,85 @@ import pandas as pd
 import numpy as np
 from src.vcf_to_df import read_vcf_to_df
 import logging, os
+from tqdm import tqdm
+from multiprocessing import Pool, cpu_count
+from functools import partial
+
 os.environ["HTS_LOG_LEVEL"] = "error"
 
 logging.basicConfig(level=logging.INFO)
 
-def find_closest_blocks(vcf_df, deconv_df, global_proportions):
-    logging.info("Finding closest blocks...")
-    closest_blocks = []
+def find_closest_block_for_row(row, deconv_df, global_proportions):
+    chr_match = deconv_df[deconv_df["chr"] == row["chr"]].copy()  # Ensure it's a new DataFrame
+    if chr_match.empty:
+        return {
+            'chr': 'global',
+            'start': None,
+            'end': None,
+            'total_reads': None,
+            'assigned_reads': None,
+            'cell_type_reads_counts': np.zeros(len(global_proportions)),
+            'cell_type_prob_em': global_proportions,
+            'max_distance': None,
+            'deviation_from_mean': None,
+            'distance': None
+        }  # No matching chromosome
+
+    # Compute distances to the start and end of each block
+    chr_match["distance"] = chr_match.apply(lambda x: min(abs(row["location"] - x["start"]), abs(row["location"] - x["end"])), axis=1)
     
-    for _, row in vcf_df.iterrows():
-        chr_match = deconv_df[deconv_df["chr"] == row["chr"]].copy()  # Ensure it's a new DataFrame        
-        if chr_match.empty:
-            closest_blocks.append({
-                'chr': 'global',
-                'start': None,
-                'end': None,
-                'total_reads': None,
-                'assigned_reads': None,
-                'cell_type_reads_counts': np.zeros(len(global_proportions)),
-                'cell_type_prob_em': global_proportions,
-                'max_distance': None,
-                'deviation_from_mean': None,
-                'distance': None
-            })  # No matching chromosome
-            continue
+    # Find the closest row
+    closest_row = chr_match.loc[chr_match["distance"].idxmin()]
+    return closest_row.to_dict()
 
-        # Compute distances to the start and end of each block
-        chr_match["distance"] = chr_match.apply(lambda x: min(abs(row["location"] - x["start"]), abs(row["location"] - x["end"])), axis=1)
-        
-        # Find the closest row
-        closest_row = chr_match.loc[chr_match["distance"].idxmin()]
-        closest_blocks.append(closest_row.to_dict())
-
+def find_closest_blocks(vcf_df, deconv_df, global_proportions, threads=1):
+    logging.info("Finding closest blocks in parallel...")
+    # Prepare the function so Pool only needs to pass a single row
+    worker = partial(find_closest_block_for_row, deconv_df=deconv_df, global_proportions=global_proportions)
+    # Convert DataFrame rows to dictionaries so they are picklable
+    rows = [row._asdict() if hasattr(row, '_asdict') else row.to_dict() for _, row in vcf_df.iterrows()]
+    with Pool(threads) as pool:
+        closest_blocks = list(tqdm(
+            pool.imap(worker, rows),
+            desc="Finding closest blocks",
+            total=len(vcf_df)
+        ))
     logging.info("Finished finding closest blocks.")
     return closest_blocks
-
     
-def assign_variant_with_cell_type_names(df, cell_type_names, global_proportions, epsilon=1e-6):
-    logging.info("Assigning cell type names to variants...")
-    assigned_cell_types = []
-    confidence_scores = []
-    genotype_fields = []
+def _assign_variant_row(row, cell_type_names, epsilon=1e-6):
+    try:
+        cell_type_probs = row["closest_cell_type_prob_em"]
+        if not isinstance(cell_type_probs, (list, np.ndarray)):
+            return ("Unknown", 0.0, "./.")
+        if len(cell_type_probs) == 0 or np.all(cell_type_probs == 0):
+            return ("Unknown", 0.0, "./.")
+        if len(cell_type_probs) != len(cell_type_names):
+            raise ValueError(f"Mismatch: Expected {len(cell_type_names)} cell types but found {len(cell_type_probs)} proportions")
+        all_proportions = np.concatenate((cell_type_probs, np.array(cell_type_probs) / 2))
+        closest_index = np.argmin(np.abs(all_proportions - row["vaf"]))
+        closest_value = all_proportions[closest_index]
+        abs_diff = abs(row["vaf"] - closest_value)
+        confidence_score = 1 - (abs_diff / (closest_value + epsilon))
+        cell_type_index = closest_index % len(cell_type_probs)
+        is_heterozygous = closest_index >= len(cell_type_probs)
+        genotype = "0/1" if is_heterozygous else "1/1"
+        return (cell_type_names[cell_type_index], confidence_score, genotype)
+    except ValueError as e:
+        logging.error(f"ValueError: {e}")
+        raise e
+    except Exception as e:
+        logging.warning(f"Exception: {e}")
+        return ("Unknown", None, "./.")
 
-    for _, row in df.iterrows():
-        try:
-            cell_type_probs = row["closest_cell_type_prob_em"]           
-            # Check if cell_type_probs is a list or array
-            if not isinstance(cell_type_probs, (list, np.ndarray)):
-                # logging.warning(f"Invalid data type for cell_type_probs: {type(cell_type_probs)}")
-                assigned_cell_types.append("Unknown")
-                confidence_scores.append(0.0)
-                genotype_fields.append("./.")  # No valid assignment
-                continue
+def assign_variant_with_cell_type_names(df, cell_type_names, global_proportions, epsilon=1e-6, threads=1):
+    logging.info("Assigning cell type names to variants (multiprocessing)...")
+    rows = [row for _, row in df.iterrows()]
+    worker = partial(_assign_variant_row, cell_type_names=cell_type_names, epsilon=epsilon)
+    with Pool(threads) as pool:
+        results = list(tqdm(pool.imap(worker, rows), desc="Assigning cell types", total=len(rows)))
 
-            # Check if cell_type_probs is empty or all zeros
-            if len(cell_type_probs) == 0 or np.all(cell_type_probs == 0):
-                assigned_cell_types.append("Unknown")
-                confidence_scores.append(0.0)
-                genotype_fields.append("./.")  # No valid assignment
-                continue
-
-            # Ensure the number of proportions matches the number of cell types (non-zero proportions still count)
-            if len(cell_type_probs) != len(cell_type_names):
-                raise ValueError(f"Mismatch: Expected {len(cell_type_names)} cell types but found {len(cell_type_probs)} proportions")
-
-            # Generate both full and half proportions for heterozygous consideration
-            all_proportions = np.concatenate((cell_type_probs, cell_type_probs / 2))
-
-            # Find the closest value (considering full and half proportions)
-            closest_index = np.argmin(np.abs(all_proportions - row["vaf"]))
-            closest_value = all_proportions[closest_index]
-
-            # Compute confidence score: 1 - (relative error) for better scaling
-            abs_diff = abs(row["vaf"] - closest_value)
-            confidence_score = 1 - (abs_diff / (closest_value + epsilon))
-
-            # Determine whether the selected proportion was full (homozygous) or half (heterozygous)
-            cell_type_index = closest_index % len(cell_type_probs)
-            is_heterozygous = closest_index >= len(cell_type_probs)
-
-            # Assign GT field based on match
-            genotype = "0/1" if is_heterozygous else "1/1"
-
-            # Use real cell type names
-            assigned_cell_types.append(cell_type_names[cell_type_index])
-            confidence_scores.append(confidence_score)
-            genotype_fields.append(genotype)
-
-        except ValueError as e:
-            logging.error(f"ValueError: {e}")
-            raise e  # Stop execution if the number of cell types and proportions don't match
-        except Exception as e:
-            logging.warning(f"Exception: {e}")
-            assigned_cell_types.append("Unknown")  # Handle other issues gracefully
-            confidence_scores.append(None)
-            genotype_fields.append("./.")  # No valid assignment
-
+    assigned_cell_types, confidence_scores, genotype_fields = zip(*results)
     df["assigned_cell_type"] = assigned_cell_types
     df["confidence_score"] = confidence_scores
     df["GT"] = genotype_fields
@@ -151,7 +134,6 @@ def annotate_vcf_by_id_copy(vcf_path, annotated_df, output_vcf_path, cmd_info):
             new_record.info["CLOSEST_REGION"] = closest_region
         
         vcf_out.write(new_record)
-    
     vcf_in.close()
     vcf_out.close()
     logging.info(f"Annotated VCF file saved to: {output_vcf_path}")
@@ -168,15 +150,41 @@ def calculate_global_celltype_proportion(deconv_df, deconv_region_number, cell_t
     return cell_type_proportions
 
 
-def estimate_celltype_assignment(vcf_file, sv_methylation_df, deconv_df, cell_type_list, output_vcf, cmd_info, assignment_method="std"):
+def estimate_celltype_assignment(vcf_file, sv_methylation_df, deconv_df, cell_type_list, output_vcf, cmd_info, threads, assignment_method="std"):
     logging.info("Starting cell type assignment estimation...")
     global_proportions = calculate_global_celltype_proportion(deconv_df, len(deconv_df), cell_type_list, assignment_method)
-    closest_blocks = find_closest_blocks(sv_methylation_df, deconv_df, global_proportions=global_proportions)
+    logging.info("Calculating global cell type proportions: %s", global_proportions)
+    closest_blocks = find_closest_blocks(sv_methylation_df, deconv_df, global_proportions=global_proportions, threads=threads )
     closest_blocks = [block if block is not None else {} for block in closest_blocks]
     closest_df = pd.DataFrame(closest_blocks)
     closest_df = closest_df.add_prefix("closest_")
     merged_df = pd.concat([sv_methylation_df, closest_df], axis=1)
-    updated_df = assign_variant_with_cell_type_names(merged_df, cell_type_list, global_proportions=global_proportions, epsilon=1e-6)
+    updated_df = assign_variant_with_cell_type_names(merged_df, cell_type_list, global_proportions=global_proportions, epsilon=1e-6, threads=threads)
     updated_df.to_csv(os.path.join(os.path.dirname(output_vcf), "sv_methylation_celltype_estimation.csv"))
     annotate_vcf_by_id_copy(vcf_file, updated_df, output_vcf, cmd_info)
     logging.info("Finished cell type assignment estimation.")
+
+
+def estimate_celltype_assignment_snp(vcf_file, snp_df, deconv_df, cell_type_list, output_vcf, cmd_info, threads, assignment_method="std"):
+    logging.info("Starting cell type assignment estimation...")
+    global_proportions = calculate_global_celltype_proportion(deconv_df, len(deconv_df), cell_type_list, assignment_method)
+    logging.info("Calculating global cell type proportions: %s", global_proportions)
+    # For SNPs, always use global proportions (do not use region-specific proportions)
+    closest_blocks = [{"chr": "global",
+                       "start": None,
+                       "end": None,
+                       "total_reads": None,
+                       "assigned_reads": None,
+                       "cell_type_reads_counts": np.zeros(len(global_proportions)),
+                       "cell_type_prob_em": global_proportions,
+                       "max_distance": None,
+                       "deviation_from_mean": None,
+                       "distance": None
+                      } for _ in range(len(snp_df))]
+    closest_blocks = [block if block is not None else {} for block in closest_blocks]
+    closest_df = pd.DataFrame(closest_blocks)
+    closest_df = closest_df.add_prefix("closest_")
+    merged_df = pd.concat([snp_df, closest_df], axis=1)
+    updated_df = assign_variant_with_cell_type_names(merged_df, cell_type_list, global_proportions=global_proportions, epsilon=1e-6, threads=threads)
+    updated_df.to_csv(os.path.join(os.path.dirname(output_vcf), "snp_methylation_celltype_estimation.csv"))
+    return updated_df

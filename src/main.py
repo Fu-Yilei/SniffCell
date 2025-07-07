@@ -96,50 +96,29 @@ def main(argv):
     input_bam, input_vcf, reference_genome, output = args.bam, args.vcf, args.reference, args.output
     threads, output_bam, smoothing = args.threads, args.output_bam or False, args.smoothing
     sv_discovery_interval, region_decide_threshold = args.interval, args.threshold
-    benchmark_second_bam, min_supporting_reads = args.second_bam, args.min_supporting
-    test_function, primary_only, outlier_thresold = args.test_function, args.primary_only, args.outlier_thresold
-
+    min_supporting_reads = args.min_supporting
+    test_function, primary_only, outlier_thresold = args.test_function, args.primary_only, args.outlier_threshold
+    sniffcell_version = version
+    sniffcell_command = " ".join(sys.argv)
     os.makedirs(output, exist_ok=True)
-
-    if benchmark_second_bam:
-        benchmark_file = os.path.join(output, "benchmarking_sv_df.csv")
-        if os.path.exists(benchmark_file):
-            print("Benchmarking results already exist. Skipping benchmarking.")
-        else:
-            benchmarking_sv_df = calc_methylation_diff_regions.calculate_methylation_diff_region_benchmark(
-                input_bam, input_vcf, reference_genome, output, sv_discovery_interval, benchmark_second_bam,
-                min_supporting_reads, test_function, smoothing, threads, output_bam
-            )
-            benchmarking_sv_df.to_csv(benchmark_file)
-    else:
-        sv_file = os.path.join(output, "sv_methylation_df.csv")
-        if os.path.exists(sv_file):
-            logging.info("SV methylation data already exists. Skipping calculation.")
-            sv_methylation_df = pd.read_csv(sv_file)
-        else:
-            sv_methylation_df = calc_methylation_diff_regions.calculate_methylation_diff_region_bam(
-                sv_vcf=input_vcf, input_bam=input_bam, reference_genome=reference_genome, output_bam_folder=output,
-                smoothing=smoothing, output_bam=output_bam, min_supporting_read_num=min_supporting_reads,
-                sv_discovery_range=sv_discovery_interval, test_function=test_function, threads=threads
-            )
-            sv_methylation_df.to_csv(sv_file)
-
+    
+    '''
+        deconvolution module
+        This module is used to deconvolute the cell type-specific methylation information from the
+        input BAM file and the cell type atlas.
+    '''
     deconv_output_location = os.path.join(output, "deconv_bam_output")
     os.makedirs(deconv_output_location, exist_ok=True)
-
     deconv_atlas, deconv_tissue = os.path.abspath(args.atlas), args.tissue
     deconv_region_number, deconv_method = args.region_number, args.method
     deconv_confidence, deconv_verbose = args.confidence, args.verbose
     min_hp_distance, read_fraction_threshold = args.hp_distance, args.assigned_read_fraction
-
     with open(os.path.join(os.path.dirname(deconv_atlas), "tissue_celltypes.json"), "r", encoding="utf-8") as f:
         celltype_dict = json.load(f)
     celltypes = celltype_dict[deconv_tissue]["cell_type"]
-
     celltypes_prior = None
     if args.wgbs_tools_uxm:
         from src.wgbs_uxm import run_wgbstools, run_uxm, get_uxm_prior
-
         run_wgbstools(args.wgbs_path, input_bam, output, args.uxm_atlas, threads)
         uxm_output = run_uxm(args.uxm_path, output, threads, args.uxm_atlas)
         with open(os.path.join(os.path.dirname(deconv_atlas), "column_mapping.json"), "r", encoding="utf-8") as f:
@@ -147,12 +126,10 @@ def main(argv):
         celltypes_prior = get_uxm_prior(uxm_output, column_mapping, selected_cell_types=celltypes)
     else:
         celltypes_prior = celltype_dict[deconv_tissue].get("prior", None)
-
     filtered_regions_df = filter_cell_type_regions(celltypes, deconv_atlas, deconv_region_number, by=deconv_method)
     summary_classification_df = pd.DataFrame(
         columns=["chr", "start", "end", "total_reads", "assigned_reads", "cell_type_reads_counts", "cell_type_prob_em"]
     )
-
     args_list = [
         (
             filtered_regions, celltypes, input_bam, deconv_output_location, reference_genome,
@@ -164,19 +141,19 @@ def main(argv):
     with Pool(threads) as p:
         summary_classification_series = list(
             tqdm(p.imap(process_individual_region_wrapper, args_list), total=len(args_list),
-                    desc="Processing methylation informative regions", unit="region")
+                    desc="Processing cell type differentially methylated regions", unit="region")
         )
 
     for summary_classification in summary_classification_series:
         summary_classification_df = pd.concat([summary_classification_df, summary_classification], ignore_index=True)
-
     summary_classification_df = summary_classification_df[
         (summary_classification_df.max_distance <= min_hp_distance) | (summary_classification_df.max_distance.isna())
     ]
+    logging.info("Filtered regions based on max distance between two haplotypes: %d regions remaining", summary_classification_df.shape[0])
     summary_classification_df = summary_classification_df[
         (summary_classification_df.assigned_reads >= read_fraction_threshold * summary_classification_df.total_reads)
     ]
-
+    logging.info("Filtered regions based on assigned reads fraction: %d regions remaining", summary_classification_df.shape[0])
     probs_array = np.stack(summary_classification_df["cell_type_prob_em"].values)
     nan_mask = np.isnan(probs_array).any(axis=1)
     summary_classification_df_clean = summary_classification_df[~nan_mask].copy()
@@ -195,14 +172,50 @@ def main(argv):
 
     cell_type_dicts = assign_variant_with_cell_type_names(summary_classification_df, celltypes)
     plot_cell_type_box_distributions(cell_type_dicts, f"{output}/celltype_prediction_distributions.png")
-    logging.info(f"Cell type proportion estimation figure saved to {output}/celltype_prediction_distributions.png")
+    logging.info("Cell type proportion estimation figure saved to %s/celltype_prediction_distributions.png", output)
+    
+    # Variant assignment module
 
-    sniffcell_version = version
-    sniffcell_command = " ".join(sys.argv)
+    if args.snp:
+        from src.vcf_to_df import read_snp_vcf_to_df
+        from src.deconv_estimate import estimate_celltype_assignment_snp
+        from src.snp_post_filtering import filter_snp_df, get_snp_supporting_read_ids_parallel
+        snp_confidence = args.confidence_snp
+        snp_file = os.path.join(output, "snp_methylation_df.csv")
+        if os.path.exists(snp_file):
+            logging.info("SNP methylation data already exists. Skipping calculation.")
+            snp_df = pd.read_csv(snp_file)
+        else:
+            logging.info("Reading SNP VCF file from %s", input_vcf)
+            snp_df = read_snp_vcf_to_df(pysam.VariantFile(input_vcf))
+            snp_df.to_csv(snp_file, index=False)
+        cmd_info = (sniffcell_version, sniffcell_command)
+        celltype_snp_df = estimate_celltype_assignment_snp(input_vcf, snp_df, summary_classification_df, celltypes, os.path.join(output, f"{os.path.basename(input_vcf).split('.')[0]}.celltype_annotated.vcf"), cmd_info=cmd_info, threads=threads, assignment_method=deconv_method)
+        snp_df_filtered = filter_snp_df(celltype_snp_df, snp_confidence)
+        snp_df_filtered.to_csv(os.path.join(output, "snp_methylation_filtered.csv"), index=False)
+        logging.info("Filtered SNP DataFrame based on minimum confidence: %d rows remaining", snp_df_filtered.shape[0])
+        logging.info("SNP DataFrame saved to %s/snp_methylation_filtered.csv", output)
+        logging.info("Finding supporting reads for SNPs...")
+        snp_supporting_reads_df = get_snp_supporting_read_ids_parallel(snp_df_filtered, input_bam, threads)
+        snp_supporting_reads_df.to_csv(os.path.join(output, "snp_with_supporting_reads.csv"), index=False)
+        logging.info("SNP supporting reads DataFrame saved to %s/snp_with_supporting_reads.csv", output)
 
-    estimate_celltype_assignment(
-        input_vcf, sv_methylation_df, summary_classification_df, celltypes,
-        os.path.join(output, f"{os.path.basename(input_vcf).split('.')[0]}.celltype_annotated.vcf"), cmd_info=(sniffcell_version, sniffcell_command),
-        assignment_method=deconv_method
-    )
+    else:
+        sv_file = os.path.join(output, "sv_methylation_df.csv")
+        if os.path.exists(sv_file):
+            logging.info("SV methylation data already exists. Skipping calculation.")
+            sv_methylation_df = pd.read_csv(sv_file)
+        else:
+            sv_methylation_df = calc_methylation_diff_regions.calculate_methylation_diff_region_bam(
+                sv_vcf=input_vcf, input_bam=input_bam, reference_genome=reference_genome, output_bam_folder=output,
+                smoothing=smoothing, output_bam=output_bam, min_supporting_read_num=min_supporting_reads,
+                sv_discovery_range=sv_discovery_interval, test_function=test_function, threads=threads
+            )
+            sv_methylation_df.to_csv(sv_file)
+        estimate_celltype_assignment(
+            input_vcf, sv_methylation_df, summary_classification_df, celltypes,
+            os.path.join(output, f"{os.path.basename(input_vcf).split('.')[0]}.celltype_annotated.vcf"), cmd_info=(sniffcell_version, sniffcell_command),
+            threads=threads,
+            assignment_method=deconv_method
+        )
     logging.info("VCF file annotated with cell type assignment.")
