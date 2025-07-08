@@ -6,8 +6,7 @@
   },
   "brain_cortex": {
     "name": "brain_cortex",
-    "cell_type": ["neuron", "oligodendrocyte", "endothelial_cell", "monocyte"],
-    "prior": [0.25, 0.25, 0.25, 0.25]
+    "cell_type": ["neuron", "oligodendrocyte", "endothelial_cell", "monocyte"]
   },
   "whole_blood": {
     "name": "whole_blood",

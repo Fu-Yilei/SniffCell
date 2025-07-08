@@ -146,14 +146,53 @@ def main(argv):
 
     for summary_classification in summary_classification_series:
         summary_classification_df = pd.concat([summary_classification_df, summary_classification], ignore_index=True)
-    summary_classification_df = summary_classification_df[
-        (summary_classification_df.max_distance <= min_hp_distance) | (summary_classification_df.max_distance.isna())
-    ]
-    logging.info("Filtered regions based on max distance between two haplotypes: %d regions remaining", summary_classification_df.shape[0])
-    summary_classification_df = summary_classification_df[
-        (summary_classification_df.assigned_reads >= read_fraction_threshold * summary_classification_df.total_reads)
-    ]
-    logging.info("Filtered regions based on assigned reads fraction: %d regions remaining", summary_classification_df.shape[0])
+
+    if deconv_method == "std":
+        summary_classification_df = summary_classification_df[
+            (summary_classification_df.max_distance <= min_hp_distance) | (summary_classification_df.max_distance.isna())
+        ]
+        logging.info("Filtered regions based on max distance between two haplotypes: %d regions remaining", summary_classification_df.shape[0])
+        summary_classification_df = summary_classification_df[
+            (summary_classification_df.assigned_reads >= read_fraction_threshold * summary_classification_df.total_reads)
+        ]
+        logging.info("Filtered regions based on assigned reads fraction: %d regions remaining", summary_classification_df.shape[0])
+    elif deconv_method == "diff":
+        # print(len(summary_classification_df))
+        for cell_type in celltypes:
+            # Identify trusted regions for this cell type
+            atlas_cell_types = filtered_regions_df[celltypes]
+            mean_others = atlas_cell_types.drop(columns=[cell_type]).mean(axis=1)
+            diff = abs(atlas_cell_types[cell_type] - mean_others)
+            top_n = deconv_region_number // len(celltypes)
+        # Compute global means for each cell type from their trusted regions
+
+        global_means = {}
+        trusted_celltype_indices = {}
+        for idx, cell_type in enumerate(celltypes):
+            indices = list(range(top_n * idx, top_n * (idx + 1)))
+            trusted_celltype_indices[cell_type] = set(indices)
+            # For each trusted region, take the value at the corresponding cell type index
+            global_means[cell_type] = summary_classification_df.loc[indices]["cell_type_prob_em"].apply(
+            lambda x: x[idx] if isinstance(x, (np.ndarray, list, pd.Series)) else np.nan
+            ).mean()
+
+        # For each region, fill the non-trusted cell type proportions with global means
+        def fill_proportions(row):
+            cell_type_probs = np.array(row["cell_type_prob_em"], dtype=float)
+            # Determine which cell type (if any) this region is trusted for
+            trusted_for = None
+            for idx, cell_type in enumerate(celltypes):
+                if row.name in trusted_celltype_indices.get(cell_type, set()):
+                    trusted_for = idx
+                    break
+            if trusted_for is not None:
+                for idx, cell_type in enumerate(celltypes):
+                    if idx != trusted_for:
+                        cell_type_probs[idx] = global_means[cell_type]
+            return cell_type_probs
+        summary_classification_df["cell_type_prob_em"] = summary_classification_df.apply(fill_proportions, axis=1)
+        logging.info("Filtered regions based on max diff catalog selection method: %d regions remaining", summary_classification_df.shape[0])
+
     probs_array = np.stack(summary_classification_df["cell_type_prob_em"].values)
     nan_mask = np.isnan(probs_array).any(axis=1)
     summary_classification_df_clean = summary_classification_df[~nan_mask].copy()

@@ -34,7 +34,7 @@ def parse_args(argv):
         help=f"Tissue type in {json_file_file_path}, need to update based on atlas. Required."
     )
     optional_args.add_argument("-n", "--region_number", type=int, default=300, help="Number of regions to be selected, default 300.")
-    optional_args.add_argument("-me", "--method", type=str, default="diff", help="Region selection method: std or diff, default diff. Diff selects the regions with certain cell type as low methylation while all other cell types have high methylation. std selects regions with highest methylation value std in all cell types.")
+    optional_args.add_argument("-me", "--method", type=str, default="std", help="Region selection method: std or diff, default std. Diff selects the regions with certain cell type as low methylation while all other cell types have high methylation. std selects regions with highest methylation value std in all cell types.")
     optional_args.add_argument("-vb", "--verbose", action="store_true", help="Enable verbose mode.")
     optional_args.add_argument("-ot", "--outlier_threshold", type=float, default=0.8, help="deviation threshold for filtering out wrongly deconvoluted regions. Default 0.8.")
     optional_args.add_argument("-confem", "--confidence", type=float, default=0.9, help="Minimum confidence threshold for EM algorithm. Default 0.9.")
