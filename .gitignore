@@ -16,3 +16,8 @@ dataset/
 sniffmeth_deconv_output/
 notebooks/
 .vscode/
+
+src/archived_src/*
+test/
+
+atlas/

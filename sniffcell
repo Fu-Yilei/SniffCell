@@ -1,5 +1,4 @@
 #!/usr/bin/env python
-import src.parse_args
 import sys, os
 import src.main
 
