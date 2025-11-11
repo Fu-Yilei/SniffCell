@@ -33,7 +33,7 @@ def kmeans_cluster_cells(
         X_scaled = X_imputed.values
 
     # Run KMeans
-    km = KMeans(n_clusters=n_clusters, n_init=10, random_state=random_state)
+    km = KMeans(n_clusters=n_clusters, n_init=20, random_state=random_state)
     labels = km.fit_predict(X_scaled)
 
     data["cluster"] = labels  # keep numeric for debugging

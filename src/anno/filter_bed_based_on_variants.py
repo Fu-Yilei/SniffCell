@@ -50,13 +50,7 @@ def filter_bed_based_on_variants(bed_df: pd.DataFrame, sv_df: pd.DataFrame, wind
         ends_sorted = np.sort(ends, kind='mergesort')
         sv_idx[chrom] = (starts, ends, ends_sorted)
 
-    # 6) Overlap test for half-open intervals with window:
-    #    BED_win = [bed_start - w, bed_end + w)
-    #    overlap if: sv_start < BED_win_end   AND   sv_end > BED_win_start
-    #    Counts via searchsorted:
-    #       n_sv_with_start_lt_end = searchsorted(starts, BED_win_end, side='left')
-    #       n_sv_with_end_le_start = searchsorted(ends_sorted, BED_win_start, side='right')
-    #       overlaps_exist if (n_start_lt_end - n_end_le_start) > 0
+
     for chrom, bdf in bed.groupby('chr', sort=False, observed=False):
         if chrom not in sv_idx:
             continue

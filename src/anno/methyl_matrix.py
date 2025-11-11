@@ -46,6 +46,7 @@ def methyl_matrix_from_bam(
             if not mb:
                 continue
             refpos = r.get_reference_positions(full_length=True)
+            
             if refpos is None:
                 continue
 
@@ -61,7 +62,10 @@ def methyl_matrix_from_bam(
                 for qpos, score in mods:
                     if 0 <= qpos < len(refpos):
                         p = refpos[qpos]
-                        j = col_index.get(p) if p is not None else None
+                        if p is None:
+                            continue
+                        p_c = p - 1 if r.is_reverse else p
+                        j = col_index.get(p_c)
                         if j is not None:
                             data_i.append(rid)
                             data_j.append(j)

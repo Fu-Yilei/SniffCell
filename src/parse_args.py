@@ -58,9 +58,8 @@ def parse_args(argv):
     anno_parser.add_argument("-w", "--window", type=int, default=5000, help="Window size for filtering BED based on variants, default=5000")
     
     svanno_parser = subparsers.add_parser("svanno", help="Use pre-annotated reads csv to annotate variants' cell types")
-    svanno_parser.add_argument("-i", "--input", required=True, help="Input read.tsv file")
     svanno_parser.add_argument("-v", "--vcf", required=True, help="Input VCF file for variant annotation")
-    svanno_parser.add_argument("-o", "--output", required=True, help="Output folder")
+    svanno_parser.add_argument("-o", "--output", required=True, help="Output folder from anno step")
 
     dmsv_parser = subparsers.add_parser("dmsv", help="Find out which SV's supporting reads have differential methylation compared to non-supporting reads.")
     dmsv_parser.add_argument("-i", "--input", required=True, help="Input BAM file")

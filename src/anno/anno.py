@@ -61,7 +61,7 @@ def _one_dmr(args):
             "mean_rest_value": row.get("mean_rest_value", np.nan),
         }
         out = kmeans_cluster_cells(mm, dmr_row=dmr_row)
-
+        
         # CpG bounds from cpgs
         cpgstart = int(cpgs[0])
         cpgend   = int(cpgs[-1])
@@ -76,11 +76,6 @@ def _one_dmr(args):
         # target mask from your output column
         mask_target = (out["celltype_or_other"].astype(str).str.lower()
                        == best_group.strip().lower()).values
-        # n_tgt = int(mask_target.sum())
-        # n_oth = int((~mask_target).sum())
-        # # logger.info(f"[{chrom}:{start}-{end}] reads={len(mm)} CpGs={n_cpgs} "
-        # #             f"target_reads={n_tgt} other_reads={n_oth}")
-
         # build variable-length code strings
         pos = {ct: i for i, ct in enumerate(cell_types)}
         t_idx = pos[best_group]
@@ -127,7 +122,7 @@ def _one_dmr(args):
 def sv_anno(args):
     logger = logging.getLogger("anno.sv_anno")
     logger.info("Starting SV annotation from pre-annotated reads")
-    input_file = args.input
+    input_file = args.output + "/reads_classification.tsv"
     sv_assignment_df = assign_sv_celltypes(read_vcf_to_df(args.vcf), pd.read_csv(input_file, sep="\t", index_col=0))
     sv_assignment_df.to_csv(os.path.join(args.output, "sv_assignment.tsv"), sep="\t", index=False)
 
