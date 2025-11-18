@@ -8,16 +8,18 @@ from src.dmsv import dmsv
 
 def main(argv):
     args = parse_args(argv)
-    os.makedirs(args.output, exist_ok=True)
     if args.command == "find":
         find.find_main(args)
     elif args.command == "anno":
+        os.makedirs(args.output, exist_ok=True)
         anno.anno_main(args)
     elif args.command == "svanno":
+        os.makedirs(args.output, exist_ok=True)
         anno.sv_anno(args)
     elif args.command == "deconv":
         deconv.deconv_main(args)
     elif args.command == "dmsv":
+        os.makedirs(args.output, exist_ok=True)
         dmsv.dmsv_main(args)
     return 0
 
