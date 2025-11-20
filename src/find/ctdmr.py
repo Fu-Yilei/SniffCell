@@ -179,20 +179,38 @@ def call_ct_specific_dmrs(
             mean_best_value, mean_rest_value,
             *per_group_means
         ])
-
+        
     dmr_df = pd.DataFrame(out_rows, columns=cols)
     dmr_df.sort_values(["chr","start","end","best_group"], inplace=True, ignore_index=True)
 
-    # Write with header line
-    with open(bed_out, "w") as f:
-        f.write("#" + "\t".join(cols) + "\n")
-    dmr_df.to_csv(bed_out, sep="\t", header=False, index=False, mode="a")
+    # Optional: save full table with all columns for downstream analysis
+    full_tsv = bed_out + ".full.tsv"
+    dmr_df.to_csv(full_tsv, sep="\t", index=False)
 
+    # ---- IGV-friendly BED9 output ----
+    bed9 = dmr_df.copy()
+    bed9["thickStart"] = bed9["start"]
+    bed9["thickEnd"] = bed9["end"]
+    bed9["itemRgb"] = 0  # or "0,0,0" if you want explicit RGB
+
+    igv_cols = [
+        "chr", "start", "end",
+        "name", "score", "strand",
+        "thickStart", "thickEnd", "itemRgb",
+    ]
+
+    with open(bed_out, "w") as f:
+        # optional comment header
+        f.write("#" + "\t".join(igv_cols) + "\n")
+    bed9[igv_cols].to_csv(bed_out, sep="\t", header=False, index=False, mode="a")
+
+    # Per-group IGV BEDs
     if per_group_bed_prefix:
         for g in groups:
-            sub = dmr_df[dmr_df["best_group"] == g]
-            with open(f"{per_group_bed_prefix}.{g}.bed", "w") as f:
-                f.write("#" + "\t".join(cols) + "\n")
-            sub.to_csv(f"{per_group_bed_prefix}.{g}.bed", sep="\t", header=False, index=False, mode="a")
+            sub = bed9[bed9["best_group"] == g]
+            out_path = f"{per_group_bed_prefix}.{g}.bed"
+            with open(out_path, "w") as f:
+                f.write("#" + "\t".join(igv_cols) + "\n")
+            sub[igv_cols].to_csv(out_path, sep="\t", header=False, index=False, mode="a")
 
     return dmr_df

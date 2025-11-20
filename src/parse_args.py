@@ -25,13 +25,14 @@ def parse_args(argv):
     default_index = os.path.join(atlas_dir, "all_celltypes_blocks.index.gz")
     default_meta  = os.path.join(atlas_dir, "all_celltypes.txt")
 
+
+    find_parser.add_argument("-n", "--npy", default=default_npy, help=f"Input .npy matrix for finding cell type DMRs, default={default_npy}")
+    find_parser.add_argument("-i", "--index", default=default_index, help=f"Index for CpGs in the npy matrix, default={default_index}")
+    find_parser.add_argument("-cf", "--celltypes_file", default=default_ct, help=f"Cell type json files mapped to the major cell types, default={default_ct}")
+    find_parser.add_argument("-m", "--meta", default=default_meta, help=f"Metadata file for cell types in the npy matrix, default={default_meta}")
     find_parser.add_argument("-ck", "--celltypes_keys", required=True, help="keys for major cell types in the cell type json file")
     find_parser.add_argument("-o", "--output", required=True, help="Output BED files for cell type DMRs")
 
-    find_parser.add_argument("-n", "--npy", default=default_npy, help=f"Input .npy matrix for finding cell type DMRs, default={default_npy}")
-    find_parser.add_argument("-cf", "--celltypes_file", default=default_ct, help=f"Cell type json files mapped to the major cell types, default={default_ct}")
-    find_parser.add_argument("-i", "--index", default=default_index, help=f"Index for CpGs in the npy matrix, default={default_index}")
-    find_parser.add_argument("-m", "--meta", default=default_meta, help=f"Metadata file for cell types in the npy matrix, default={default_meta}")
     find_parser.add_argument( "--diff_threshold", type=float, default=0.40, help="Minimum difference threshold for calling DMRs, default=0.40" )
     find_parser.add_argument( "--min_rows", type=int, default=2, help="Minimum number of rows (CpG groups in index) for calling DMRs, default=2")
     find_parser.add_argument( "--min_cpgs", type=int, default=3, help="Minimum number of CpGs for calling DMRs, default=3" )

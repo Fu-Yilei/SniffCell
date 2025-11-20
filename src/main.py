@@ -8,7 +8,7 @@ from src.dmsv import dmsv
 
 def main(argv):
     args = parse_args(argv)
-    os.makedirs(args.output, exist_ok=True)
+    # os.makedirs(args.output, exist_ok=True)
     if args.command == "find":
         find.find_main(args)
     elif args.command == "anno":
