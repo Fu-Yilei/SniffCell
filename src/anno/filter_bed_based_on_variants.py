@@ -58,13 +58,28 @@ def filter_bed_based_on_variants(bed_df: pd.DataFrame, sv_df: pd.DataFrame, wind
         if starts.size == 0:
             continue
 
-        bed_starts = (bdf['start'].to_numpy(np.int64) - window)
-        bed_ends   = (bdf['end'].to_numpy(np.int64)   + window)
+        # Core (original) BED interval
+        core_start = bdf['start'].to_numpy(np.int64)
+        core_end   = bdf['end'].to_numpy(np.int64)
 
-        n_start_lt_end = np.searchsorted(starts,      bed_ends,   side='left')
-        n_end_le_start = np.searchsorted(ends_sorted, bed_starts, side='right')
+        # Padded interval
+        bed_starts = core_start - window
+        bed_ends   = core_end   + window
 
-        overlaps = (n_start_lt_end - n_end_le_start) > 0
-        out_mask[bdf.index] = overlaps
+        # ---------- 1) Overlap with *padded* interval (half-open, as before) ----------
+        n_start_lt_end_pad = np.searchsorted(starts,      bed_ends,   side='left')
+        n_end_le_start_pad = np.searchsorted(ends_sorted, bed_starts, side='right')
+        overlap_padded = (n_start_lt_end_pad - n_end_le_start_pad) > 0
+
+        # ---------- 2) Overlap with *core* interval (treat breakpoint as overlap) ------
+        # Closed-interval style: sv_start <= core_end AND sv_end >= core_start
+        n_start_le_end_core = np.searchsorted(starts,      core_end,   side='right')
+        n_end_lt_start_core = np.searchsorted(ends_sorted, core_start, side='left')
+        overlap_core = (n_start_le_end_core - n_end_lt_start_core) > 0
+
+        # ---------- 3) We want SV in padding, but NOT in core --------------------------
+        keep = overlap_padded & (~overlap_core)
+        out_mask[bdf.index] = keep
+
 
     return bed_df.loc[out_mask]

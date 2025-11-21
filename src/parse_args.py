@@ -55,12 +55,15 @@ def parse_args(argv):
     anno_parser.add_argument("-r", "--reference", required=True, help="Reference FASTA file")
     anno_parser.add_argument("-b", "--bed", required=True, help="Input BED file with DMR indications")
     anno_parser.add_argument("-o", "--output", required=True, help="Output folder")
+    anno_parser.add_argument( "-krn", "--kanpig_read_names", type=str, default=None, help="Read names TSV from kanpig output, will use Sniffles read names if not sepecified." )
     anno_parser.add_argument("-t", "--threads", type=int, default=1, help="Number of threads to use, default=1")
     anno_parser.add_argument("-w", "--window", type=int, default=5000, help="Window size for filtering BED based on variants, default=5000")
     
     svanno_parser = subparsers.add_parser("svanno", help="Use pre-annotated reads csv to annotate variants' cell types")
     svanno_parser.add_argument("-v", "--vcf", required=True, help="Input VCF file for variant annotation")
-    svanno_parser.add_argument("-o", "--output", required=True, help="Output folder from anno step")
+    svanno_parser.add_argument("-i", "--input", required=True, help="Input reads_classification.tsv file from anno step")
+    svanno_parser.add_argument( "-krn", "--kanpig_read_names", type=str, default=None, help="Read names TSV from kanpig output, will use Sniffles read names if not sepecified." )
+    svanno_parser.add_argument("-o", "--output", required=True, help="Output sv_assignment.tsv file")
 
     dmsv_parser = subparsers.add_parser("dmsv", help="Find out which SV's supporting reads have differential methylation compared to non-supporting reads.")
     dmsv_parser.add_argument("-i", "--input", required=True, help="Input BAM file")

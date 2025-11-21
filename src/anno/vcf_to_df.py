@@ -4,7 +4,7 @@ import numpy as np
 import pysam
 
 
-def read_vcf_to_df(vcf_file):
+def read_vcf_to_df(vcf_file, kanpig_read_names=None):
     """_summary_
 
     Args:
@@ -39,5 +39,18 @@ def read_vcf_to_df(vcf_file):
 
             df_record.update({"ref_start": int(ref_start), "ref_end": int(ref_end)})
             records.append(df_record)
+    if kanpig_read_names is not None:
+        kanpig_df = pd.read_csv(kanpig_read_names, sep="\t", header=None, names=["sv_id", "read_name"])
+        sv_to_reads = (
+            kanpig_df.groupby("sv_id")["read_name"]
+            .apply(list)
+            .to_dict()
+        )
+        for record in records:
+            sv_id = record["id"]
+            if sv_id in sv_to_reads:
+                record["supporting_reads"] = sv_to_reads[sv_id]
+            else:
+                record["supporting_reads"] = []
     sv_df = pd.DataFrame(records, columns=["chr", "location", "id", "sv_len", "supporting_reads", "stdev_len", "stdev_pos", "ref_start", "ref_end", 'vaf'])
     return sv_df

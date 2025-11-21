@@ -122,8 +122,12 @@ def _one_dmr(args):
 def sv_anno(args):
     logger = logging.getLogger("anno.sv_anno")
     logger.info("Starting SV annotation from pre-annotated reads")
-    input_file = args.output + "/reads_classification.tsv"
-    sv_assignment_df = assign_sv_celltypes(read_vcf_to_df(args.vcf), pd.read_csv(input_file, sep="\t", index_col=0))
+    input_file = args.input
+    if args.kanpig_read_names is not None:
+        logger.info(f"Using kanpig read names from: {args.kanpig_read_names}")
+    else:
+        logger.info("No kanpig read names provided; using Sniffles read names from VCF")
+    sv_assignment_df = assign_sv_celltypes(read_vcf_to_df(args.vcf, kanpig_read_names=args.kanpig_read_names), pd.read_csv(input_file, sep="\t", index_col=0))
     sv_assignment_df.to_csv(os.path.join(args.output, "sv_assignment.tsv"), sep="\t", index=False)
 
 
