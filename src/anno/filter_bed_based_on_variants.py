@@ -3,7 +3,7 @@ import pandas as pd
 
 def filter_bed_based_on_variants(bed_df: pd.DataFrame, sv_df: pd.DataFrame, window: int = 5000) -> pd.DataFrame:
     # 1) Normalize column names
-    bed = bed_df.rename(columns={'#chr': 'chr'}).copy()
+    bed = bed_df.copy() 
     sv  = sv_df.rename(columns={'chr': 'chr'}).copy()
     if 'supporting_reads' not in sv.columns:
         exit("VCF DataFrame missing 'supporting_reads' column required for SV assignment.")

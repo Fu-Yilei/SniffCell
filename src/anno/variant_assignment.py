@@ -58,7 +58,7 @@ def assign_sv_celltypes(
     if "code" not in assignment.columns:
         raise ValueError("read_assignment_df must contain a 'code' column")
     assignment["code"] = assignment["code"].astype("string")
-    for col in ("#chr", "start", "end"):
+    for col in ("chr", "start", "end"):
         if col not in assignment.columns:
             assignment[col] = pd.NA
 
@@ -76,7 +76,7 @@ def assign_sv_celltypes(
           .apply(lambda s: int(s.apply(_len_support).sum()))
           .rename("n_supporting")
     )
-
+    # print(sv)
     # explode to (sv_id, read)
     exploded = sv.assign(
         read=sv[reads_col].apply(
@@ -113,17 +113,16 @@ def assign_sv_celltypes(
         ]
 
     exploded["read"] = exploded["read"].astype(str)
-    merged = exploded.join(assignment[["code", "#chr", "start", "end"]], on="read", how="left")
+    merged = exploded.join(assignment[["code", "chr", "start", "end"]], on="read", how="left")
 
     if unique_reads_for_overlap:
         merged = merged.drop_duplicates([sv_id_col, "read"])
 
     overlapped = merged[merged["code"].notna()].copy()
     n_overlapped = overlapped.groupby(sv_id_col, sort=False).size().rename("n_overlapped")
-
     # ---- code counts & majority ----
     if overlapped.empty:
-        code_counts_str = pd.Series(dtype="string")
+        code_counts_str = pd.Series(dtype="string", name="code_counts")
         majority = pd.DataFrame(columns=["majority_code","majority_count"]).astype(
             {"majority_code":"string","majority_count":"int64"}
         )
@@ -139,21 +138,21 @@ def assign_sv_celltypes(
               .groupby(sv_id_col, sort=False)["pair"].agg(";".join)
               .rename("code_counts").astype("string")
         )
+        # print(cc)
         majority = (
             cc.drop_duplicates(subset=[sv_id_col], keep="first")
               .set_index(sv_id_col)
               .rename(columns={"code":"majority_code","count":"majority_count"})
         )
         majority["majority_code"] = majority["majority_code"].astype("string")
-
     # ---- CpG coords (mode) ----
     coord_df = (
-        merged[[sv_id_col, "#chr", "start", "end"]]
+        merged[[sv_id_col, "chr", "start", "end"]]
         .assign(
             start=pd.to_numeric(merged["start"], errors="coerce"),
             end=pd.to_numeric(merged["end"], errors="coerce"),
         )
-        .dropna(subset=["#chr", "start", "end"])
+        .dropna(subset=["chr", "start", "end"])
     )
 
     if coord_df.empty:
@@ -163,17 +162,17 @@ def assign_sv_celltypes(
     else:
         coord_counts = (
             coord_df
-            .groupby([sv_id_col, "#chr", "start", "end"], sort=False)
+            .groupby([sv_id_col, "chr", "start", "end"], sort=False)
             .size()
             .rename("cnt")
             .reset_index()
-            .sort_values(["cnt", "#chr", "start", "end"], ascending=[False, True, True, True], kind="stable")
+            .sort_values(["cnt", "chr", "start", "end"], ascending=[False, True, True, True], kind="stable")
         )
         cpg_coords = (
             coord_counts
             .drop_duplicates(subset=[sv_id_col], keep="first")
-            .set_index(sv_id_col)[["#chr", "start", "end"]]
-            .rename(columns={"#chr": "cpg_chr", "start": "cpg_start", "end": "cpg_end"})
+            .set_index(sv_id_col)[["chr", "start", "end"]]
+            .rename(columns={"chr": "cpg_chr", "start": "cpg_start", "end": "cpg_end"})
         )
     for col in ["cpg_start","cpg_end"]:
         if col in cpg_coords:
@@ -184,7 +183,7 @@ def assign_sv_celltypes(
         pd.DataFrame(index=n_supporting.index)
           .join(n_supporting)
           .join(n_overlapped)
-          .join(majority[["majority_code","majority_count"]] if not majority.empty else None)
+          .join(majority[["majority_code","majority_count"]])
           .join(code_counts_str)
           .reset_index()
           .rename(columns={sv_id_col: "id"})
@@ -192,14 +191,14 @@ def assign_sv_celltypes(
 
     out["n_overlapped"] = out["n_overlapped"].fillna(0).astype(int)
     out["majority_count"] = out["majority_count"].fillna(0).astype(int)
-    out["majority_code"] = out.get("majority_code", pd.Series([pd.NA]*len(out))).astype("string")
+    out["majority_code"] = out.get("majority_code", pd.Series([pd.NA]*len(out))).astype("object")
     out.loc[out["majority_count"] == 0, "majority_code"] = pd.NA
     out["code_counts"] = out["code_counts"].fillna("").astype("string")
 
     out["overlap_pct"] = out["n_overlapped"] / out["n_supporting"].replace(0, 1)
     out["majority_pct"] = out["majority_count"] / out["n_overlapped"].replace(0, 1)
     cond = (out["overlap_pct"] >= min_overlap_pct) & (out["majority_pct"] >= min_agreement_pct)
-    out["assigned_code"] = out["majority_code"].where(cond).astype("string")
+    out["assigned_code"] = out["majority_code"].where(cond).astype("object")
 
     out = (
         out.set_index("id")

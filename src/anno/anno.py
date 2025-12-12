@@ -16,7 +16,7 @@ def _one_dmr(args):
     logger = logging.getLogger("anno._one_dmr")
 
     row, input_file, reference = args
-    chrom = str(row["#chr"])
+    chrom = str(row["chr"])
     start = int(row["start"])
     end   = int(row["end"])
 
@@ -87,7 +87,7 @@ def _one_dmr(args):
 
         # --- per-read assignments (each read = one row / index) ---
         assign_df = pd.DataFrame({
-            "#chr": chrom,
+            "chr": chrom,
             "start": start,
             "end": end,
             "cpgstart": cpgstart,
@@ -106,7 +106,7 @@ def _one_dmr(args):
         #             f"cpg_bounds={cpgstart}-{cpgend}")
 
         state_payload = {
-            "#chr": chrom, "start": start, "end": end,
+            "chr": chrom, "start": start, "end": end,
             "cpgstart": cpgstart, "cpgend": cpgend,
         }
         for ct in cell_types:
@@ -122,7 +122,10 @@ def _one_dmr(args):
 def sv_anno(args):
     logger = logging.getLogger("anno.sv_anno")
     logger.info("Starting SV annotation from pre-annotated reads")
-    input_file = args.input
+    if args.command == "svanno":    
+        input_file = args.input
+    else:
+        input_file = os.path.join(args.output, "reads_classification.tsv")
     if args.kanpig_read_names is not None:
         logger.info(f"Using kanpig read names from: {args.kanpig_read_names}")
     else:
@@ -134,6 +137,8 @@ def sv_anno(args):
 
 
 def anno_main(args):
+    # print(args)
+    # return
     logger = logging.getLogger("anno.main")
 
     bed_file   = args.bed
@@ -156,7 +161,7 @@ def anno_main(args):
     sv_df = read_vcf_to_df(args.vcf)
     filtered_bed = filter_bed_based_on_variants(bed, sv_df=sv_df, window=window)
 
-    for col in ["#chr", "start", "end", "best_group", "best_dir"]:
+    for col in ["chr", "start", "end", "best_group", "best_dir"]:
         if col not in filtered_bed.columns:
             logger.error(f"BED missing required column: {col}")
             raise ValueError(f"BED missing required column: {col}")
@@ -215,7 +220,7 @@ def anno_main(args):
         logger.warning("No per-read assignments generated; wrote empty reads header only")
 
     if not blocks_header_written:
-        pd.DataFrame(columns=["#chr","start","end","cpgstart","cpgend"]).to_csv(
+        pd.DataFrame(columns=["chr","start","end","cpgstart","cpgend"]).to_csv(
             blocks_out, sep="\t", index=False, header=True
         )
         logger.warning("No block states generated; wrote empty blocks header only")
