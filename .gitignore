@@ -11,6 +11,7 @@ src/__pycache__/*
 # Ignore virtual environment directories
 venv/
 env/
+dist
 
 dataset/
 sniffmeth_deconv_output/
