@@ -13,9 +13,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
-ARG VERSION
+COPY . /app
+
+ARG VERSION=""
+
 RUN pip install --upgrade pip && \
-    pip install "sniffcell==${VERSION}"
+    if [ -n "$VERSION" ]; then \
+      pip install "sniffcell==${VERSION}"; \
+    else \
+      pip install .; \
+    fi
 
 ENTRYPOINT ["sniffcell"]
 CMD ["-h"]
