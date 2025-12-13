@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 import sys, os
-import src.main
+import main
 
 sys.path.append(os.path.join(os.path.dirname(__file__), 'src'))
 
 
 if __name__ == "__main__":
-    src.main.main(sys.argv[1:])
+    main.main(sys.argv[1:])

@@ -1,9 +1,9 @@
 import os
 import json
 import pandas as pd
-from src.dmsv.sv_methylation import get_methylation_around_sv
-from src.dmsv.statistical_test_around_sv import get_statistical_tests_around_sv
-from src.anno.vcf_to_df import read_vcf_to_df
+from sniffcell.dmsv.sv_methylation import get_methylation_around_sv
+from sniffcell.dmsv.statistical_test_around_sv import get_statistical_tests_around_sv
+from sniffcell.anno.vcf_to_df import read_vcf_to_df
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(processName)s] %(levelname)s: %(message)s")
 

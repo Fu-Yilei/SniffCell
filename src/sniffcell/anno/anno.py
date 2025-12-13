@@ -1,10 +1,10 @@
 import os
 import pandas as pd
-from src.anno.kmeans import kmeans_cluster_cells
-from src.anno.methyl_matrix import methyl_matrix_from_bam
-from src.anno.filter_bed_based_on_variants import filter_bed_based_on_variants
-from src.anno.vcf_to_df import read_vcf_to_df
-from src.anno.variant_assignment import assign_sv_celltypes
+from sniffcell.anno.kmeans import kmeans_cluster_cells
+from sniffcell.anno.methyl_matrix import methyl_matrix_from_bam
+from sniffcell.anno.filter_bed_based_on_variants import filter_bed_based_on_variants
+from sniffcell.anno.vcf_to_df import read_vcf_to_df
+from sniffcell.anno.variant_assignment import assign_sv_celltypes
 from tqdm import tqdm
 import multiprocessing as mp
 import numpy as np

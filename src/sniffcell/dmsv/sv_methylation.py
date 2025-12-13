@@ -1,4 +1,4 @@
-from src.anno.methyl_matrix import methyl_matrix_from_bam
+from sniffcell.anno.methyl_matrix import methyl_matrix_from_bam
 import pandas as pd
 from typing import Tuple, Iterable
 import logging

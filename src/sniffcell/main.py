@@ -1,12 +1,14 @@
 import os
 import sys
-from src.anno import anno
-from src.find import find
-from src.parse_args import parse_args  # assuming you defined parse_args in args.py
-from src.deconv import deconv  # assuming these modules exist
-from src.dmsv import dmsv
+from sniffcell.anno import anno
+from sniffcell.find import find
+from sniffcell.parse_args import parse_args  # assuming you defined parse_args in args.py
+from sniffcell.deconv import deconv  # assuming these modules exist
+from sniffcell.dmsv import dmsv
 
-def main(argv):
+def main(argv=None):
+    if argv is None:
+        argv = sys.argv[1:]
     args = parse_args(argv)
     if args.command == "find":
         find.find_main(args)

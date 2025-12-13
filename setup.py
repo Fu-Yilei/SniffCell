@@ -1,8 +1,8 @@
 from setuptools import setup, find_packages
-from src.__init__ import __version__
+
 setup(
     name='sniffcell',
-    version=__version__,
+    version='0.5.0',
     packages=find_packages(),
     url='https://github.com/Fu-Yilei/SniffCell',
     license='MIT',

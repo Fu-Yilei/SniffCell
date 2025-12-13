@@ -2,8 +2,8 @@ import json
 import pandas as pd
 import numpy as np
 
-from src.find import ctdmr
-from src.find.ctdmr import means_from_mapping
+from sniffcell.find import ctdmr
+from sniffcell.find.ctdmr import means_from_mapping
 import logging
 def find_main(args):
 
