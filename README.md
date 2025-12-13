@@ -1,4 +1,8 @@
 # SniffCell - Identifying cell type specific SV from long-read bulk sequenced tissue only
+[![PyPI version](https://img.shields.io/pypi/v/sniffcell.svg)](https://pypi.org/project/sniffcell/)
+[![Install](https://img.shields.io/badge/Install-PyPI-3776AB?logo=pypi&logoColor=white)](https://pypi.org/project/sniffcell/)
+[![Docs](https://img.shields.io/badge/Docs-GitHub-181717?logo=github)](https://github.com/Fu-Yilei/SniffCell/wiki)
+[![Issues](https://img.shields.io/badge/Issues-GitHub-181717?logo=github)](https://github.com/Fu-Yilei/SniffCell/issues)
 
 SniffCell is a tool designed to analyze DNA methylation changes associated with structural variations (SVs), including mosaic SVs. It processes primary alignments from BAM files and provides detailed outputs for visualization and analysis.
 
