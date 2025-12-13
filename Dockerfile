@@ -6,23 +6,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    zlib1g-dev \
-    libbz2-dev \
-    liblzma-dev \
-    ca-certificates \
+    build-essential zlib1g-dev libbz2-dev liblzma-dev ca-certificates \
  && rm -rf /var/lib/apt/lists/*
 
 COPY . /app
-
-ARG VERSION=""
-
-RUN pip install --upgrade pip && \
-    if [ -n "$VERSION" ]; then \
-      pip install "sniffcell==${VERSION}"; \
-    else \
-      pip install .; \
-    fi
+RUN pip install --upgrade pip && pip install .
 
 ENTRYPOINT ["sniffcell"]
 CMD ["-h"]
