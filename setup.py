@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name='sniffcell',
-    version='0.5.0',
+    version='0.5.2',
     packages=find_packages(),
     url='https://github.com/Fu-Yilei/SniffCell',
     license='MIT',
