@@ -361,22 +361,10 @@ def _one_dmr(args):
 def sv_anno(args):
     logger = logging.getLogger("anno.sv_anno")
     logger.info("Starting SV annotation from pre-annotated reads")
-    if args.command == "svanno":
+    if args.command == "svanno":    
         input_file = args.input
-        output_arg = str(args.output)
-        # Backward compatibility: treat extension-less output as directory.
-        if os.path.isdir(output_arg) or os.path.splitext(output_arg)[1] == "":
-            output_dir = output_arg
-            sv_assignment_path = os.path.join(output_dir, "sv_assignment.tsv")
-        else:
-            sv_assignment_path = output_arg
-            output_dir = os.path.dirname(output_arg) or "."
     else:
-        output_dir = args.output
-        input_file = os.path.join(output_dir, "reads_classification.tsv")
-        sv_assignment_path = os.path.join(output_dir, "sv_assignment.tsv")
-
-    os.makedirs(output_dir, exist_ok=True)
+        input_file = os.path.join(args.output, "reads_classification.tsv")
     if args.kanpig_read_names is not None:
         logger.info(f"Using kanpig read names from: {args.kanpig_read_names}")
     else:
@@ -421,11 +409,12 @@ def sv_anno(args):
         min_agreement_pct=min_agreement_pct,
         unique_reads_for_overlap=unique_reads_for_overlap,
     )
+    sv_assignment_path = os.path.join(args.output, "sv_assignment.tsv")
     sv_assignment_df.to_csv(sv_assignment_path, sep="\t", index=False)
 
     readable_report_df, readable_report_long_df = _build_sv_readable_reports(sv_assignment_df)
-    readable_report_path = os.path.join(output_dir, "sv_assignment_readable.tsv")
-    readable_report_long_path = os.path.join(output_dir, "sv_assignment_readable_long.tsv")
+    readable_report_path = os.path.join(args.output, "sv_assignment_readable.tsv")
+    readable_report_long_path = os.path.join(args.output, "sv_assignment_readable_long.tsv")
     readable_report_df.to_csv(readable_report_path, sep="\t", index=False)
     readable_report_long_df.to_csv(readable_report_long_path, sep="\t", index=False)
     logger.info(f"Wrote SV assignment report: {sv_assignment_path}")

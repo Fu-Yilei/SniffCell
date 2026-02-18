@@ -17,9 +17,7 @@ def main(argv=None):
         os.makedirs(args.output, exist_ok=True)
         anno.anno_main(args)
     elif args.command == "svanno":
-        output_dir = os.path.dirname(os.path.abspath(args.output))
-        if output_dir:
-            os.makedirs(output_dir, exist_ok=True)
+        os.makedirs(args.output, exist_ok=True)
         anno.sv_anno(args)
     elif args.command == "deconv":
         deconv.deconv_main(args)

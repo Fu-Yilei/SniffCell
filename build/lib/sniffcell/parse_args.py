@@ -92,7 +92,7 @@ def parse_args(argv):
     svanno_parser.add_argument("-i", "--input", required=True, help="Input reads_classification.tsv file from anno step")
     svanno_parser.add_argument( "-krn", "--kanpig_read_names", type=str, default=None, help="Read names TSV from kanpig output, will use Sniffles read names if not sepecified." )
     svanno_parser.add_argument("-w", "--window", type=int, default=5000, help="Window size for SV-aware region matching, default=5000")
-    svanno_parser.add_argument("-o", "--output", required=True, help="Output TSV file path for sv_assignment")
+    svanno_parser.add_argument("-o", "--output", required=True, help="Output sv_assignment.tsv file")
     svanno_parser.add_argument(
         "--evidence_mode",
         type=str,
