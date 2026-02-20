@@ -6,6 +6,10 @@
 
 SniffCell annotates structural variants (SVs) using long-read methylation evidence and cell-type-specific ctDMR signals.
 
+## Wiki
+- End-to-end workflow page source: [`wiki/End-to-End-Workflow.md`](wiki/End-to-End-Workflow.md)
+- Test examples page source: [`wiki/Test-Examples.md`](wiki/Test-Examples.md)
+
 ## Version
 Current package version in code: `v0.6.0`.
 

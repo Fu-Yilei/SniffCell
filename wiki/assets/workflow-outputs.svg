@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="560" viewBox="0 0 980 560">
+  <defs>
+    <style>
+      .title { font: 700 24px sans-serif; fill: #1f2937; }
+      .label { font: 600 15px sans-serif; fill: #111827; }
+      .text  { font: 500 13px monospace; fill: #374151; }
+      .box   { fill: #f8fafc; stroke: #64748b; stroke-width: 2; rx: 10; }
+      .root  { fill: #e0f2fe; stroke: #0284c7; stroke-width: 2; rx: 12; }
+      .line  { stroke: #94a3b8; stroke-width: 2; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="980" height="560" fill="#ffffff"/>
+  <text x="36" y="44" class="title">Expected Output Layout (Example)</text>
+
+  <rect x="36" y="72" width="260" height="48" class="root"/>
+  <text x="52" y="101" class="label">out/full_run/</text>
+
+  <line x1="166" y1="120" x2="166" y2="150" class="line"/>
+  <line x1="166" y1="150" x2="90" y2="150" class="line"/>
+  <line x1="166" y1="150" x2="310" y2="150" class="line"/>
+  <line x1="90" y1="150" x2="90" y2="176" class="line"/>
+  <line x1="310" y1="150" x2="310" y2="176" class="line"/>
+
+  <rect x="40" y="176" width="500" height="66" class="box"/>
+  <text x="56" y="201" class="label">find outputs</text>
+  <text x="56" y="224" class="text">pbmc_ctdmr.tsv</text>
+  <text x="56" y="240" class="text">pbmc_ctdmr.tsv.igv.bed</text>
+
+  <rect x="560" y="176" width="380" height="140" class="box"/>
+  <text x="576" y="201" class="label">anno/</text>
+  <text x="576" y="224" class="text">reads_classification.tsv</text>
+  <text x="576" y="240" class="text">blocks_classification.tsv</text>
+  <text x="576" y="256" class="text">sv_assignment.tsv</text>
+  <text x="576" y="272" class="text">sv_assignment_readable.tsv</text>
+  <text x="576" y="288" class="text">anno_run_manifest.json</text>
+
+  <line x1="750" y1="316" x2="750" y2="344" class="line"/>
+  <line x1="750" y1="344" x2="676" y2="344" class="line"/>
+  <line x1="750" y1="344" x2="876" y2="344" class="line"/>
+  <line x1="676" y1="344" x2="676" y2="362" class="line"/>
+  <line x1="876" y1="344" x2="876" y2="362" class="line"/>
+
+  <rect x="526" y="362" width="300" height="126" class="box"/>
+  <text x="542" y="387" class="label">figures/ (from viz)</text>
+  <text x="542" y="410" class="text">&lt;sv&gt;.png</text>
+  <text x="542" y="426" class="text">&lt;sv&gt;.summary.tsv</text>
+  <text x="542" y="442" class="text">&lt;sv&gt;.supporting_reads_assignment.tsv</text>
+  <text x="542" y="458" class="text">&lt;sv&gt;.supporting_reads_ctdmr_methylation.tsv</text>
+
+  <rect x="842" y="362" width="120" height="96" class="box"/>
+  <text x="858" y="387" class="label">dmsv/</text>
+  <text x="858" y="410" class="text">significant_</text>
+  <text x="858" y="426" class="text">SVs.tsv</text>
+  <text x="858" y="442" class="text">sv_details/</text>
+
+  <text x="36" y="534" class="text">Tip: keep this structure stable so downstream reporting scripts can be reused across runs.</text>
+</svg>

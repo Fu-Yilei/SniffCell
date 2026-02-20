@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="600" viewBox="0 0 980 600">
+  <defs>
+    <style>
+      .title { font: 700 24px sans-serif; fill: #1f2937; }
+      .label { font: 600 15px sans-serif; fill: #111827; }
+      .text  { font: 500 13px sans-serif; fill: #334155; }
+      .readAssigned { stroke: #b91c1c; stroke-width: 3; }
+      .readUnassigned { stroke: #ea580c; stroke-width: 3; stroke-dasharray: 7 5; }
+      .readOther { stroke: #6b7280; stroke-width: 2; }
+      .svSpan { fill: #93c5fd; opacity: 0.35; }
+      .dmrHyper { fill: #16a34a; opacity: 0.75; }
+      .dmrHypo { fill: #7c3aed; opacity: 0.75; }
+      .box { fill: #f8fafc; stroke: #64748b; stroke-width: 2; rx: 10; }
+      .axis { stroke: #475569; stroke-width: 2; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="980" height="600" fill="#ffffff"/>
+  <text x="30" y="42" class="title">`sniffcell viz` Panel Anatomy (Schematic)</text>
+
+  <rect x="24" y="64" width="932" height="318" class="box"/>
+  <text x="42" y="92" class="label">Top track: reads around the SV</text>
+
+  <rect x="470" y="104" width="86" height="240" class="svSpan"/>
+  <line x1="470" y1="102" x2="470" y2="344" class="axis"/>
+  <line x1="556" y1="102" x2="556" y2="344" class="axis"/>
+
+  <line x1="62" y1="130" x2="882" y2="130" class="readAssigned"/>
+  <line x1="62" y1="156" x2="900" y2="156" class="readAssigned"/>
+  <line x1="75" y1="182" x2="855" y2="182" class="readUnassigned"/>
+  <line x1="40" y1="208" x2="920" y2="208" class="readOther"/>
+  <line x1="68" y1="234" x2="910" y2="234" class="readOther"/>
+  <line x1="92" y1="260" x2="885" y2="260" class="readAssigned"/>
+  <line x1="58" y1="286" x2="872" y2="286" class="readUnassigned"/>
+
+  <circle cx="468" cy="130" r="5" fill="#dc2626"/>
+  <circle cx="468" cy="156" r="5" fill="#dc2626"/>
+  <circle cx="468" cy="182" r="5" fill="#f97316"/>
+  <text x="42" y="330" class="text">Supporting assigned (red), supporting unassigned (orange dashed), other reads (gray)</text>
+
+  <rect x="24" y="398" width="932" height="126" class="box"/>
+  <text x="42" y="425" class="label">Bottom track: ctDMRs in the plotting window</text>
+
+  <rect x="120" y="448" width="130" height="24" class="dmrHyper"/>
+  <rect x="290" y="448" width="170" height="24" class="dmrHypo"/>
+  <rect x="505" y="448" width="120" height="24" class="dmrHyper"/>
+  <rect x="680" y="448" width="185" height="24" class="dmrHypo"/>
+  <text x="42" y="505" class="text">Hyper ctDMR (green) and hypo/other ctDMR (purple) with SV interval highlighted in blue.</text>
+
+  <rect x="24" y="536" width="932" height="46" class="box"/>
+  <text x="42" y="564" class="text">Use `--export_tables` to save per-SV summaries and per-supporting-read methylation tables next to the figure.</text>
+</svg>
