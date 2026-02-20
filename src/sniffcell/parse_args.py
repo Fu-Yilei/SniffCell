@@ -17,7 +17,7 @@ def parse_args(argv):
         version=f"sniffcell {version}"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
-    valid_commands = ["find", "deconv", "anno", "svanno", "dmsv", "viz"]
+    valid_commands = ["find", "deconv", "anno", "svanno", "dmsv", "viz", "report"]
     # Subcommand: find
     find_parser = subparsers.add_parser("find", help="Find cell type-specific DMRs.")
     atlas_dir = os.path.abspath("atlas")
@@ -189,6 +189,77 @@ def parse_args(argv):
         help="Output figure path or prefix. Defaults to <anno_output>/<sv_id>.viz.<format> when --anno_output is set.",
     )
 
+    report_parser = subparsers.add_parser(
+        "report",
+        help="Generate an HTML report for high-confidence SV assignments and render viz panels for each SV (can be slow for many SVs).",
+    )
+    report_parser.add_argument(
+        "--anno_output",
+        required=True,
+        help="sniffcell anno output folder containing sv_assignment.tsv and anno_run_manifest.json.",
+    )
+    report_parser.add_argument(
+        "--min_overlap_pct",
+        type=float,
+        default=0.5,
+        help="Minimum overlap_pct threshold for including an SV in report, default=0.5",
+    )
+    report_parser.add_argument(
+        "--min_majority_pct",
+        type=float,
+        default=0.95,
+        help="Minimum majority_pct threshold for including an SV in report, default=0.95",
+    )
+    report_parser.add_argument(
+        "--include_unassigned",
+        action="store_true",
+        help="Include SVs with empty assigned_code (default filters to assigned SVs only).",
+    )
+    report_parser.add_argument(
+        "--allow_hard_conflict",
+        action="store_true",
+        help="Include SVs with has_hard_conflict=True (default excludes them).",
+    )
+    report_parser.add_argument(
+        "--max_sv",
+        type=int,
+        default=0,
+        help="Maximum number of SVs to include after filtering. 0 means no limit.",
+    )
+    report_parser.add_argument(
+        "-w", "--window",
+        type=int,
+        default=5000,
+        help="Window size passed through to viz; when default=5000 and anno manifest has a window, viz uses the manifest window.",
+    )
+    report_parser.add_argument(
+        "-m", "--max_reads",
+        type=int,
+        default=250,
+        help="Maximum reads per viz panel, default=250",
+    )
+    report_parser.add_argument(
+        "-f", "--format",
+        default="png",
+        choices=["png", "pdf"],
+        help="Figure format for SV panels, default=png",
+    )
+    report_parser.add_argument(
+        "--export_tables",
+        action="store_true",
+        help="Export viz supplementary TSV tables for each rendered SV.",
+    )
+    report_parser.add_argument(
+        "--reuse_existing_viz",
+        action="store_true",
+        help="Reuse existing per-SV viz figure files when present instead of regenerating.",
+    )
+    report_parser.add_argument(
+        "-o", "--output",
+        default=None,
+        help="Report output directory or HTML file path. Defaults to <anno_output>/report/.",
+    )
+
 
     if len(argv) == 0:
         parser.print_help(sys.stderr)
@@ -213,6 +284,9 @@ def parse_args(argv):
         sys.exit(1)
     elif len(argv) == 1 and argv[0] == "viz":
         viz_parser.print_help(sys.stderr)
+        sys.exit(1)
+    elif len(argv) == 1 and argv[0] == "report":
+        report_parser.print_help(sys.stderr)
         sys.exit(1)
     args = parser.parse_args(argv)
     return args

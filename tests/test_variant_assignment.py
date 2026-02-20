@@ -452,6 +452,28 @@ class TestParseArgs(unittest.TestCase):
         self.assertAlmostEqual(args.min_overlap_pct, 0.0)
         self.assertAlmostEqual(args.min_agreement_pct, 1.0)
 
+    def test_report_subcommand_parses_with_defaults(self):
+        args = parse_args(
+            [
+                "report",
+                "--anno_output",
+                "anno_out",
+            ]
+        )
+        self.assertEqual(args.command, "report")
+        self.assertEqual(args.anno_output, "anno_out")
+        self.assertAlmostEqual(args.min_overlap_pct, 0.5)
+        self.assertAlmostEqual(args.min_majority_pct, 0.95)
+        self.assertFalse(args.include_unassigned)
+        self.assertFalse(args.allow_hard_conflict)
+        self.assertEqual(args.max_sv, 0)
+        self.assertEqual(args.format, "png")
+        self.assertFalse(hasattr(args, "input"))
+        self.assertFalse(hasattr(args, "vcf"))
+        self.assertFalse(hasattr(args, "reference"))
+        self.assertFalse(hasattr(args, "bed"))
+        self.assertFalse(hasattr(args, "read_assignment"))
+
 
 class TestReadableSvReport(unittest.TestCase):
     def test_build_readable_reports_summarizes_celltypes(self):

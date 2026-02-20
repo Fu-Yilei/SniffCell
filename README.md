@@ -27,7 +27,7 @@ Python requirement: `>=3.10`.
 
 ## CLI Commands
 ```text
-sniffcell {find,deconv,anno,svanno,dmsv,viz}
+sniffcell {find,deconv,anno,svanno,dmsv,viz,report}
 ```
 
 Current command status:
@@ -35,6 +35,7 @@ Current command status:
 - `anno`: implemented.
 - `svanno`: implemented.
 - `viz`: implemented.
+- `report`: implemented.
 - `dmsv`: implemented.
 - `deconv`: placeholder (prints arguments only).
 
@@ -50,8 +51,9 @@ Current command status:
 1. Call ctDMRs with `find`.
 2. Run `anno` to classify reads and produce SV-level assignments.
 3. Optionally rerun SV assignment from saved read classifications with `svanno`.
-4. Visualize specific SVs with `viz`.
-5. Optionally run `dmsv` for differential methylation testing near SVs.
+4. Generate an HTML summary for high-confidence SVs with `report` (auto-runs `viz` for each selected SV).
+5. Visualize specific SVs with `viz` when you need an ad hoc plot.
+6. Optionally run `dmsv` for differential methylation testing near SVs.
 
 ## `find`: Call ctDMRs From Atlas Matrices
 `find` loads:
@@ -180,6 +182,35 @@ If `--export_tables` is set, additional files are written using the figure stem:
 - `<stem>.summary.tsv`
 - `<stem>.supporting_reads_assignment.tsv`
 - `<stem>.supporting_reads_ctdmr_methylation.tsv`
+
+## `report`: HTML Report for High-Confidence SVs
+`report` reads `sv_assignment.tsv` from one `anno` output folder, filters to high-confidence SVs, renders one `viz` panel per selected SV, and writes an HTML index.
+
+Input model:
+- only `--anno_output` is required for data inputs; BAM/VCF/REF/BED/read tables are resolved from `anno_run_manifest.json`.
+- this can take a long time when many SVs pass filters (one `viz` render per SV).
+
+Example:
+```bash
+sniffcell report \
+  --anno_output anno_out \
+  --min_overlap_pct 0.5 \
+  --min_majority_pct 0.95 \
+  -f png
+```
+
+Default filtering behavior:
+- requires non-empty `assigned_code`
+- requires non-empty `linked_celltypes`
+- excludes `has_hard_conflict=True`
+- threshold filters: `--min_overlap_pct` (default `0.5`) and `--min_majority_pct` (default `0.95`)
+
+Outputs under `<anno_output>/report/` by default:
+- `index.html`
+- `figures/<sv_id>.viz.<format>`
+- `high_confidence_sv.tsv`
+- `failed_viz.tsv`
+- `report_manifest.json`
 
 ## `dmsv`: Differential Methylation Around SVs
 `dmsv` compares methylation between supporting and non-supporting reads near each SV.

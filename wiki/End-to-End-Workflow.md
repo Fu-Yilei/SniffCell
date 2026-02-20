@@ -128,7 +128,27 @@ Per-SV files:
 - `<sv>.supporting_reads_assignment.tsv`
 - `<sv>.supporting_reads_ctdmr_methylation.tsv`
 
-## 6. Differential methylation near SVs (`dmsv`)
+## 6. Build High-Confidence SV Report (`report`)
+
+Generate one HTML page and one `viz` figure per selected SV:
+
+```bash
+sniffcell report \
+  --anno_output "$OUT/anno" \
+  --min_overlap_pct 0.5 \
+  --min_majority_pct 0.95 \
+  -f png
+```
+
+Outputs:
+- `$OUT/anno/report/index.html`
+- `$OUT/anno/report/high_confidence_sv.tsv`
+- `$OUT/anno/report/figures/<sv_id>.viz.png`
+
+Note:
+- report runtime scales with the number of selected SVs because it runs `viz` for each selected SV.
+
+## 7. Differential methylation near SVs (`dmsv`)
 
 ```bash
 sniffcell dmsv \
@@ -146,7 +166,7 @@ Outputs:
 - `$OUT/dmsv/significant_SVs.tsv`
 - `$OUT/dmsv/sv_details/<sv_id>.tsv.gz`
 
-## 7. Quick QA checks
+## 8. Quick QA checks
 
 ```bash
 # Assigned SV count
@@ -160,7 +180,7 @@ awk -F'\t' 'NR==1{for(i=1;i<=NF;i++) if($i=="has_hard_conflict") c=i}
 cut -f11 "$OUT/anno/sv_assignment_readable.tsv" | tail -n +2 | tr '|' '\n' | sort | uniq -c | sort -nr | head
 ```
 
-## 8. Common adjustments
+## 9. Common adjustments
 
 - If few SVs are assigned, relax `--min_agreement_pct` via `svanno`.
 - If `reads_classification.tsv` is sparse, increase `-w/--window`.

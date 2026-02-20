@@ -24,7 +24,7 @@ What this covers:
 
 ## 2. End-to-End Smoke Test (CLI)
 
-This sequence validates `find -> anno -> svanno -> viz -> dmsv`.
+This sequence validates `find -> anno -> svanno -> report -> viz -> dmsv`.
 
 ### 2.1 Generate ctDMRs (`find`)
 
@@ -106,7 +106,23 @@ Checks:
   - `*.supporting_reads_assignment.tsv`
   - `*.supporting_reads_ctdmr_methylation.tsv`
 
-### 2.5 Differential methylation near SVs (`dmsv`)
+### 2.5 Build high-confidence SV HTML report (`report`)
+
+```bash
+sniffcell report \
+  --anno_output out/anno \
+  --min_overlap_pct 0.5 \
+  --min_majority_pct 0.95 \
+  -f png
+```
+
+Checks:
+- `out/anno/report/index.html`
+- `out/anno/report/high_confidence_sv.tsv`
+- `out/anno/report/figures/*.viz.png`
+- if many SVs pass, expect report generation to take longer (one `viz` render per SV)
+
+### 2.6 Differential methylation near SVs (`dmsv`)
 
 ```bash
 sniffcell dmsv \
