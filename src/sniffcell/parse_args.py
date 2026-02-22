@@ -64,6 +64,17 @@ def parse_args(argv):
     anno_parser.add_argument("-t", "--threads", type=int, default=1, help="Number of threads to use, default=1")
     anno_parser.add_argument("-w", "--window", type=int, default=5000, help="Window size for filtering BED based on variants, default=5000")
     anno_parser.add_argument(
+        "--read_assignment_mode",
+        type=str,
+        choices=["closest_reference_mean", "kmeans"],
+        default="closest_reference_mean",
+        help=(
+            "How to assign each read to best_group vs other_group within each ctDMR. "
+            "'closest_reference_mean' compares per-read methylation mean to mean_best_value/mean_rest_value, "
+            "'kmeans' uses unsupervised clustering. Default=closest_reference_mean."
+        ),
+    )
+    anno_parser.add_argument(
         "--evidence_mode",
         type=str,
         choices=["all_rows", "per_read"],
@@ -166,6 +177,14 @@ def parse_args(argv):
         help="Window size around SV to plot, default=5000",
     )
     viz_parser.add_argument(
+        "--exact_window",
+        action="store_true",
+        help=(
+            "Use --window exactly as provided. "
+            "By default, when --window=5000 and --anno_output is used, viz adopts anno manifest window if available."
+        ),
+    )
+    viz_parser.add_argument(
         "-m", "--max_reads",
         type=int,
         default=250,
@@ -176,6 +195,17 @@ def parse_args(argv):
         default="png",
         choices=["png", "pdf"],
         help="Output figure format, default=png",
+    )
+    viz_parser.add_argument(
+        "--dpi",
+        type=int,
+        default=300,
+        help="Output figure DPI, default=300",
+    )
+    viz_parser.add_argument(
+        "--skip_methylation_overlay",
+        action="store_true",
+        help="Skip per-read ctDMR methylation extraction/overlay for faster rendering.",
     )
     viz_parser.add_argument(
         "--export_tables",
@@ -191,7 +221,10 @@ def parse_args(argv):
 
     report_parser = subparsers.add_parser(
         "report",
-        help="Generate an HTML report for high-confidence SV assignments and render viz panels for each SV (can be slow for many SVs).",
+        help=(
+            "Generate an HTML report for high-confidence SV assignments. "
+            "By default this is figure-less (fast); add --with_figures to render viz panels."
+        ),
     )
     report_parser.add_argument(
         "--anno_output",
@@ -201,14 +234,14 @@ def parse_args(argv):
     report_parser.add_argument(
         "--min_overlap_pct",
         type=float,
-        default=0.5,
-        help="Minimum overlap_pct threshold for including an SV in report, default=0.5",
+        default=0.8,
+        help="Minimum overlap_pct threshold for including an SV in report, default=0.8",
     )
     report_parser.add_argument(
         "--min_majority_pct",
         type=float,
-        default=0.95,
-        help="Minimum majority_pct threshold for including an SV in report, default=0.95",
+        default=1.0,
+        help="Minimum majority_pct threshold for including an SV in report, default=1.0",
     )
     report_parser.add_argument(
         "--include_unassigned",
@@ -225,6 +258,14 @@ def parse_args(argv):
         type=int,
         default=0,
         help="Maximum number of SVs to include after filtering. 0 means no limit.",
+    )
+    report_parser.add_argument(
+        "--with_figures",
+        action="store_true",
+        help=(
+            "Render viz panel figures for selected SVs. "
+            "Default is figure-less report (no viz rendering)."
+        ),
     )
     report_parser.add_argument(
         "-w", "--window",
@@ -245,6 +286,18 @@ def parse_args(argv):
         help="Figure format for SV panels, default=png",
     )
     report_parser.add_argument(
+        "--figure_profile",
+        choices=["fast", "full"],
+        default="full",
+        help="Figure rendering profile for report panels. 'full' keeps read-level methylation overlay; 'fast' skips it for speed.",
+    )
+    report_parser.add_argument(
+        "--figure_dpi",
+        type=int,
+        default=160,
+        help="Figure DPI for report panel rendering, default=160",
+    )
+    report_parser.add_argument(
         "--export_tables",
         action="store_true",
         help="Export viz supplementary TSV tables for each rendered SV.",
@@ -253,6 +306,12 @@ def parse_args(argv):
         "--reuse_existing_viz",
         action="store_true",
         help="Reuse existing per-SV viz figure files when present instead of regenerating.",
+    )
+    report_parser.add_argument(
+        "--figure_threads",
+        type=int,
+        default=1,
+        help="Number of threads for figure rendering when --with_figures is set, default=1",
     )
     report_parser.add_argument(
         "-o", "--output",

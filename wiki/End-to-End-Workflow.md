@@ -37,7 +37,31 @@ OUT=out/full_run
 mkdir -p "$OUT"
 ```
 
-## 2. Call ctDMRs (`find`)
+## 2. (Optional) Build confident SV VCFs (`sniffcell-discover-sv`)
+
+This dual-pass helper runs Sniffles on TR and non-TR regions, applies confidence filters, and writes a merged VCF for downstream `anno`.
+
+```bash
+sniffcell-discover-sv \
+  -i "$BAM" \
+  -r "$REF" \
+  -o "$OUT/sv_discovery" \
+  -t 8
+```
+
+Key outputs:
+- `$OUT/sv_discovery/tr/sniffles.tr.confident.vcf.gz`
+- `$OUT/sv_discovery/non_tr/sniffles.nontr.confident.vcf.gz`
+- `$OUT/sv_discovery/merged/sniffles.confident.merged.vcf.gz`
+- `$OUT/sv_discovery/sv_discovery_manifest.json`
+
+Use merged VCF as `VCF` in later steps:
+
+```bash
+VCF="$OUT/sv_discovery/merged/sniffles.confident.merged.vcf.gz"
+```
+
+## 3. Call ctDMRs (`find`)
 
 ```bash
 sniffcell find \
@@ -57,7 +81,7 @@ Expected files:
 - `$OUT/pbmc_ctdmr.tsv`
 - `$OUT/pbmc_ctdmr.tsv.igv.bed`
 
-## 3. Annotate SVs (`anno`)
+## 4. Annotate SVs (`anno`)
 
 ```bash
 sniffcell anno \
@@ -81,7 +105,7 @@ Core outputs:
 - `$OUT/anno/sv_assignment_readable_long.tsv`
 - `$OUT/anno/anno_run_manifest.json`
 
-## 4. Re-score with different assignment strictness (`svanno`)
+## 5. Re-score with different assignment strictness (`svanno`)
 
 Use this to compare strict vs relaxed assignments without re-running `anno`:
 
@@ -96,7 +120,7 @@ sniffcell svanno \
   --min_agreement_pct 0.6
 ```
 
-## 5. Generate SV Figures (`viz`)
+## 6. Generate SV Figures (`viz`)
 
 Single SV:
 
@@ -128,27 +152,40 @@ Per-SV files:
 - `<sv>.supporting_reads_assignment.tsv`
 - `<sv>.supporting_reads_ctdmr_methylation.tsv`
 
-## 6. Build High-Confidence SV Report (`report`)
+## 7. Build High-Confidence SV Report (`report`)
 
-Generate one HTML page and one `viz` figure per selected SV:
+Generate one HTML page (figure-less by default):
 
 ```bash
 sniffcell report \
   --anno_output "$OUT/anno" \
-  --min_overlap_pct 0.5 \
-  --min_majority_pct 0.95 \
-  -f png
+  --min_overlap_pct 0.8 \
+  --min_majority_pct 1.0
 ```
 
 Outputs:
 - `$OUT/anno/report/index.html`
 - `$OUT/anno/report/high_confidence_sv.tsv`
+- report entries include `Copy viz command` buttons for per-SV figure generation
+
+Enable batch figure rendering:
+
+```bash
+sniffcell report \
+  --anno_output "$OUT/anno" \
+  --with_figures \
+  --figure_threads 8 \
+  -f png
+```
+
+Additional output:
 - `$OUT/anno/report/figures/<sv_id>.viz.png`
 
 Note:
-- report runtime scales with the number of selected SVs because it runs `viz` for each selected SV.
+- default is figure-less for speed.
+- with `--with_figures`, runtime scales with selected SV count; use `--figure_threads` to parallelize.
 
-## 7. Differential methylation near SVs (`dmsv`)
+## 8. Differential methylation near SVs (`dmsv`)
 
 ```bash
 sniffcell dmsv \
@@ -166,7 +203,7 @@ Outputs:
 - `$OUT/dmsv/significant_SVs.tsv`
 - `$OUT/dmsv/sv_details/<sv_id>.tsv.gz`
 
-## 8. Quick QA checks
+## 9. Quick QA checks
 
 ```bash
 # Assigned SV count
@@ -180,7 +217,7 @@ awk -F'\t' 'NR==1{for(i=1;i<=NF;i++) if($i=="has_hard_conflict") c=i}
 cut -f11 "$OUT/anno/sv_assignment_readable.tsv" | tail -n +2 | tr '|' '\n' | sort | uniq -c | sort -nr | head
 ```
 
-## 9. Common adjustments
+## 10. Common adjustments
 
 - If few SVs are assigned, relax `--min_agreement_pct` via `svanno`.
 - If `reads_classification.tsv` is sparse, increase `-w/--window`.

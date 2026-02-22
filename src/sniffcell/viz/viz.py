@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
 from collections import defaultdict
+from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -15,6 +17,44 @@ from sniffcell.anno.variant_assignment import (
     _decode_linked_celltypes_from_row,
     _resolve_hierarchy_labels,
 )
+
+_THREAD_LOCAL_IO = threading.local()
+
+
+def _path_cache_key(path: str | None) -> str | None:
+    if path is None:
+        return None
+    return str(Path(path).expanduser().resolve())
+
+
+def _get_thread_bam_handle(bam_path: str) -> pysam.AlignmentFile:
+    key = _path_cache_key(bam_path)
+    if key is None:
+        raise ValueError("bam_path is required")
+    cache = getattr(_THREAD_LOCAL_IO, "bam_handles", None)
+    if cache is None:
+        cache = {}
+        _THREAD_LOCAL_IO.bam_handles = cache
+    handle = cache.get(key)
+    if handle is None:
+        handle = pysam.AlignmentFile(key, "rb")
+        cache[key] = handle
+    return handle
+
+
+def _get_thread_fasta_handle(reference_path: str | None) -> pysam.FastaFile | None:
+    key = _path_cache_key(reference_path)
+    if key is None:
+        return None
+    cache = getattr(_THREAD_LOCAL_IO, "fasta_handles", None)
+    if cache is None:
+        cache = {}
+        _THREAD_LOCAL_IO.fasta_handles = cache
+    handle = cache.get(key)
+    if handle is None:
+        handle = pysam.FastaFile(key)
+        cache[key] = handle
+    return handle
 
 
 def _norm_chr(value: object) -> str:
@@ -74,34 +114,54 @@ def _first_scalar(value: object) -> object:
     return value
 
 
-def _get_sv_payload(vcf_path: str, sv_id: str) -> dict:
-    with pysam.VariantFile(vcf_path) as vf:
+def _build_sv_payload(record: pysam.VariantRecord) -> dict:
+    sv_start = int(record.start)
+    sv_end = int(record.stop)
+    if sv_end <= sv_start:
+        svlen_val = _first_scalar(record.info.get("SVLEN", 1))
+        try:
+            svlen_abs = abs(int(svlen_val))
+        except (TypeError, ValueError):
+            svlen_abs = 1
+        sv_end = sv_start + max(1, svlen_abs)
+
+    svtype = str(record.info.get("SVTYPE", "SV"))
+    support_names = set(_parse_support_read_names(record.info.get("RNAMES", [])))
+    return {
+        "id": str(record.id),
+        "chrom": str(record.chrom),
+        "start": sv_start,
+        "end": sv_end,
+        "svtype": svtype,
+        "svlen": _first_scalar(record.info.get("SVLEN", pd.NA)),
+        "supporting_reads": support_names,
+    }
+
+
+@lru_cache(maxsize=8)
+def _load_sv_payload_index(vcf_path: str) -> dict[str, dict]:
+    key = _path_cache_key(vcf_path)
+    if key is None:
+        raise ValueError("vcf_path is required")
+
+    payloads: dict[str, dict] = {}
+    with pysam.VariantFile(key) as vf:
         for record in vf.fetch():
-            if str(record.id) != str(sv_id):
+            rec_id = str(record.id)
+            if not rec_id:
                 continue
+            payloads[rec_id] = _build_sv_payload(record)
+    return payloads
 
-            sv_start = int(record.start)
-            sv_end = int(record.stop)
-            if sv_end <= sv_start:
-                svlen_val = _first_scalar(record.info.get("SVLEN", 1))
-                try:
-                    svlen_abs = abs(int(svlen_val))
-                except (TypeError, ValueError):
-                    svlen_abs = 1
-                sv_end = sv_start + max(1, svlen_abs)
 
-            svtype = str(record.info.get("SVTYPE", "SV"))
-            support_names = set(_parse_support_read_names(record.info.get("RNAMES", [])))
-            return {
-                "id": str(record.id),
-                "chrom": str(record.chrom),
-                "start": sv_start,
-                "end": sv_end,
-                "svtype": svtype,
-                "svlen": _first_scalar(record.info.get("SVLEN", pd.NA)),
-                "supporting_reads": support_names,
-            }
-    raise ValueError(f"SV ID '{sv_id}' was not found in VCF: {vcf_path}")
+def _get_sv_payload(vcf_path: str, sv_id: str) -> dict:
+    payloads = _load_sv_payload_index(vcf_path)
+    payload = payloads.get(str(sv_id))
+    if payload is None:
+        raise ValueError(f"SV ID '{sv_id}' was not found in VCF: {vcf_path}")
+    out = dict(payload)
+    out["supporting_reads"] = set(payload.get("supporting_reads", set()))
+    return out
 
 
 def _resolve_output_path(output: str, fmt: str) -> Path:
@@ -111,8 +171,10 @@ def _resolve_output_path(output: str, fmt: str) -> Path:
     return out.with_suffix(f".{fmt}")
 
 
+@lru_cache(maxsize=8)
 def _load_anno_manifest(anno_output: str) -> dict:
-    manifest_path = Path(anno_output) / "anno_run_manifest.json"
+    anno_root = _path_cache_key(anno_output) or str(anno_output)
+    manifest_path = Path(anno_root) / "anno_run_manifest.json"
     if not manifest_path.exists():
         raise FileNotFoundError(
             f"Could not find anno run manifest: {manifest_path}. "
@@ -130,7 +192,7 @@ def _resolve_viz_runtime_inputs(args, logger: logging.Logger) -> dict:
     manifest = {}
     if anno_output:
         manifest = _load_anno_manifest(anno_output)
-        logger.info("Loaded anno run manifest from: %s", Path(anno_output) / "anno_run_manifest.json")
+        logger.debug("Loaded anno run manifest from: %s", Path(anno_output) / "anno_run_manifest.json")
 
     manifest_inputs = manifest.get("inputs", {}) if isinstance(manifest, dict) else {}
     manifest_runtime = manifest.get("runtime", {}) if isinstance(manifest, dict) else {}
@@ -162,7 +224,8 @@ def _resolve_viz_runtime_inputs(args, logger: logging.Logger) -> dict:
         output_path = Path.cwd() / f"{args.sv_id}.viz.{args.format}"
 
     effective_window = int(args.window)
-    if anno_output and int(args.window) == 5000 and "window" in manifest_runtime:
+    use_manifest_window = (not bool(getattr(args, "exact_window", False)))
+    if use_manifest_window and anno_output and int(args.window) == 5000 and "window" in manifest_runtime:
         try:
             effective_window = int(manifest_runtime["window"])
         except (TypeError, ValueError):
@@ -187,29 +250,30 @@ def _fetch_reads(
     end: int,
     supporting_reads: set[str],
     max_reads: int,
+    bam_handle: pysam.AlignmentFile | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     rows: list[dict] = []
-    with pysam.AlignmentFile(bam_path, "rb") as bam:
-        for read in bam.fetch(chrom, start, end):
-            if read.is_unmapped or read.reference_start is None or read.reference_end is None:
-                continue
-            if read.is_secondary or read.is_supplementary:
-                continue
+    bam = bam_handle if bam_handle is not None else _get_thread_bam_handle(bam_path)
+    for read in bam.fetch(chrom, start, end):
+        if read.is_unmapped or read.reference_start is None or read.reference_end is None:
+            continue
+        if read.is_secondary or read.is_supplementary:
+            continue
 
-            r_start = max(int(read.reference_start), start)
-            r_end = min(int(read.reference_end), end)
-            if r_end <= r_start:
-                continue
+        r_start = max(int(read.reference_start), start)
+        r_end = min(int(read.reference_end), end)
+        if r_end <= r_start:
+            continue
 
-            qname = str(read.query_name)
-            rows.append(
-                {
-                    "read_name": qname,
-                    "start": r_start,
-                    "end": r_end,
-                    "is_supporting": qname in supporting_reads,
-                }
-            )
+        qname = str(read.query_name)
+        rows.append(
+            {
+                "read_name": qname,
+                "start": r_start,
+                "end": r_end,
+                "is_supporting": qname in supporting_reads,
+            }
+        )
 
     all_reads = pd.DataFrame(rows)
     if all_reads.empty:
@@ -240,11 +304,9 @@ def _fetch_reads(
     return shown, all_reads
 
 
-def _read_ctdmrs(bed_path: str | None, chrom: str, start: int, end: int) -> pd.DataFrame:
+@lru_cache(maxsize=4)
+def _load_ctdmr_table_cached(bed_path: str) -> pd.DataFrame:
     cols = ["chr", "start", "end", "best_group", "best_group_leaves", "best_dir", "name"]
-    if bed_path is None:
-        return pd.DataFrame(columns=cols + ["label", "chr_norm"])
-
     dmrs = pd.read_csv(bed_path, sep="\t")
     if dmrs.empty:
         return pd.DataFrame(columns=cols + ["label", "chr_norm"])
@@ -262,12 +324,7 @@ def _read_ctdmrs(bed_path: str | None, chrom: str, start: int, end: int) -> pd.D
     dmrs["start"] = dmrs["start"].astype(int)
     dmrs["end"] = dmrs["end"].astype(int)
     dmrs = dmrs[dmrs["end"] > dmrs["start"]]
-
-    chrom_norm = _norm_chr(chrom)
     dmrs["chr_norm"] = dmrs["chr"].map(_norm_chr)
-    dmrs = dmrs[(dmrs["chr_norm"] == chrom_norm) & (dmrs["start"] < end) & (dmrs["end"] > start)].copy()
-    if dmrs.empty:
-        return pd.DataFrame(columns=cols + ["label", "chr_norm"])
 
     for col in cols:
         if col not in dmrs.columns:
@@ -283,10 +340,29 @@ def _read_ctdmrs(bed_path: str | None, chrom: str, start: int, end: int) -> pd.D
             dmrs["name"].astype(str),
         ),
     )
-    dmrs = dmrs.sort_values(["start", "end"], kind="stable", ignore_index=True)
+    dmrs = dmrs.sort_values(["chr_norm", "start", "end"], kind="stable", ignore_index=True)
     mean_cols = [c for c in dmrs.columns if isinstance(c, str) and c.startswith("mean_")]
     keep_cols = cols + ["label", "chr_norm"] + [c for c in mean_cols if c not in cols]
     return dmrs[keep_cols]
+
+
+def _read_ctdmrs(bed_path: str | None, chrom: str, start: int, end: int) -> pd.DataFrame:
+    cols = ["chr", "start", "end", "best_group", "best_group_leaves", "best_dir", "name", "label", "chr_norm"]
+    if bed_path is None:
+        return pd.DataFrame(columns=cols)
+
+    key = _path_cache_key(bed_path)
+    if key is None:
+        return pd.DataFrame(columns=cols)
+    dmrs = _load_ctdmr_table_cached(key)
+    if dmrs.empty:
+        return dmrs.copy()
+
+    chrom_norm = _norm_chr(chrom)
+    out = dmrs[(dmrs["chr_norm"] == chrom_norm) & (dmrs["start"] < end) & (dmrs["end"] > start)]
+    if out.empty:
+        return pd.DataFrame(columns=list(dmrs.columns))
+    return out.copy()
 
 
 def _summarize_ctdmr_overlap(
@@ -350,10 +426,8 @@ def _summarize_ctdmr_overlap(
     return pd.DataFrame(rows, columns=cols)
 
 
-def _load_read_assignment_table(path: str | None) -> pd.DataFrame:
-    if path is None:
-        return pd.DataFrame()
-
+@lru_cache(maxsize=4)
+def _load_read_assignment_table_cached(path: str) -> pd.DataFrame:
     assignment = pd.read_csv(
         path,
         sep="\t",
@@ -369,6 +443,7 @@ def _load_read_assignment_table(path: str | None) -> pd.DataFrame:
     )
     if assignment.empty:
         assignment["read_name"] = pd.Series(dtype="string")
+        assignment["chr_norm"] = pd.Series(dtype="string")
         return assignment
 
     assignment = assignment.copy()
@@ -377,6 +452,11 @@ def _load_read_assignment_table(path: str | None) -> pd.DataFrame:
     for col in ["chr", "start", "end", "code", "code_order", "best_group", "best_group_leaves", "other_group", "other_group_leaves"]:
         if col not in assignment.columns:
             assignment[col] = pd.NA
+
+    assignment["chr"] = assignment["chr"].astype("string")
+    assignment["chr_norm"] = assignment["chr"].map(_norm_chr).astype("string")
+    assignment["start"] = pd.to_numeric(assignment["start"], errors="coerce").astype("Int64")
+    assignment["end"] = pd.to_numeric(assignment["end"], errors="coerce").astype("Int64")
 
     if "is_best_group" not in assignment.columns:
         assignment["is_best_group"] = False
@@ -388,6 +468,15 @@ def _load_read_assignment_table(path: str | None) -> pd.DataFrame:
             .astype(bool)
         )
     return assignment
+
+
+def _load_read_assignment_table(path: str | None) -> pd.DataFrame:
+    if path is None:
+        return pd.DataFrame()
+    key = _path_cache_key(path)
+    if key is None:
+        return pd.DataFrame()
+    return _load_read_assignment_table_cached(key)
 
 
 def _decode_read_assignment_rows(evidence: pd.DataFrame) -> pd.DataFrame:
@@ -486,11 +575,51 @@ def _summarize_supporting_read_assignments(
         )
         return summary, pd.DataFrame(columns=detail_cols)
 
-    evidence = assignment_df.copy()
-    evidence["chr_norm"] = evidence["chr"].map(_norm_chr)
-    evidence["start"] = pd.to_numeric(evidence["start"], errors="coerce")
-    evidence["end"] = pd.to_numeric(evidence["end"], errors="coerce")
+    support_idx = assignment_df.index.intersection(pd.Index(support_list))
+    if support_idx.empty:
+        status = "unassigned_no_overlap_rows"
+        summary = pd.DataFrame(
+            {
+                "read_name": support_list,
+                "is_supporting": True,
+                "assignment_status": status,
+                "is_assigned": False,
+                "assigned_celltypes": "",
+                "assigned_celltype_counts": "",
+                "n_candidate_rows": 0,
+                "n_assignment_rows": 0,
+                "n_assignment_regions": 0,
+            }
+        )
+        return summary, pd.DataFrame(columns=detail_cols)
+
+    evidence = assignment_df.loc[support_idx].copy()
+    if "chr_norm" not in evidence.columns:
+        evidence["chr_norm"] = evidence["chr"].map(_norm_chr)
+
+    if not pd.api.types.is_integer_dtype(evidence["start"].dtype):
+        evidence["start"] = pd.to_numeric(evidence["start"], errors="coerce").astype("Int64")
+    if not pd.api.types.is_integer_dtype(evidence["end"].dtype):
+        evidence["end"] = pd.to_numeric(evidence["end"], errors="coerce").astype("Int64")
+
     evidence = evidence.dropna(subset=["chr_norm", "start", "end"])
+    if evidence.empty:
+        status = "unassigned_no_overlap_rows"
+        summary = pd.DataFrame(
+            {
+                "read_name": support_list,
+                "is_supporting": True,
+                "assignment_status": status,
+                "is_assigned": False,
+                "assigned_celltypes": "",
+                "assigned_celltype_counts": "",
+                "n_candidate_rows": 0,
+                "n_assignment_rows": 0,
+                "n_assignment_regions": 0,
+            }
+        )
+        return summary, pd.DataFrame(columns=detail_cols)
+
     evidence["start"] = evidence["start"].astype(int)
     evidence["end"] = evidence["end"].astype(int)
 
@@ -509,7 +638,23 @@ def _summarize_supporting_read_assignments(
     raw_counts = evidence.groupby("read_name", sort=False).size().to_dict()
     by_read_counts: dict[str, dict[str, int]] = {}
     by_read_majority: dict[str, str] = {}
+    decoded_n_by_read: dict[str, int] = {}
+    decoded_regions_by_read: dict[str, int] = {}
     if not decoded_detail.empty:
+        decoded_n_by_read = (
+            decoded_detail.groupby("read_name", sort=False)
+            .size()
+            .astype(int)
+            .to_dict()
+        )
+        decoded_regions_by_read = (
+            decoded_detail[["read_name", "chr_norm", "start", "end"]]
+            .drop_duplicates(ignore_index=True)
+            .groupby("read_name", sort=False)
+            .size()
+            .astype(int)
+            .to_dict()
+        )
         per_read_link_counts = (
             decoded_detail
             .groupby(["read_name", "assigned_celltypes"], sort=False)
@@ -538,12 +683,8 @@ def _summarize_supporting_read_assignments(
             majority_celltypes = [ct for ct in str(majority_link).split("|") if ct.strip()]
             celltypes = majority_celltypes if majority_celltypes else [ct for ct, _ in ranked]
             ct_count_str = ";".join(f"{ct}:{cnt}" for ct, cnt in ranked)
-            decoded_n = int(len(decoded_detail[decoded_detail["read_name"] == read_name]))
-            decoded_regions_n = int(
-                decoded_detail[decoded_detail["read_name"] == read_name][["chr_norm", "start", "end"]]
-                .drop_duplicates(ignore_index=True)
-                .shape[0]
-            )
+            decoded_n = int(decoded_n_by_read.get(read_name, 0))
+            decoded_regions_n = int(decoded_regions_by_read.get(read_name, 0))
             rows.append(
                 {
                     "read_name": read_name,
@@ -587,6 +728,8 @@ def _compute_supporting_read_ctdmr_methylation(
     support_assignment_df: pd.DataFrame,
     decoded_assignment_df: pd.DataFrame,
     logger: logging.Logger,
+    bam_handle: pysam.AlignmentFile | None = None,
+    fasta_handle: pysam.FastaFile | None = None,
 ) -> pd.DataFrame:
     cols = [
         "sv_id",
@@ -619,6 +762,10 @@ def _compute_supporting_read_ctdmr_methylation(
     support_df["read_name"] = support_df["read_name"].astype(str)
     support_lookup = support_df.set_index("read_name", drop=False)
     supporting_reads = list(support_lookup.index.unique())
+    support_meta = (
+        support_lookup[["assignment_status", "is_assigned", "assigned_celltypes"]]
+        .to_dict(orient="index")
+    )
 
     dmr_assign_map: dict[tuple[str, str, int, int], str] = {}
     if not decoded_assignment_df.empty:
@@ -633,49 +780,70 @@ def _compute_supporting_read_ctdmr_methylation(
                         merged.append(ct)
             dmr_assign_map[(str(key[0]), str(key[1]), int(key[2]), int(key[3]))] = "|".join(merged)
 
+    bam_for_mm = bam_handle if bam_handle is not None else _get_thread_bam_handle(bam_path)
+    fa_for_mm = fasta_handle if fasta_handle is not None else _get_thread_fasta_handle(reference_path)
+
+    per_chr_methyl: dict[str, tuple[pd.DataFrame, np.ndarray]] = {}
+    for chr_name, chr_dmrs in dmrs.groupby("chr", sort=False):
+        chr_text = str(chr_name)
+        fetch_start = int(pd.to_numeric(chr_dmrs["start"], errors="coerce").min())
+        fetch_end = int(pd.to_numeric(chr_dmrs["end"], errors="coerce").max())
+        read_matrix = pd.DataFrame()
+        cpg_positions = np.asarray([], dtype=np.int64)
+        try:
+            mm, cpgs = methyl_matrix_from_bam(
+                bam_path,
+                reference_path,
+                chrom=chr_text,
+                start=fetch_start,
+                end=fetch_end,
+                return_positions=True,
+                read_name_whitelist=set(supporting_reads),
+                bam_handle=bam_for_mm,
+                fasta_handle=fa_for_mm,
+            )
+            cpg_positions = np.asarray(cpgs, dtype=np.int64)
+            if not mm.empty:
+                if isinstance(mm.index, pd.MultiIndex) and "read_name" in mm.index.names:
+                    read_names = mm.index.get_level_values("read_name").astype(str)
+                else:
+                    read_names = mm.index.astype(str)
+                mm2 = mm.copy()
+                mm2["_read_name"] = read_names
+                value_cols = [c for c in mm2.columns if c != "_read_name"]
+                if value_cols:
+                    read_matrix = mm2.groupby("_read_name", sort=False)[value_cols].mean()
+        except Exception:
+            logger.exception(
+                "Failed methylation extraction for %s:%d-%d; writing NA values.",
+                chr_text,
+                fetch_start,
+                fetch_end,
+            )
+        per_chr_methyl[chr_text] = (read_matrix, cpg_positions)
+
     out_rows = []
     for dmr in dmrs.itertuples(index=False):
         dmr_chr = str(dmr.chr)
         dmr_start = int(dmr.start)
         dmr_end = int(dmr.end)
         dmr_chr_norm = _norm_chr(dmr_chr)
-        dmr_cpg_count = 0
+        read_matrix, cpg_positions = per_chr_methyl.get(
+            dmr_chr, (pd.DataFrame(), np.asarray([], dtype=np.int64))
+        )
+        in_dmr = (cpg_positions >= dmr_start) & (cpg_positions < dmr_end)
+        dmr_cols = [int(x) for x in cpg_positions[in_dmr]]
+        dmr_cpg_count = int(len(dmr_cols))
 
         read_mean = pd.Series(dtype="float64")
         read_n_obs = pd.Series(dtype="int64")
-        try:
-            mm, cpgs = methyl_matrix_from_bam(
-                bam_path,
-                reference_path,
-                chrom=dmr_chr,
-                start=dmr_start,
-                end=dmr_end,
-                return_positions=True,
-            )
-            dmr_cpg_count = int(len(cpgs))
-            if not mm.empty:
-                if isinstance(mm.index, pd.MultiIndex) and "read_name" in mm.index.names:
-                    read_names = mm.index.get_level_values("read_name").astype(str)
-                else:
-                    read_names = mm.index.astype(str)
-
-                mm2 = mm.copy()
-                mm2["_read_name"] = read_names
-                value_cols = [c for c in mm2.columns if c != "_read_name"]
-                if value_cols:
-                    grouped = mm2.groupby("_read_name", sort=False)[value_cols].mean()
-                    read_mean = grouped.mean(axis=1, skipna=True)
-                    read_n_obs = grouped.notna().sum(axis=1).astype(int)
-        except Exception:
-            logger.exception(
-                "Failed methylation extraction for %s:%d-%d; writing NA values.",
-                dmr_chr,
-                dmr_start,
-                dmr_end,
-            )
+        if dmr_cols and (not read_matrix.empty):
+            dmr_matrix = read_matrix.loc[:, dmr_cols]
+            read_mean = dmr_matrix.mean(axis=1, skipna=True)
+            read_n_obs = dmr_matrix.notna().sum(axis=1).astype(int)
 
         for read_name in supporting_reads:
-            base = support_lookup.loc[read_name]
+            base = support_meta.get(read_name, {})
             mean_val = read_mean.get(read_name, np.nan)
             n_obs_val = int(read_n_obs.get(read_name, 0)) if read_name in read_n_obs.index else 0
 
@@ -795,40 +963,17 @@ def _build_read_methylation_map(methyl_df: pd.DataFrame) -> dict[str, float]:
     return {str(k): float(v) for k, v in stats.items() if pd.notna(v)}
 
 
-def _build_reference_celltype_matrix(dmrs: pd.DataFrame) -> pd.DataFrame:
-    """
-    Build a ctDMR x cell-type matrix from BED mean_* columns.
-    Uses all available mean_<celltype> columns (excluding summary means).
-    """
+def _reference_celltype_mean_columns(dmrs: pd.DataFrame) -> list[str]:
     if dmrs.empty:
-        return pd.DataFrame()
-
+        return []
     skip = {"mean_best_value", "mean_rest_value", "mean_margin"}
-    mean_cols = [
+    all_cols = [
         c for c in dmrs.columns
         if isinstance(c, str) and c.startswith("mean_") and c not in skip
     ]
-    if not mean_cols:
-        return pd.DataFrame()
-
-    mat = dmrs[mean_cols].apply(pd.to_numeric, errors="coerce")
-    if mat.empty:
-        return pd.DataFrame()
-
-    rename_map = {c: c[len("mean_"):] for c in mean_cols}
-    mat = mat.rename(columns=rename_map)
-
-    # Stable row labels with coordinates to avoid collisions.
-    row_labels = (
-        dmrs["label"].astype(str)
-        + " ["
-        + dmrs["start"].astype(int).astype(str)
-        + "-"
-        + dmrs["end"].astype(int).astype(str)
-        + "]"
-    )
-    mat.index = row_labels
-    return mat
+    if not all_cols:
+        return []
+    return all_cols
 
 
 def _plot_sv_panel(
@@ -843,6 +988,7 @@ def _plot_sv_panel(
     region_end: int,
     window: int,
     output_path: Path,
+    dpi: int,
 ) -> None:
     try:
         import matplotlib.pyplot as plt
@@ -853,35 +999,25 @@ def _plot_sv_panel(
             "sniffcell viz requires matplotlib. Install it with `pip install matplotlib`."
         ) from e
 
-    ref_matrix = _build_reference_celltype_matrix(dmrs)
-    has_ref_matrix = not ref_matrix.empty
+    ref_mean_cols = _reference_celltype_mean_columns(dmrs)
+    ref_celltypes = [c[len("mean_"):] for c in ref_mean_cols]
 
-    fig_height = max(7.5, 6.2 + 0.08 * max(1, len(shown_reads)) + 0.12 * max(1, len(dmrs)))
-    if has_ref_matrix:
-        fig_height += max(2.4, 0.10 * len(ref_matrix.index))
+    fig_height = max(6.4, 5.0 + 0.060 * max(1, len(shown_reads)) + 0.035 * max(1, len(ref_mean_cols)))
+    fig, axes = plt.subplots(
+        2,
+        1,
+        figsize=(18, fig_height),
+        sharex=True,
+        constrained_layout=False,
+        gridspec_kw={"height_ratios": [4.2, 1.8]},
+    )
+    fig.subplots_adjust(left=0.055, right=0.995, top=0.82, bottom=0.08, hspace=0.08)
+    ax_reads, ax_dmrs = axes
 
-    if has_ref_matrix:
-        fig = plt.figure(figsize=(18, fig_height), constrained_layout=True)
-        gs = fig.add_gridspec(3, 1, height_ratios=[4.8, 2.6, max(2.2, 0.16 * len(ref_matrix.index))], hspace=0.24)
-        ax_reads = fig.add_subplot(gs[0, 0])
-        ax_dmrs = fig.add_subplot(gs[1, 0], sharex=ax_reads)
-        ax_ref = fig.add_subplot(gs[2, 0])
-    else:
-        fig, axes = plt.subplots(
-            2,
-            1,
-            figsize=(15, fig_height),
-            sharex=True,
-            constrained_layout=True,
-            gridspec_kw={"height_ratios": [4.8, 2.6]},
-        )
-        ax_reads, ax_dmrs = axes
-        ax_ref = None
-
-    title_size = 18
+    title_size = 20
     subtitle_size = 13
-    axis_label_size = 14
-    tick_label_size = 11
+    axis_label_size = 16
+    tick_label_size = 13
 
     sv_start = int(sv["start"])
     sv_end = int(sv["end"])
@@ -902,7 +1038,6 @@ def _plot_sv_panel(
         )
 
     read_meth_map = _build_read_methylation_map(methyl_df)
-    dmr_meth_stats_map = _build_dmr_methylation_stats_map(methyl_df)
     meth_threshold = 0.50
     methylated_color = "#d73027"   # IGV-style: methylated -> red
     unmethylated_color = "#4575b4" # IGV-style: unmethylated -> blue
@@ -1041,51 +1176,75 @@ def _plot_sv_panel(
     ax_reads.grid(axis="x", alpha=0.2)
     ax_reads.tick_params(axis="x", labelsize=tick_label_size)
 
-    plotted_dmr_methylation = False
+    plotted_reference_methylation = False
     if dmrs.empty:
         ax_dmrs.text(0.01, 0.5, "No ctDMRs overlap this window", transform=ax_dmrs.transAxes, va="center", fontsize=axis_label_size)
         ax_dmrs.set_ylim(0, 1)
         ax_dmrs.set_yticks([])
+    elif not ref_mean_cols:
+        ax_dmrs.text(
+            0.01,
+            0.5,
+            "ctDMRs found, but no input cell-type methylation columns (mean_<celltype>) were found in BED.",
+            transform=ax_dmrs.transAxes,
+            va="center",
+            fontsize=axis_label_size - 1,
+        )
+        ax_dmrs.set_ylim(0, 1)
+        ax_dmrs.set_yticks([])
     else:
-        dmr_y = []
-        dmr_labels = []
-        for i, row in enumerate(dmrs.itertuples(index=False)):
-            y = i + 0.1
-            height = 0.8
-            color = "#2ca25f" if str(row.best_dir).lower() == "hyper" else "#756bb1"
-            ax_dmrs.broken_barh(
-                [(int(row.start), int(row.end) - int(row.start))],
-                (y, height),
-                facecolors=color,
-                alpha=0.75,
-            )
-            dmr_key = (str(row.chr), int(row.start), int(row.end))
-            if dmr_key in dmr_meth_stats_map:
-                meth_mean, n_signal = dmr_meth_stats_map[dmr_key]
-                center_x = 0.5 * (int(row.start) + int(row.end))
-                marker_size = 25 + 6 * min(max(n_signal, 1), 12)
-                marker_color = methylated_color if float(meth_mean) >= meth_threshold else unmethylated_color
-                ax_dmrs.scatter(
-                    [center_x],
-                    [i + 0.5],
-                    marker="s",
-                    s=marker_size,
-                    c=[marker_color],
-                    edgecolors="#111111",
-                    linewidths=0.45,
-                    zorder=5,
-                )
-                plotted_dmr_methylation = True
-            dmr_y.append(i + 0.5)
-            dmr_labels.append(str(row.label))
-        ax_dmrs.set_ylim(0, max(1, len(dmrs)))
-        if len(dmrs) <= 20:
-            ax_dmrs.set_yticks(dmr_y)
-            ax_dmrs.set_yticklabels(dmr_labels, fontsize=tick_label_size - 1)
-        else:
-            ax_dmrs.set_yticks([])
+        dmrs_plot = dmrs.reset_index(drop=True)
+        cmap = plt.cm.bwr
+        n_celltypes = len(ref_mean_cols)
+        for ct_idx, mean_col in enumerate(ref_mean_cols):
+            y0 = ct_idx + 0.1
+            y_center = ct_idx + 0.5
+            for _, row in dmrs_plot.iterrows():
+                start = int(row["start"])
+                end = int(row["end"])
+                if end <= start:
+                    continue
+                best_dir = str(row.get("best_dir", "")).lower()
+                edge_color = "#2ca25f" if best_dir == "hyper" else "#756bb1"
+                value = pd.to_numeric(row.get(mean_col, pd.NA), errors="coerce")
+                if pd.notna(value):
+                    v = float(np.clip(float(value), 0.0, 1.0))
+                    face_color = cmap(v)
+                    text_value = f"{v:.2f}"
+                    text_color = "#111111"
+                    plotted_reference_methylation = True
+                else:
+                    face_color = "#d9d9d9"
+                    text_value = "NA"
+                    text_color = "#111111"
 
-    ax_dmrs.set_ylabel("ctDMRs", fontsize=axis_label_size)
+                ax_dmrs.broken_barh(
+                    [(start, end - start)],
+                    (y0, 0.8),
+                    facecolors=face_color,
+                    edgecolors=edge_color,
+                    linewidth=0.8,
+                    alpha=0.82,
+                    zorder=2,
+                )
+
+                center_x = 0.5 * (start + end)
+                ax_dmrs.text(
+                    center_x,
+                    y_center,
+                    text_value,
+                    ha="center",
+                    va="center",
+                    fontsize=max(10, tick_label_size - 1),
+                    color=text_color,
+                    zorder=3,
+                )
+
+        ax_dmrs.set_ylim(0, max(1, n_celltypes))
+        ax_dmrs.set_yticks([i + 0.5 for i in range(n_celltypes)])
+        ax_dmrs.set_yticklabels(ref_celltypes, fontsize=max(8, tick_label_size - 1))
+
+    ax_dmrs.set_ylabel("Cell types", fontsize=axis_label_size)
     ax_dmrs.set_xlabel(f"{chrom} coordinate (bp)", fontsize=axis_label_size)
     ax_dmrs.grid(axis="x", alpha=0.2)
     ax_dmrs.tick_params(axis="x", labelsize=tick_label_size)
@@ -1098,13 +1257,40 @@ def _plot_sv_panel(
     n_total_support = int(len(support_assignment_df)) if not support_assignment_df.empty else n_support_listed
     n_unassigned = max(0, n_total_support - n_assigned)
 
-    title = f"SV {sv['id']} ({sv['svtype']}) at {chrom}:{sv_start + 1}-{sv_end} | window +/-{window} bp"
-    fig.suptitle(title, fontsize=title_size, y=0.995)
+    sv_len_signed: int | None
+    try:
+        sv_len_signed = int(float(sv.get("svlen", pd.NA)))
+    except Exception:
+        sv_len_signed = None
+    if sv_len_signed is None:
+        sv_len_signed = int(sv_end - sv_start)
+    sv_len_abs = abs(int(sv_len_signed))
+    sv_len_text = f"{sv_len_signed} bp (abs {sv_len_abs} bp)"
+
+    sv_locus_igv = f"{chrom}:{sv_start + 1}-{sv_end}"
+    window_locus_igv = f"{chrom}:{region_start + 1}-{region_end}"
+    dmr_coords_igv = [
+        f"{str(row.chr)}:{int(row.start) + 1}-{int(row.end)}"
+        for row in dmrs.itertuples(index=False)
+    ]
+    dmr_preview = ", ".join(dmr_coords_igv[:8])
+    if len(dmr_coords_igv) > 8:
+        dmr_preview += f", ... (+{len(dmr_coords_igv) - 8} more)"
+    if not dmr_preview:
+        dmr_preview = "none"
+
+    title = (
+        f"SV {sv['id']} ({sv['svtype']}) at {chrom}:{sv_start + 1}-{sv_end} "
+        f"| SVLEN {sv_len_text} | window +/-{window} bp"
+    )
+    fig.suptitle(title, fontsize=title_size, y=0.985)
     subtitle = (
         f"supporting reads in VCF: {n_support_listed} | in BAM window: {n_support_in_window} | shown: {n_support_shown} | "
         f"assigned: {n_assigned} | unassigned: {n_unassigned}"
     )
-    ax_reads.text(0.01, 1.02, subtitle, transform=ax_reads.transAxes, fontsize=subtitle_size, va="bottom")
+    fig.text(0.01, 0.955, subtitle, fontsize=subtitle_size, ha="left", va="center")
+    fig.text(0.01, 0.935, f"SV (IGV): {sv_locus_igv} | Window (IGV): {window_locus_igv}", fontsize=11, ha="left", va="center")
+    fig.text(0.01, 0.916, f"ctDMRs plotted (IGV, {len(dmr_coords_igv)}): {dmr_preview}", fontsize=10, ha="left", va="center")
 
     legend_handles = [
         Line2D([0], [0], color="#d62728", lw=2.6, linestyle="-", label="Supporting read (assigned)"),
@@ -1115,63 +1301,35 @@ def _plot_sv_panel(
         Line2D([0], [0], linestyle="None", marker="o", markerfacecolor=methylated_color, markeredgecolor="#111111", markersize=7, label="Methylated (red)"),
         Line2D([0], [0], linestyle="None", marker="o", markerfacecolor=unmethylated_color, markeredgecolor="#111111", markersize=7, label="Unmethylated (blue)"),
         Patch(facecolor="#3182bd", alpha=0.20, label="SV interval"),
-        Patch(facecolor="#2ca25f", alpha=0.75, label="ctDMR hyper"),
-        Patch(facecolor="#756bb1", alpha=0.75, label="ctDMR hypo/other"),
+        Patch(facecolor="#f7f7f7", edgecolor="#2ca25f", alpha=0.95, label="ctDMR hyper (edge)"),
+        Patch(facecolor="#f7f7f7", edgecolor="#756bb1", alpha=0.95, label="ctDMR hypo/other (edge)"),
     ]
     ax_reads.legend(handles=legend_handles, loc="upper right", fontsize=tick_label_size, frameon=False)
 
-    if plotted_read_methylation or plotted_dmr_methylation:
+    if plotted_read_methylation or plotted_reference_methylation:
         ax_dmrs.text(
             0.01,
-            1.02,
-            "Methylation color rule: mean >= 0.50 -> red, mean < 0.50 -> blue",
+            0.99,
+            "Panel-2 colors are input cell-type methylation values (0=blue, 1=red); numbers are exact values.",
             transform=ax_dmrs.transAxes,
             fontsize=tick_label_size - 1,
-            va="bottom",
+            va="top",
+            bbox={"facecolor": "#ffffff", "edgecolor": "none", "alpha": 0.7},
+        )
+    if ref_mean_cols:
+        ref_note = f"Panel-2 y-axis cell types: {', '.join(ref_celltypes)}"
+        ax_dmrs.text(
+            0.01,
+            0.90,
+            ref_note,
+            transform=ax_dmrs.transAxes,
+            fontsize=tick_label_size - 1,
+            va="top",
+            bbox={"facecolor": "#ffffff", "edgecolor": "none", "alpha": 0.7},
         )
 
-    if ax_ref is not None:
-        ref_vals = ref_matrix.to_numpy(dtype=float)
-        ref_ma = np.ma.masked_invalid(ref_vals)
-        cmap = plt.cm.bwr.copy()
-        cmap.set_bad("#d9d9d9")
-        im = ax_ref.imshow(ref_ma, aspect="auto", interpolation="nearest", cmap=cmap, vmin=0.0, vmax=1.0)
-        ax_ref.set_title("Cell-type DNA methylation values on shown ctDMRs (from mean_* in BED)", fontsize=axis_label_size)
-        ax_ref.set_ylabel("ctDMRs", fontsize=axis_label_size)
-        ax_ref.set_xlabel("Cell types", fontsize=axis_label_size)
-
-        # Show all cell types on x-axis.
-        ax_ref.set_xticks(np.arange(ref_matrix.shape[1]))
-        ax_ref.set_xticklabels(ref_matrix.columns.tolist(), rotation=60, ha="right", fontsize=max(7, tick_label_size - 2))
-
-        # Show ctDMR labels if manageable.
-        if ref_matrix.shape[0] <= 30:
-            ax_ref.set_yticks(np.arange(ref_matrix.shape[0]))
-            ax_ref.set_yticklabels(ref_matrix.index.tolist(), fontsize=max(7, tick_label_size - 2))
-        else:
-            ax_ref.set_yticks(np.arange(ref_matrix.shape[0]))
-            ax_ref.set_yticklabels(
-                [str(x).split(" [", 1)[0] for x in ref_matrix.index.tolist()],
-                fontsize=max(6, tick_label_size - 3),
-            )
-
-        # Overlay numeric values for smaller matrices so all values are explicit.
-        n_rows, n_cols = ref_matrix.shape
-        if n_rows * n_cols <= 240:
-            for i in range(n_rows):
-                for j in range(n_cols):
-                    v = ref_vals[i, j]
-                    if np.isnan(v):
-                        continue
-                    txt_color = "white" if (v >= 0.65 or v <= 0.35) else "black"
-                    ax_ref.text(j, i, f"{v:.2f}", ha="center", va="center", fontsize=7, color=txt_color)
-
-        cbar = fig.colorbar(im, ax=ax_ref, fraction=0.02, pad=0.01)
-        cbar.set_label("DNA methylation (0-1)", fontsize=tick_label_size)
-        cbar.ax.tick_params(labelsize=tick_label_size - 1)
-
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, dpi=300, bbox_inches="tight")
+    fig.savefig(output_path, dpi=int(dpi), bbox_inches="tight")
     plt.close(fig)
 
 
@@ -1183,13 +1341,17 @@ def viz_main(args) -> None:
     max_reads = int(args.max_reads)
     if max_reads <= 0:
         raise ValueError("max_reads must be > 0")
+    dpi = int(getattr(args, "dpi", 300))
+    if dpi <= 0:
+        raise ValueError("dpi must be > 0")
+    skip_methylation_overlay = bool(getattr(args, "skip_methylation_overlay", False))
 
     resolved = _resolve_viz_runtime_inputs(args, logger)
     window = int(resolved["window"])
     if window < 0:
         raise ValueError("window must be >= 0")
     output_path = resolved["output_path"]
-    logger.info(
+    logger.debug(
         "Resolved viz inputs: bam=%s vcf=%s ref=%s bed=%s read_assignment=%s output=%s window=%d",
         resolved["bam_path"],
         resolved["vcf_path"],
@@ -1207,6 +1369,8 @@ def viz_main(args) -> None:
 
     region_start = max(0, int(sv["start"]) - window)
     region_end = int(sv["end"]) + window
+    bam_handle = _get_thread_bam_handle(resolved["bam_path"])
+    fasta_handle = _get_thread_fasta_handle(resolved["reference_path"])
 
     shown_reads, all_reads = _fetch_reads(
         resolved["bam_path"],
@@ -1215,9 +1379,14 @@ def viz_main(args) -> None:
         region_end,
         supporting_reads=set(sv["supporting_reads"]),
         max_reads=max_reads,
+        bam_handle=bam_handle,
     )
     dmrs = _read_ctdmrs(resolved["bed_path"], sv["chrom"], region_start, region_end)
-    overlap_summary = _summarize_ctdmr_overlap(dmrs, all_reads, int(sv["start"]), int(sv["end"]))
+    export_tables = bool(getattr(args, "export_tables", False))
+    if export_tables:
+        overlap_summary = _summarize_ctdmr_overlap(dmrs, all_reads, int(sv["start"]), int(sv["end"]))
+    else:
+        overlap_summary = pd.DataFrame()
 
     assignment_df = _load_read_assignment_table(resolved["read_assignment_path"])
     support_assignment_df, decoded_assignment_df = _summarize_supporting_read_assignments(
@@ -1231,15 +1400,40 @@ def viz_main(args) -> None:
         region_end=region_end,
         assignment_available=(resolved["read_assignment_path"] is not None),
     )
-    methyl_df = _compute_supporting_read_ctdmr_methylation(
-        sv_id=str(sv["id"]),
-        bam_path=resolved["bam_path"],
-        reference_path=resolved["reference_path"],
-        dmrs=dmrs,
-        support_assignment_df=support_assignment_df,
-        decoded_assignment_df=decoded_assignment_df,
-        logger=logger,
-    )
+    if skip_methylation_overlay:
+        methyl_df = pd.DataFrame(
+            columns=[
+                "sv_id",
+                "read_name",
+                "assignment_status",
+                "is_assigned",
+                "assigned_celltypes",
+                "dmr_assigned_celltypes",
+                "dmr_was_assigned",
+                "chr",
+                "start",
+                "end",
+                "label",
+                "best_group",
+                "best_group_leaves",
+                "best_dir",
+                "mean_methylation",
+                "n_cpg_observed",
+                "n_cpg_in_dmr",
+            ]
+        )
+    else:
+        methyl_df = _compute_supporting_read_ctdmr_methylation(
+            sv_id=str(sv["id"]),
+            bam_path=resolved["bam_path"],
+            reference_path=resolved["reference_path"],
+            dmrs=dmrs,
+            support_assignment_df=support_assignment_df,
+            decoded_assignment_df=decoded_assignment_df,
+            logger=logger,
+            bam_handle=bam_handle,
+            fasta_handle=fasta_handle,
+        )
 
     _plot_sv_panel(
         sv=sv,
@@ -1252,10 +1446,11 @@ def viz_main(args) -> None:
         region_end=region_end,
         window=window,
         output_path=output_path,
+        dpi=dpi,
     )
 
-    logger.info("Wrote SV visualization: %s", output_path)
-    if bool(getattr(args, "export_tables", False)):
+    logger.debug("Wrote SV visualization: %s", output_path)
+    if export_tables:
         summary_path = output_path.with_name(f"{output_path.stem}.summary.tsv")
         assign_path = output_path.with_name(f"{output_path.stem}.supporting_reads_assignment.tsv")
         methyl_path = output_path.with_name(f"{output_path.stem}.supporting_reads_ctdmr_methylation.tsv")

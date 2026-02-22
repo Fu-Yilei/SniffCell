@@ -4,6 +4,7 @@ import numpy as np
 from typing import Optional, List, Tuple, Union
 from scipy import sparse
 from math import log, exp
+from contextlib import nullcontext
 
 def _cpg_c_sites(fa: pysam.FastaFile, chrom: str, start: int, end: int):
     return [m.start() + start for m in re.finditer(r"CG", fa.fetch(chrom, start, end))]
@@ -41,7 +42,10 @@ def methyl_matrix_from_bam(
     include_supplementary: bool = False, include_unmapped: bool = False,
     as_sparse: bool = False, return_positions: bool = False,
     wanted_keys: Optional[set] = None,
+    read_name_whitelist: Optional[set[str]] = None,
     combine_mode: str = "union",   # <-- NEW: how to combine m & h
+    bam_handle: Optional[pysam.AlignmentFile] = None,
+    fasta_handle: Optional[pysam.FastaFile] = None,
 ) -> Union[pd.DataFrame, Tuple[pd.DataFrame, List[int]]]:
 
     # default: include both 5mC and 5hmC on both strands
@@ -49,8 +53,16 @@ def methyl_matrix_from_bam(
         ('C', 0, 'm'), ('C', 1, 'm'),
         ('C', 0, 'h'), ('C', 1, 'h'),
     }
+    if read_name_whitelist is not None:
+        read_name_whitelist = {str(x) for x in read_name_whitelist if str(x).strip()}
+        if not read_name_whitelist:
+            idx = pd.MultiIndex.from_arrays([[], []], names=["read_name", "haplotype"])
+            out = pd.DataFrame(index=idx)
+            return (out, []) if return_positions else out
 
-    with pysam.AlignmentFile(bam_path, "rb") as bam, pysam.FastaFile(fasta_path) as fa:
+    bam_ctx = nullcontext(bam_handle) if bam_handle is not None else pysam.AlignmentFile(bam_path, "rb")
+    fa_ctx = nullcontext(fasta_handle) if fasta_handle is not None else pysam.FastaFile(fasta_path)
+    with bam_ctx as bam, fa_ctx as fa:
         cpgs = _cpg_c_sites(fa, chrom, start, end)
         if not cpgs:
             idx = pd.MultiIndex.from_arrays([[], []], names=["read_name", "haplotype"])
@@ -64,11 +76,13 @@ def methyl_matrix_from_bam(
 
         row_ids, haps, key2row = [], [], {}
 
-        for r in bam.fetch(chrom, start, end, multiple_iterators=True):
+        for r in bam.fetch(chrom, start, end):
             if (r.is_unmapped and not include_unmapped) or \
                (r.is_secondary and not include_secondary) or \
                (r.is_supplementary and not include_supplementary) or \
                (min_read_length and (r.query_length or 0) < min_read_length):
+                continue
+            if read_name_whitelist is not None and r.query_name not in read_name_whitelist:
                 continue
 
             try:

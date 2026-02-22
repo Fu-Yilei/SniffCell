@@ -91,6 +91,46 @@ class TestVariantAssignment(unittest.TestCase):
         self.assertEqual(row["linked_celltype_fractions"], "A:0.500;C:0.500")
         self.assertTrue(bool(row["is_multi_celltype_link"]))
 
+    def test_strict_majority_can_still_assign_with_partial_support_overlap(self):
+        sv_df = pd.DataFrame(
+            {
+                "chr": ["1"],
+                "location": [1000],
+                "id": ["sv1"],
+                "supporting_reads": [["r1", "r2", "r3", "r4", "r5"]],
+            }
+        )
+
+        read_assignment_df = pd.DataFrame(
+            {
+                "sv_id": ["sv1", "sv1", "sv1", "sv1"],
+                "code_order": ["A|B"] * 4,
+                "code": ["10", "10", "10", "10"],
+                "best_group": ["A", "A", "A", "A"],
+                "is_best_group": [True, True, True, True],
+                "chr": ["1", "1", "1", "1"],
+                "start": [100, 200, 300, 400],
+                "end": [150, 250, 350, 450],
+            },
+            index=pd.Index(["r1", "r2", "r3", "r4"], name="readname"),
+        )
+
+        out = assign_sv_celltypes(
+            sv_df,
+            read_assignment_df,
+            unique_reads_for_overlap=True,
+            min_overlap_pct=0.8,
+            min_agreement_pct=1.0,
+        )
+        row = out.iloc[0]
+
+        self.assertEqual(row["n_supporting"], 5)
+        self.assertEqual(row["n_overlapped"], 4)
+        self.assertAlmostEqual(float(row["overlap_pct"]), 0.8, places=6)
+        self.assertEqual(row["majority_code"], "10")
+        self.assertAlmostEqual(float(row["majority_pct"]), 1.0, places=6)
+        self.assertEqual(row["assigned_code"], "10")
+
     def test_no_usable_evidence_sets_multi_link_na(self):
         sv_df = pd.DataFrame(
             {
@@ -432,9 +472,30 @@ class TestParseArgs(unittest.TestCase):
                 "out_dir",
             ]
         )
+        self.assertEqual(args.read_assignment_mode, "closest_reference_mean")
         self.assertEqual(args.evidence_mode, "all_rows")
         self.assertAlmostEqual(args.min_overlap_pct, 0.0)
         self.assertAlmostEqual(args.min_agreement_pct, 1.0)
+
+    def test_anno_assignment_mode_accepts_kmeans(self):
+        args = parse_args(
+            [
+                "anno",
+                "-i",
+                "input.bam",
+                "-v",
+                "input.vcf.gz",
+                "-r",
+                "ref.fa",
+                "-b",
+                "a.bed.tsv",
+                "-o",
+                "out_dir",
+                "--read_assignment_mode",
+                "kmeans",
+            ]
+        )
+        self.assertEqual(args.read_assignment_mode, "kmeans")
 
     def test_svanno_assignment_defaults_are_strict_all_rows(self):
         args = parse_args(
@@ -462,11 +523,13 @@ class TestParseArgs(unittest.TestCase):
         )
         self.assertEqual(args.command, "report")
         self.assertEqual(args.anno_output, "anno_out")
-        self.assertAlmostEqual(args.min_overlap_pct, 0.5)
-        self.assertAlmostEqual(args.min_majority_pct, 0.95)
+        self.assertAlmostEqual(args.min_overlap_pct, 0.8)
+        self.assertAlmostEqual(args.min_majority_pct, 1.0)
         self.assertFalse(args.include_unassigned)
         self.assertFalse(args.allow_hard_conflict)
         self.assertEqual(args.max_sv, 0)
+        self.assertFalse(args.with_figures)
+        self.assertEqual(args.figure_threads, 1)
         self.assertEqual(args.format, "png")
         self.assertFalse(hasattr(args, "input"))
         self.assertFalse(hasattr(args, "vcf"))

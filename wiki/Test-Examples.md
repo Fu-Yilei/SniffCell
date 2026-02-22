@@ -111,16 +111,28 @@ Checks:
 ```bash
 sniffcell report \
   --anno_output out/anno \
-  --min_overlap_pct 0.5 \
-  --min_majority_pct 0.95 \
-  -f png
+  --min_overlap_pct 0.8 \
+  --min_majority_pct 1.0
 ```
 
 Checks:
 - `out/anno/report/index.html`
 - `out/anno/report/high_confidence_sv.tsv`
+- HTML includes `Copy viz command` controls for each SV
+
+Optional figure rendering:
+
+```bash
+sniffcell report \
+  --anno_output out/anno \
+  --with_figures \
+  --figure_threads 8 \
+  -f png
+```
+
+Checks:
 - `out/anno/report/figures/*.viz.png`
-- if many SVs pass, expect report generation to take longer (one `viz` render per SV)
+- if many SVs pass, expect longer runtime; increase `--figure_threads` to speed up
 
 ### 2.6 Differential methylation near SVs (`dmsv`)
 

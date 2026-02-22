@@ -25,6 +25,7 @@ def _write_anno_run_manifest(
     window: int,
     threads: int,
     kanpig_read_names: str | None,
+    read_assignment_mode: str,
 ) -> str:
     manifest_path = os.path.join(output_dir, "anno_run_manifest.json")
     payload = {
@@ -40,6 +41,7 @@ def _write_anno_run_manifest(
         "runtime": {
             "window": int(window),
             "threads": int(threads),
+            "read_assignment_mode": str(read_assignment_mode),
         },
         "outputs": {
             "output_dir": os.path.abspath(output_dir),
@@ -133,6 +135,36 @@ def _parse_celltype_metric_map(value, cast_type):
         except (TypeError, ValueError):
             continue
     return out
+
+
+def _to_finite_float(value) -> float | None:
+    try:
+        if pd.isna(value):
+            return None
+    except TypeError:
+        pass
+    try:
+        out = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not np.isfinite(out):
+        return None
+    return out
+
+
+def _assign_target_by_reference_mean(
+    read_means: np.ndarray,
+    *,
+    mean_best_value,
+    mean_rest_value,
+) -> np.ndarray | None:
+    mb = _to_finite_float(mean_best_value)
+    mr = _to_finite_float(mean_rest_value)
+    if mb is None or mr is None:
+        return None
+    d_best = np.abs(np.asarray(read_means, dtype=float) - mb)
+    d_rest = np.abs(np.asarray(read_means, dtype=float) - mr)
+    return d_best <= d_rest
 
 
 def _build_sv_readable_reports(sv_assignment_df: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -250,7 +282,15 @@ def _one_dmr(args):
     # args: (row_dict, input_bam, reference_fasta)
     logger = logging.getLogger("anno._one_dmr")
 
-    row, input_file, reference = args
+    if len(args) >= 4:
+        row, input_file, reference, read_assignment_mode = args[:4]
+    else:
+        row, input_file, reference = args
+        read_assignment_mode = "closest_reference_mean"
+    read_assignment_mode = str(read_assignment_mode).strip().lower()
+    if read_assignment_mode not in {"closest_reference_mean", "kmeans"}:
+        raise ValueError("read_assignment_mode must be one of: closest_reference_mean, kmeans")
+
     chrom = str(row["chr"])
     start = int(row["start"])
     end   = int(row["end"])
@@ -282,15 +322,6 @@ def _one_dmr(args):
                            f"(raw={n_reads_raw}) < 2; skipping")
             return None
 
-        # call your untouched kmeans wrapper to assign target vs Other
-        dmr_row = {
-            "best_group": best_group,
-            "best_dir": best_dir,
-            "mean_best_value": row.get("mean_best_value", np.nan),
-            "mean_rest_value": row.get("mean_rest_value", np.nan),
-        }
-        out = kmeans_cluster_cells(mm, dmr_row=dmr_row)
-        
         # CpG bounds from cpgs
         cpgstart = int(cpgs[0])
         cpgend   = int(cpgs[-1])
@@ -302,9 +333,43 @@ def _one_dmr(args):
             readnames = (mm.index.astype(str).values if mm.index.dtype == object
                          else np.array([f"read_{i}" for i in range(len(mm))], dtype=str))
 
-        # target mask from your output column
-        mask_target = (out["celltype_or_other"].astype(str).str.lower()
-                       == best_group.strip().lower()).values
+        X_imp = mm.astype(float).copy().fillna(mm.astype(float).mean())
+        read_mean = X_imp.mean(axis=1).values
+
+        # Assign each read to best_group vs other_group per ctDMR.
+        if read_assignment_mode == "closest_reference_mean":
+            mask_target = _assign_target_by_reference_mean(
+                read_mean,
+                mean_best_value=row.get("mean_best_value", np.nan),
+                mean_rest_value=row.get("mean_rest_value", np.nan),
+            )
+            if mask_target is None:
+                logger.warning(
+                    "[%s:%d-%d] closest_reference_mean unavailable (missing mean_best_value/mean_rest_value); "
+                    "falling back to kmeans",
+                    chrom,
+                    start,
+                    end,
+                )
+                dmr_row = {
+                    "best_group": best_group,
+                    "best_dir": best_dir,
+                    "mean_best_value": row.get("mean_best_value", np.nan),
+                    "mean_rest_value": row.get("mean_rest_value", np.nan),
+                }
+                out = kmeans_cluster_cells(mm, dmr_row=dmr_row)
+                mask_target = (out["celltype_or_other"].astype(str).str.lower()
+                               == best_group.strip().lower()).values
+        else:
+            dmr_row = {
+                "best_group": best_group,
+                "best_dir": best_dir,
+                "mean_best_value": row.get("mean_best_value", np.nan),
+                "mean_rest_value": row.get("mean_rest_value", np.nan),
+            }
+            out = kmeans_cluster_cells(mm, dmr_row=dmr_row)
+            mask_target = (out["celltype_or_other"].astype(str).str.lower()
+                           == best_group.strip().lower()).values
 
         # Build hierarchical bit codes in a global schema from code_order.
         target_bits = ["1" if ct in target_set else "0" for ct in cell_types]
@@ -336,8 +401,6 @@ def _one_dmr(args):
         }, index=pd.Index(readnames, name="readname"))
 
         # per-block means (per-read mean methylation, then avg by target vs other)
-        X_imp = mm.astype(float).copy().fillna(mm.astype(float).mean())
-        read_mean = X_imp.mean(axis=1).values
         tgt_mean = float(np.nanmean(read_mean[mask_target])) if mask_target.any() else np.nan
         oth_mean = float(np.nanmean(read_mean[~mask_target])) if (~mask_target).any() else np.nan
 
@@ -446,9 +509,12 @@ def anno_main(args):
     reference  = args.reference
     threads    = int(args.threads)
     window     = int(args.window)
+    read_assignment_mode = str(getattr(args, "read_assignment_mode", "closest_reference_mean")).strip().lower()
+    if read_assignment_mode not in {"closest_reference_mean", "kmeans"}:
+        raise ValueError("read_assignment_mode must be one of: closest_reference_mean, kmeans")
     logger.info(
         f"Starting annotation: bed={bed_input} bam={input_file} ref={reference} "
-        f"threads={threads} out_base={base_out}"
+        f"threads={threads} read_assignment_mode={read_assignment_mode} out_base={base_out}"
     )
 
     # Output paths
@@ -465,6 +531,7 @@ def anno_main(args):
         window=window,
         threads=threads,
         kanpig_read_names=getattr(args, "kanpig_read_names", None),
+        read_assignment_mode=read_assignment_mode,
     )
     logger.info("Wrote anno run manifest: %s", manifest_path)
 
@@ -486,7 +553,7 @@ def anno_main(args):
     n_tasks = len(filtered_bed)
     logger.info(f"Filtered BED to {n_tasks} DMRs after variant overlap filtering, window size = {window}")
 
-    tasks = [(dict(row), input_file, reference) for _, row in filtered_bed.iterrows()]
+    tasks = [(dict(row), input_file, reference, read_assignment_mode) for _, row in filtered_bed.iterrows()]
 
     # --- Prepare outputs: truncate files and reset header flags ---
     # We'll only write headers on the first real chunk for each file.

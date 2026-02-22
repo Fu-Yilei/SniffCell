@@ -3,7 +3,7 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from sniffcell.anno.anno import _resolve_cell_types_and_targets
+from sniffcell.anno.anno import _assign_target_by_reference_mean, _resolve_cell_types_and_targets
 from sniffcell.find.ctdmr import call_ct_combination_dmrs
 
 
@@ -80,6 +80,25 @@ class TestAnnoCodeResolution(unittest.TestCase):
 
         self.assertEqual(cell_types, ["A"])
         self.assertEqual(target_cell_types, ["A"])
+
+    def test_assign_target_by_reference_mean_prefers_closer_mean(self):
+        read_means = np.array([0.10, 0.25, 0.70, 0.90], dtype=float)
+        mask = _assign_target_by_reference_mean(
+            read_means,
+            mean_best_value=0.20,
+            mean_rest_value=0.75,
+        )
+        self.assertIsNotNone(mask)
+        self.assertEqual(mask.tolist(), [True, True, False, False])
+
+    def test_assign_target_by_reference_mean_returns_none_on_missing_reference(self):
+        read_means = np.array([0.10, 0.25, 0.70], dtype=float)
+        mask = _assign_target_by_reference_mean(
+            read_means,
+            mean_best_value=np.nan,
+            mean_rest_value=0.75,
+        )
+        self.assertIsNone(mask)
 
 
 if __name__ == "__main__":

@@ -26,3 +26,4 @@ dataset/
 sniffmeth_deconv_output/
 notebooks/
 atlas/
+tmp/
