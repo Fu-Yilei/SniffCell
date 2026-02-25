@@ -81,6 +81,28 @@ def _build_svtype_expr(svtypes: Iterable[str]) -> str | None:
     return " || ".join(terms)
 
 
+def _build_additional_filter_expr(
+    *,
+    max_vaf: float | None,
+    max_del_len: int | None,
+    min_support: int | None,
+    max_support: int | None,
+) -> str | None:
+    terms: list[str] = []
+    if max_vaf is not None:
+        # Prefer VAF when present; fall back to AF when VAF is missing.
+        terms.append(f'((INFO/VAF<={max_vaf:g}) || (INFO/VAF="." && INFO/AF<={max_vaf:g}))')
+    if max_del_len is not None:
+        terms.append(f'(INFO/SVTYPE!="DEL" || ABS(INFO/SVLEN)<={max_del_len})')
+    if min_support is not None:
+        terms.append(f"(INFO/SUPPORT>={min_support})")
+    if max_support is not None:
+        terms.append(f"(INFO/SUPPORT<={max_support})")
+    if not terms:
+        return None
+    return " && ".join(terms)
+
+
 def _index_vcf(vcf_path: Path, bcftools_bin: str, runner: CommandRunner) -> None:
     runner.run([bcftools_bin, "index", "-t", "-f", str(vcf_path)])
 
@@ -172,6 +194,7 @@ def _bcftools_view(
     exclude_bed: Path | None = None,
     pass_only: bool = False,
     svtypes: tuple[str, ...] = (),
+    include_expr: str | None = None,
 ) -> None:
     if include_bed is not None and exclude_bed is not None:
         raise ValueError("Use at most one of include_bed/exclude_bed per bcftools view call")
@@ -184,9 +207,14 @@ def _bcftools_view(
     if pass_only:
         cmd.extend(["-f", "PASS"])
 
-    expr = _build_svtype_expr(svtypes)
-    if expr:
-        cmd.extend(["-i", expr])
+    exprs: list[str] = []
+    svtype_expr = _build_svtype_expr(svtypes)
+    if svtype_expr:
+        exprs.append(f"({svtype_expr})")
+    if include_expr:
+        exprs.append(f"({include_expr})")
+    if exprs:
+        cmd.extend(["-i", " && ".join(exprs)])
 
     cmd.extend(["-Oz", "-o", str(output_vcf), str(input_vcf)])
     runner.run(cmd)
@@ -203,6 +231,7 @@ def _apply_confidence_filters(
     pass_only: bool,
     include_bed: Path | None,
     exclude_bed: Path | None,
+    include_expr: str | None,
 ) -> None:
     with tempfile.TemporaryDirectory(prefix="sv_filter_", dir=str(output_vcf.parent)) as td:
         tmpdir = Path(td)
@@ -237,6 +266,7 @@ def _apply_confidence_filters(
             runner=runner,
             pass_only=pass_only,
             svtypes=svtypes,
+            include_expr=include_expr,
         )
 
 
@@ -329,6 +359,30 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
         "--keep-nonpass",
         action="store_true",
         help="Keep non-PASS calls (default keeps PASS only for confidence).",
+    )
+    parser.add_argument(
+        "--max-vaf",
+        type=float,
+        default=None,
+        help="Optional maximum allowed VAF/AF in confident calls (e.g., 0.2 keeps VAF<=0.2).",
+    )
+    parser.add_argument(
+        "--max-del-len",
+        type=int,
+        default=None,
+        help="Optional maximum absolute DEL size in bp; larger DELs are excluded.",
+    )
+    parser.add_argument(
+        "--min-support",
+        type=int,
+        default=None,
+        help="Optional minimum INFO/SUPPORT to keep.",
+    )
+    parser.add_argument(
+        "--max-support",
+        type=int,
+        default=None,
+        help="Optional maximum INFO/SUPPORT to keep.",
     )
 
     parser.add_argument("--tr-mosaic-af-min", type=float, default=0.001, help="Mosaic AF minimum for TR pass.")
@@ -439,6 +493,28 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     svtypes = _parse_svtypes(args.svtypes)
     pass_only = not args.keep_nonpass
+    if args.max_vaf is not None and (args.max_vaf < 0 or args.max_vaf > 1):
+        raise ValueError(f"--max-vaf must be in [0,1], got: {args.max_vaf}")
+    if args.max_del_len is not None and args.max_del_len <= 0:
+        raise ValueError(f"--max-del-len must be > 0, got: {args.max_del_len}")
+    if args.min_support is not None and args.min_support <= 0:
+        raise ValueError(f"--min-support must be > 0, got: {args.min_support}")
+    if args.max_support is not None and args.max_support <= 0:
+        raise ValueError(f"--max-support must be > 0, got: {args.max_support}")
+    if (
+        args.min_support is not None
+        and args.max_support is not None
+        and args.min_support > args.max_support
+    ):
+        raise ValueError(
+            f"--min-support ({args.min_support}) cannot exceed --max-support ({args.max_support})"
+        )
+    additional_filter_expr = _build_additional_filter_expr(
+        max_vaf=args.max_vaf,
+        max_del_len=args.max_del_len,
+        min_support=args.min_support,
+        max_support=args.max_support,
+    )
     tr_no_qc = not args.tr_with_qc
     tr_include_germline = not args.tr_exclude_germline
     nontr_include_germline = not args.nontr_exclude_germline
@@ -449,6 +525,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         logging.info("Q100 filter disabled")
     else:
         logging.info("Q100 include BED enabled: %s", q100_bed)
+    if additional_filter_expr:
+        logging.info("Additional confidence expression enabled: %s", additional_filter_expr)
 
     tr_raw_vcf = tr_dir / "sniffles.tr.raw.vcf.gz"
     tr_raw_snf = tr_dir / "sniffles.tr.raw.snf"
@@ -484,6 +562,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         pass_only=pass_only,
         include_bed=None if args.disable_q100_filter else q100_bed,
         exclude_bed=None,
+        include_expr=additional_filter_expr,
     )
 
     nontr_regions_bed: Path | None = None
@@ -527,6 +606,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         pass_only=pass_only,
         include_bed=None if args.disable_q100_filter else q100_bed,
         exclude_bed=nontr_exclude_tr_bed,
+        include_expr=additional_filter_expr,
     )
 
     merged_vcf: Path | None = None
@@ -555,6 +635,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             "nontr_region_mode": nontr_mode,
             "tr_mosaic_af_min": args.tr_mosaic_af_min,
             "nontr_mosaic_af_min": args.nontr_mosaic_af_min,
+            "max_vaf": args.max_vaf,
+            "max_del_len": args.max_del_len,
+            "min_support": args.min_support,
+            "max_support": args.max_support,
+            "additional_filter_expr": additional_filter_expr,
             "tr_no_qc": tr_no_qc,
             "nontr_no_qc": args.nontr_no_qc,
             "tr_include_germline": tr_include_germline,
