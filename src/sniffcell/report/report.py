@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import shlex
+import tarfile
 from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,6 +14,7 @@ from types import SimpleNamespace
 import pandas as pd
 
 from sniffcell.viz import viz as viz_module
+from sniffcell.viz import igvviz as igvviz_module
 
 try:
     from tqdm.auto import tqdm
@@ -197,20 +199,50 @@ def _select_high_confidence_svs(
     return selected
 
 
-def _resolve_report_paths(anno_output: Path, output: str | None) -> tuple[Path, Path, Path]:
+def _report_dir_from_archive_path(archive_path: Path) -> Path:
+    name = archive_path.name
+    lowered = name.lower()
+    if lowered.endswith(".tar.gz"):
+        stem = name[:-7]
+    elif lowered.endswith(".tgz"):
+        stem = name[:-4]
+    elif lowered.endswith(".gz"):
+        stem = name[:-3]
+    else:
+        stem = archive_path.stem
+    stem = stem.strip()
+    if not stem:
+        stem = "report"
+    return archive_path.with_name(stem)
+
+
+def _resolve_report_paths(anno_output: Path, output: str | None) -> tuple[Path, Path, Path, Path | None]:
+    archive_path: Path | None = None
     if output is None:
         report_dir = anno_output / "report"
         html_path = report_dir / "index.html"
     else:
         out = Path(output)
+        lower_name = out.name.lower()
         if out.suffix.lower() == ".html":
             html_path = out
             report_dir = out.parent if str(out.parent) else Path(".")
+        elif lower_name.endswith(".tar.gz") or lower_name.endswith(".tgz") or lower_name.endswith(".gz"):
+            archive_path = out
+            report_dir = _report_dir_from_archive_path(out)
+            html_path = report_dir / "index.html"
         else:
             report_dir = out
             html_path = report_dir / "index.html"
     figure_dir = report_dir / "figures"
-    return report_dir, figure_dir, html_path
+    return report_dir, figure_dir, html_path, archive_path
+
+
+def _write_report_archive(report_dir: Path, archive_path: Path) -> Path:
+    archive_path.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(archive_path, mode="w:gz") as tar:
+        tar.add(str(report_dir), arcname=report_dir.name)
+    return archive_path
 
 
 def _build_viz_cli_command(
@@ -224,7 +256,6 @@ def _build_viz_cli_command(
     dpi: int,
     exact_window: bool,
     skip_methylation_overlay: bool,
-    export_tables: bool,
 ) -> str:
     parts = [
         "sniffcell",
@@ -248,8 +279,7 @@ def _build_viz_cli_command(
         parts.append("--exact_window")
     if skip_methylation_overlay:
         parts.append("--skip_methylation_overlay")
-    if export_tables:
-        parts.append("--export_tables")
+    parts.append("--export_tables")
     return " ".join(shlex.quote(p) for p in parts)
 
 
@@ -264,7 +294,6 @@ def _render_one_viz_panel(
     dpi: int,
     exact_window: bool,
     skip_methylation_overlay: bool,
-    export_tables: bool,
     reuse_existing_viz: bool,
 ) -> tuple[str, str]:
     if reuse_existing_viz and figure_path.exists():
@@ -286,7 +315,7 @@ def _render_one_viz_panel(
             dpi=int(dpi),
             exact_window=bool(exact_window),
             skip_methylation_overlay=bool(skip_methylation_overlay),
-            export_tables=bool(export_tables),
+            export_tables=True,
             output=str(figure_path),
         )
         viz_module.viz_main(viz_args)
@@ -296,6 +325,164 @@ def _render_one_viz_panel(
     if figure_path.exists():
         return "rendered", ""
     return "failed_no_output", "viz completed but output figure was not found."
+
+
+def _build_igvviz_cli_command(
+    *,
+    anno_output: Path,
+    sv_id: str,
+    output_dir: Path,
+    window: int,
+    igv_bams: list[str] | None,
+    igv_cmd: str,
+    snapshot_format: str,
+    snapshot_width: int,
+    snapshot_height: int,
+) -> str:
+    parts = [
+        "sniffcell",
+        "igvviz",
+        "--anno_output",
+        str(anno_output),
+        "-s",
+        str(sv_id),
+        "-o",
+        str(output_dir),
+        "-w",
+        str(window),
+        "--igv_cmd",
+        str(igv_cmd),
+        "--keep_intermediates",
+    ]
+    parts += [
+        "--snapshot_format",
+        str(snapshot_format),
+        "--snapshot_width",
+        str(snapshot_width),
+        "--snapshot_height",
+        str(snapshot_height),
+    ]
+    if igv_bams:
+        parts.extend(["-i", *[str(x) for x in igv_bams]])
+    return " ".join(shlex.quote(p) for p in parts)
+
+
+def _read_igvviz_snapshot_stats(manifest_path: Path) -> tuple[int, int]:
+    if not manifest_path.exists():
+        return 0, 0
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        return 0, 0
+    jobs = payload.get("jobs", [])
+    if not isinstance(jobs, list):
+        return 0, 0
+    total = 0
+    existing = 0
+    for job in jobs:
+        if not isinstance(job, dict):
+            continue
+        snap = str(job.get("snapshot", "")).strip()
+        if not snap:
+            continue
+        total += 1
+        if Path(snap).exists():
+            existing += 1
+    return total, existing
+
+
+def _load_igvviz_snapshot_rows(manifest_path: Path, html_parent: Path) -> list[dict[str, object]]:
+    if not manifest_path.exists():
+        return []
+    try:
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    jobs = payload.get("jobs", [])
+    if not isinstance(jobs, list):
+        return []
+
+    out: list[dict[str, object]] = []
+    for idx, job in enumerate(jobs, start=1):
+        if not isinstance(job, dict):
+            continue
+        snap_text = str(job.get("snapshot", "")).strip()
+        if not snap_text:
+            continue
+        bam_text = str(job.get("bam", "")).strip()
+        bam_label = Path(bam_text).name if bam_text else f"bam_{idx:02d}"
+        snap_path = Path(snap_text)
+        exists = snap_path.exists()
+        snap_rel = ""
+        if exists:
+            try:
+                snap_rel = snap_path.relative_to(html_parent).as_posix()
+            except ValueError:
+                snap_rel = str(snap_path.resolve())
+        out.append(
+            {
+                "bam": bam_text,
+                "bam_label": bam_label,
+                "snapshot": str(snap_path),
+                "snapshot_rel": snap_rel,
+                "exists": bool(exists),
+            }
+        )
+    return out
+
+
+def _render_one_igvviz_bundle(
+    *,
+    anno_output: Path,
+    sv_id: str,
+    output_dir: Path,
+    expected_manifest_path: Path,
+    window: int,
+    igv_bams: list[str] | None,
+    igv_cmd: str,
+    snapshot_format: str,
+    snapshot_width: int,
+    snapshot_height: int,
+    reuse_existing_igvviz: bool,
+) -> tuple[str, str]:
+    if reuse_existing_igvviz and expected_manifest_path.exists():
+        total, existing = _read_igvviz_snapshot_stats(expected_manifest_path)
+        if total > 0 and existing == total:
+            return "reused", ""
+
+    try:
+        igv_args = SimpleNamespace(
+            anno_output=str(anno_output),
+            sv_id=sv_id,
+            input=(list(igv_bams) if igv_bams else None),
+            vcf=None,
+            reference=None,
+            bed=None,
+            kanpig_read_names=None,
+            window=int(window),
+            visibility_window=int(window),
+            phase_tag="HP",
+            support_tag="SC",
+            igv_cmd=str(igv_cmd),
+            batch_only=False,
+            keep_intermediates=True,
+            snapshot_format=str(snapshot_format),
+            snapshot_width=int(snapshot_width),
+            snapshot_height=int(snapshot_height),
+            output=str(output_dir),
+        )
+        igvviz_module.igvviz_main(igv_args)
+    except Exception as exc:
+        return "failed", str(exc)
+
+    if not expected_manifest_path.exists():
+        return "failed_no_output", "igvviz completed but output manifest was not found."
+    total, existing = _read_igvviz_snapshot_stats(expected_manifest_path)
+    if total == 0:
+        return "failed_no_output", "igvviz manifest exists but no snapshot jobs were recorded."
+    if existing == total:
+        return "rendered", ""
+    return "rendered_partial", f"Missing {total-existing}/{total} IGV snapshots."
 
 
 def _build_report_html(
@@ -370,6 +557,9 @@ def _build_report_html(
         ".review-state-not-real{border-left:6px solid #b42318;}"
         ".review-state-undecided{border-left:6px solid #98a2b3;}"
         ".review-badge{text-transform:lowercase;font-weight:700;}"
+        ".igv-grid{display:flex;flex-direction:column;gap:10px;margin-top:10px;}"
+        ".igv-card{background:#f8fafc;border:1px solid #d8dee4;border-radius:8px;padding:8px;}"
+        ".igv-card img{display:block;width:100%;}"
     )
     page.append("</style>")
     page.append("</head>")
@@ -530,14 +720,38 @@ def _build_report_html(
                 f"<b>n_overlapped:</b> {html.escape(n_overlapped_text)}</div>"
             )
             page.append(f"<div class=\"kv\"><b>viz status:</b> {status}</div>")
+            igvviz_status = html.escape(str(item.get("igvviz_status", "")))
+            page.append(f"<div class=\"kv\"><b>igvviz status:</b> {igvviz_status}</div>")
 
             err = str(item.get("viz_error", "")).strip()
             if err:
                 page.append(f"<div class=\"kv err\">viz error: {html.escape(err)}</div>")
+            igv_err = str(item.get("igvviz_error", "")).strip()
+            if igv_err:
+                page.append(f"<div class=\"kv err\">igvviz error: {html.escape(igv_err)}</div>")
 
             fig_rel = str(item.get("viz_figure_rel", "")).strip()
             if fig_rel:
                 page.append(f"<div style=\"margin-top:10px\"><img src=\"{html.escape(fig_rel)}\" alt=\"SV plot for {sv_id}\" loading=\"lazy\"></div>")
+            igv_manifest_rel = str(item.get("igvviz_manifest_rel", "")).strip()
+            if igv_manifest_rel:
+                page.append(
+                    f"<div class=\"kv\" style=\"margin-top:8px\"><b>igvviz manifest:</b> "
+                    f"<a href=\"{html.escape(igv_manifest_rel)}\" target=\"_blank\" rel=\"noopener\">{html.escape(igv_manifest_rel)}</a></div>"
+                )
+            igv_snapshots = item.get("_igvviz_snapshots", [])
+            if isinstance(igv_snapshots, list):
+                shown = [x for x in igv_snapshots if isinstance(x, dict) and str(x.get("snapshot_rel", "")).strip()]
+                if shown:
+                    page.append("<div class=\"igv-grid\">")
+                    for snap in shown:
+                        snap_rel = html.escape(str(snap.get("snapshot_rel", "")).strip())
+                        bam_label = html.escape(str(snap.get("bam_label", "IGV")).strip() or "IGV")
+                        page.append("<div class=\"igv-card\">")
+                        page.append(f"<div class=\"kv\"><b>{bam_label}</b></div>")
+                        page.append(f"<img src=\"{snap_rel}\" alt=\"IGV snapshot {bam_label} for {sv_id}\" loading=\"lazy\">")
+                        page.append("</div>")
+                    page.append("</div>")
 
             viz_command = str(item.get("viz_command", "")).strip()
             if viz_command:
@@ -546,6 +760,14 @@ def _build_report_html(
                 page.append(
                     f"<button class=\"copy\" type=\"button\" data-cmd=\"{escaped_command}\" "
                     "onclick=\"copyVizCommand(this)\">Copy viz command</button>"
+                )
+            igvviz_command = str(item.get("igvviz_command", "")).strip()
+            if igvviz_command:
+                escaped_igv_command = html.escape(igvviz_command, quote=True)
+                page.append(f"<div class=\"cmd\"><code>{html.escape(igvviz_command)}</code></div>")
+                page.append(
+                    f"<button class=\"copy\" type=\"button\" data-cmd=\"{escaped_igv_command}\" "
+                    "onclick=\"copyVizCommand(this)\">Copy igvviz command</button>"
                 )
             page.append("</section>")
 
@@ -822,6 +1044,10 @@ def report_main(args) -> None:
         raise ValueError("window must be >= 0")
     if int(args.figure_threads) <= 0:
         raise ValueError("figure_threads must be > 0")
+    if int(getattr(args, "igv_snapshot_width", 3600)) <= 0:
+        raise ValueError("igv_snapshot_width must be > 0")
+    if int(getattr(args, "igv_snapshot_height", 1600)) <= 0:
+        raise ValueError("igv_snapshot_height must be > 0")
 
     figure_profile = str(getattr(args, "figure_profile", "full")).strip().lower()
     if figure_profile not in {"fast", "full"}:
@@ -834,15 +1060,28 @@ def report_main(args) -> None:
     effective_max_reads = requested_max_reads
     effective_dpi = requested_dpi
     skip_methylation_overlay = (figure_profile == "fast")
+    shared_threads = int(args.figure_threads)
+    with_igvviz = bool(getattr(args, "with_igvviz", False))
+    igv_cmd = str(getattr(args, "igv_cmd", "igv.sh"))
+    igv_visibility_window = int(args.window)
+    igv_phase_tag = "HP"
+    igv_support_tag = "SC"
+    igv_snapshot_format = str(getattr(args, "igv_snapshot_format", "png"))
+    igv_snapshot_width = int(getattr(args, "igv_snapshot_width", 3600))
+    igv_snapshot_height = int(getattr(args, "igv_snapshot_height", 1600))
+    reuse_existing_igvviz = bool(getattr(args, "reuse_existing_igvviz", False))
+    igv_bams = igvviz_module._split_bam_args(getattr(args, "igv_bams", None))
 
     # Fast profile intentionally trades panel detail for speed.
     if figure_profile == "fast":
         effective_max_reads = min(requested_max_reads, 120)
         effective_dpi = min(requested_dpi, 160)
 
-    report_dir, figure_dir, html_path = _resolve_report_paths(anno_output, args.output)
+    report_dir, figure_dir, html_path, archive_path = _resolve_report_paths(anno_output, args.output)
     report_dir.mkdir(parents=True, exist_ok=True)
     figure_dir.mkdir(parents=True, exist_ok=True)
+    igvviz_root = report_dir / "igvviz"
+    igvviz_root.mkdir(parents=True, exist_ok=True)
 
     sv_df = _load_sv_assignment(sv_assignment_path)
     selected = _select_high_confidence_svs(
@@ -866,7 +1105,7 @@ def report_main(args) -> None:
     logger.info(
         "Figure profile: %s (threads=%d dpi=%d max_reads=%d skip_methylation_overlay=%s)",
         figure_profile,
-        int(args.figure_threads),
+        shared_threads,
         int(effective_dpi),
         int(effective_max_reads),
         bool(skip_methylation_overlay),
@@ -883,6 +1122,21 @@ def report_main(args) -> None:
             requested_dpi,
             effective_dpi,
         )
+    logger.info(
+        "IGV rendering: with_igvviz=%s threads=%d igv_cmd=%s igv_bams=%s visibility_window=%d phase_tag=%s support_tag=%s include_non_supporting=%s keep_intermediates=%s snapshot_format=%s size=%dx%d",
+        with_igvviz,
+        shared_threads,
+        igv_cmd,
+        "|".join(igv_bams) if igv_bams else "<anno-manifest-bam>",
+        igv_visibility_window,
+        igv_phase_tag,
+        igv_support_tag,
+        True,
+        True,
+        igv_snapshot_format,
+        igv_snapshot_width,
+        igv_snapshot_height,
+    )
     if bool(args.with_figures) and len(selected) >= 25:
         logger.warning(
             "Report will render %d SV panels; this can take a long time. "
@@ -890,15 +1144,27 @@ def report_main(args) -> None:
             "or increase --figure_threads.",
             len(selected),
         )
+    if with_igvviz and len(selected) >= 10:
+        logger.warning(
+            "Report will run igvviz for %d SVs across %d BAM(s); this can take a long time. "
+            "Use --max_sv to limit candidates or increase --figure_threads.",
+            len(selected),
+            max(1, len(igv_bams)),
+        )
     if (not bool(args.with_figures)) and len(selected) > 0:
         logger.info(
             "Figure rendering is disabled (default figure-less mode). "
             "Use --with_figures to render panels, or copy per-SV viz commands from the report HTML."
         )
+    if (not with_igvviz) and len(selected) > 0:
+        logger.info(
+            "IGV rendering is disabled. Use --with_igvviz to generate igvviz screenshots per selected SV."
+        )
 
     rows_for_report: list[dict[str, object]] = []
     slug_counts: dict[str, int] = {}
     render_jobs: list[tuple[int, str, Path]] = []
+    igvviz_jobs: list[tuple[int, str, Path, Path]] = []
 
     for row_idx, row in enumerate(selected.to_dict(orient="records")):
         sv_id = str(row["id"])
@@ -906,6 +1172,9 @@ def report_main(args) -> None:
         slug_counts[base_slug] = slug_counts.get(base_slug, 0) + 1
         slug = base_slug if slug_counts[base_slug] == 1 else f"{base_slug}_{slug_counts[base_slug]}"
         figure_path = figure_dir / f"{slug}.viz.{args.format}"
+        igvviz_dir = igvviz_root / slug
+        sv_slug_for_igv = _safe_slug(sv_id)
+        igvviz_manifest_path = igvviz_dir / f"{sv_slug_for_igv}.igvviz.manifest.json"
         viz_command = _build_viz_cli_command(
             anno_output=anno_output,
             sv_id=sv_id,
@@ -916,7 +1185,17 @@ def report_main(args) -> None:
             dpi=int(effective_dpi),
             exact_window=True,
             skip_methylation_overlay=bool(skip_methylation_overlay),
-            export_tables=bool(args.export_tables),
+        )
+        igvviz_command = _build_igvviz_cli_command(
+            anno_output=anno_output,
+            sv_id=sv_id,
+            output_dir=igvviz_dir,
+            window=int(args.window),
+            igv_bams=igv_bams,
+            igv_cmd=igv_cmd,
+            snapshot_format=igv_snapshot_format,
+            snapshot_width=igv_snapshot_width,
+            snapshot_height=igv_snapshot_height,
         )
 
         report_row = dict(row)
@@ -925,8 +1204,19 @@ def report_main(args) -> None:
         report_row["viz_figure"] = str(figure_path)
         report_row["viz_figure_rel"] = ""
         report_row["viz_command"] = viz_command
+        report_row["igvviz_status"] = "not_rendered"
+        report_row["igvviz_error"] = ""
+        report_row["igvviz_dir"] = str(igvviz_dir)
+        report_row["igvviz_dir_rel"] = ""
+        report_row["igvviz_manifest"] = str(igvviz_manifest_path)
+        report_row["igvviz_manifest_rel"] = ""
+        report_row["igvviz_snapshots_rel"] = ""
+        report_row["igvviz_snapshot_bams"] = ""
+        report_row["_igvviz_snapshots"] = []
+        report_row["igvviz_command"] = igvviz_command
         rows_for_report.append(report_row)
         render_jobs.append((row_idx, sv_id, figure_path))
+        igvviz_jobs.append((row_idx, sv_id, igvviz_dir, igvviz_manifest_path))
 
     if bool(args.with_figures) and render_jobs:
         n_threads = int(args.figure_threads)
@@ -946,7 +1236,6 @@ def report_main(args) -> None:
                         dpi=int(effective_dpi),
                         exact_window=True,
                         skip_methylation_overlay=bool(skip_methylation_overlay),
-                        export_tables=bool(args.export_tables),
                         reuse_existing_viz=bool(args.reuse_existing_viz),
                     )
                     rows_for_report[row_idx]["viz_status"] = status
@@ -971,7 +1260,6 @@ def report_main(args) -> None:
                             dpi=int(effective_dpi),
                             exact_window=True,
                             skip_methylation_overlay=bool(skip_methylation_overlay),
-                            export_tables=bool(args.export_tables),
                             reuse_existing_viz=bool(args.reuse_existing_viz),
                         ): (row_idx, sv_id)
                         for row_idx, sv_id, figure_path in render_jobs
@@ -993,8 +1281,75 @@ def report_main(args) -> None:
                 if progress is not None:
                     progress.close()
 
+    if with_igvviz and igvviz_jobs:
+        n_threads = shared_threads
+        progress = None
+        if tqdm is not None:
+            progress = tqdm(total=len(igvviz_jobs), desc="Rendering IGV screenshots", unit="sv")
+        if n_threads <= 1 or len(igvviz_jobs) <= 1:
+            try:
+                for row_idx, sv_id, igvviz_dir, igvviz_manifest_path in igvviz_jobs:
+                    status, error = _render_one_igvviz_bundle(
+                        anno_output=anno_output,
+                        sv_id=sv_id,
+                        output_dir=igvviz_dir,
+                        expected_manifest_path=igvviz_manifest_path,
+                        window=int(args.window),
+                        igv_bams=igv_bams,
+                        igv_cmd=igv_cmd,
+                        snapshot_format=igv_snapshot_format,
+                        snapshot_width=igv_snapshot_width,
+                        snapshot_height=igv_snapshot_height,
+                        reuse_existing_igvviz=bool(reuse_existing_igvviz),
+                    )
+                    rows_for_report[row_idx]["igvviz_status"] = status
+                    rows_for_report[row_idx]["igvviz_error"] = error
+                    if progress is not None:
+                        progress.update(1)
+            finally:
+                if progress is not None:
+                    progress.close()
+        else:
+            try:
+                with ThreadPoolExecutor(max_workers=n_threads) as executor:
+                    future_map = {
+                        executor.submit(
+                            _render_one_igvviz_bundle,
+                            anno_output=anno_output,
+                            sv_id=sv_id,
+                            output_dir=igvviz_dir,
+                            expected_manifest_path=igvviz_manifest_path,
+                            window=int(args.window),
+                            igv_bams=igv_bams,
+                            igv_cmd=igv_cmd,
+                            snapshot_format=igv_snapshot_format,
+                            snapshot_width=igv_snapshot_width,
+                            snapshot_height=igv_snapshot_height,
+                            reuse_existing_igvviz=bool(reuse_existing_igvviz),
+                        ): (row_idx, sv_id)
+                        for row_idx, sv_id, igvviz_dir, igvviz_manifest_path in igvviz_jobs
+                    }
+                    for future in as_completed(future_map):
+                        row_idx, sv_id = future_map[future]
+                        try:
+                            status, error = future.result()
+                        except Exception as exc:
+                            status, error = "failed", str(exc)
+                            logger.exception("Unexpected igvviz worker failure for SV %s", sv_id)
+                        rows_for_report[row_idx]["igvviz_status"] = status
+                        rows_for_report[row_idx]["igvviz_error"] = error
+                        if str(status).startswith("failed"):
+                            logger.error("igvviz failed for SV %s: %s", sv_id, error)
+                        if progress is not None:
+                            progress.update(1)
+            finally:
+                if progress is not None:
+                    progress.close()
+
     rendered_count = 0
     failed_count = 0
+    igvviz_rendered_count = 0
+    igvviz_failed_count = 0
     for report_row in rows_for_report:
         fig_path = Path(str(report_row["viz_figure"]))
         if (not bool(args.with_figures)) and fig_path.exists():
@@ -1005,8 +1360,41 @@ def report_main(args) -> None:
         if str(report_row["viz_status"]).startswith("failed"):
             failed_count += 1
 
+        igv_manifest_path = Path(str(report_row["igvviz_manifest"]))
+        igv_dir_path = Path(str(report_row["igvviz_dir"]))
+        if (not with_igvviz) and igv_manifest_path.exists():
+            report_row["igvviz_status"] = "existing"
+        if igv_dir_path.exists():
+            report_row["igvviz_dir_rel"] = igv_dir_path.relative_to(html_path.parent).as_posix()
+        if igv_manifest_path.exists():
+            igvviz_rendered_count += 1
+            report_row["igvviz_manifest_rel"] = igv_manifest_path.relative_to(html_path.parent).as_posix()
+            snap_rows = _load_igvviz_snapshot_rows(igv_manifest_path, html_path.parent)
+            report_row["_igvviz_snapshots"] = snap_rows
+            rels = [str(x.get("snapshot_rel", "")).strip() for x in snap_rows if str(x.get("snapshot_rel", "")).strip()]
+            bam_labels = [str(x.get("bam_label", "")).strip() for x in snap_rows if str(x.get("snapshot_rel", "")).strip()]
+            report_row["igvviz_snapshots_rel"] = ";".join(rels)
+            report_row["igvviz_snapshot_bams"] = ";".join(bam_labels)
+        if str(report_row["igvviz_status"]).startswith("failed"):
+            igvviz_failed_count += 1
+
     selected_report_df = pd.DataFrame(rows_for_report)
-    for col in ("viz_status", "viz_error", "viz_figure", "viz_figure_rel", "viz_command"):
+    for col in (
+        "viz_status",
+        "viz_error",
+        "viz_figure",
+        "viz_figure_rel",
+        "viz_command",
+        "igvviz_status",
+        "igvviz_error",
+        "igvviz_dir",
+        "igvviz_dir_rel",
+        "igvviz_manifest",
+        "igvviz_manifest_rel",
+        "igvviz_snapshots_rel",
+        "igvviz_snapshot_bams",
+        "igvviz_command",
+    ):
         if col not in selected_report_df.columns:
             selected_report_df[col] = pd.Series(dtype="string")
     selected_tsv_path = report_dir / "high_confidence_sv.tsv"
@@ -1015,6 +1403,9 @@ def report_main(args) -> None:
     failed_tsv_path = report_dir / "failed_viz.tsv"
     failed_only = selected_report_df[selected_report_df["viz_status"].astype(str).str.startswith("failed")].copy()
     failed_only.to_csv(failed_tsv_path, sep="\t", index=False)
+    failed_igvviz_tsv_path = report_dir / "failed_igvviz.tsv"
+    failed_igv_only = selected_report_df[selected_report_df["igvviz_status"].astype(str).str.startswith("failed")].copy()
+    failed_igv_only.to_csv(failed_igvviz_tsv_path, sep="\t", index=False)
 
     filters = {
         "min_overlap_pct": float(args.min_overlap_pct),
@@ -1025,7 +1416,7 @@ def report_main(args) -> None:
     }
     viz_cfg = {
         "with_figures": bool(args.with_figures),
-        "figure_threads": int(args.figure_threads),
+        "figure_threads": int(shared_threads),
         "figure_profile": str(figure_profile),
         "figure_dpi": int(effective_dpi),
         "skip_methylation_overlay": bool(skip_methylation_overlay),
@@ -1033,8 +1424,24 @@ def report_main(args) -> None:
         "window": int(args.window),
         "max_reads": int(effective_max_reads),
         "format": str(args.format),
-        "export_tables": bool(args.export_tables),
+        "export_tables": True,
         "reuse_existing_viz": bool(args.reuse_existing_viz),
+    }
+    igvviz_cfg = {
+        "with_igvviz": bool(with_igvviz),
+        "igv_bams": list(igv_bams),
+        "igv_threads": int(shared_threads),
+        "igv_cmd": str(igv_cmd),
+        "igv_visibility_window": int(igv_visibility_window),
+        "igv_phase_tag": str(igv_phase_tag),
+        "igv_support_tag": str(igv_support_tag),
+        "igv_include_non_supporting": True,
+        "igv_snapshot_format": str(igv_snapshot_format),
+        "igv_snapshot_width": int(igv_snapshot_width),
+        "igv_snapshot_height": int(igv_snapshot_height),
+        "reuse_existing_igvviz": bool(reuse_existing_igvviz),
+        "igv_keep_intermediates": True,
+        "igv_batch_only": False,
     }
     dashboard_records = _build_dashboard_records(selected_report_df)
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1063,24 +1470,37 @@ def report_main(args) -> None:
         },
         "filters": filters,
         "viz": viz_cfg,
+        "igvviz": igvviz_cfg,
         "counts": {
             "sv_total": int(len(sv_df)),
             "sv_selected": int(len(selected)),
             "viz_rendered_or_reused": int(rendered_count),
             "viz_failed": int(failed_count),
+            "igvviz_rendered_or_reused": int(igvviz_rendered_count),
+            "igvviz_failed": int(igvviz_failed_count),
         },
         "outputs": {
             "report_dir": str(report_dir.resolve()),
             "html": str(html_path.resolve()),
             "figures_dir": str(figure_dir.resolve()),
+            "igvviz_dir": str(igvviz_root.resolve()),
             "high_confidence_sv_tsv": str(selected_tsv_path.resolve()),
             "failed_viz_tsv": str(failed_tsv_path.resolve()),
+            "failed_igvviz_tsv": str(failed_igvviz_tsv_path.resolve()),
+            "report_archive": (str(archive_path.resolve()) if archive_path is not None else ""),
         },
     }
     manifest_out = report_dir / "report_manifest.json"
     manifest_out.write_text(json.dumps(manifest_payload, indent=2, sort_keys=True), encoding="utf-8")
 
+    archive_out: Path | None = None
+    if archive_path is not None:
+        archive_out = _write_report_archive(report_dir, archive_path)
+
     logger.info("Wrote HTML report: %s", html_path)
     logger.info("Wrote selected SV table: %s", selected_tsv_path)
     logger.info("Wrote failed viz table: %s", failed_tsv_path)
+    logger.info("Wrote failed igvviz table: %s", failed_igvviz_tsv_path)
     logger.info("Wrote report manifest: %s", manifest_out)
+    if archive_out is not None:
+        logger.info("Wrote gzipped report archive: %s", archive_out)

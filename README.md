@@ -27,7 +27,7 @@ Python requirement: `>=3.10`.
 
 ## CLI Commands
 ```text
-sniffcell {find,deconv,anno,svanno,dmsv,viz,report}
+sniffcell {find,deconv,anno,svanno,dmsv,viz,igvviz,report}
 ```
 
 Standalone pre-`anno` helper:
@@ -40,6 +40,7 @@ Current command status:
 - `anno`: implemented.
 - `svanno`: implemented.
 - `viz`: implemented.
+- `igvviz`: implemented.
 - `report`: implemented.
 - `dmsv`: implemented.
 - `deconv`: placeholder (prints arguments only).
@@ -214,13 +215,45 @@ If `--export_tables` is set, additional files are written using the figure stem:
 - `<stem>.supporting_reads_assignment.tsv`
 - `<stem>.supporting_reads_ctdmr_methylation.tsv`
 
+## `igvviz`: IGV Screenshots for One SV Across One or More BAMs
+`igvviz` runs IGV batch mode, tags supporting reads in temporary regional BAMs, loads optional ctDMR markers, groups reads by phase tag, and writes one snapshot per BAM.
+
+Example with multiple BAMs:
+```bash
+sniffcell igvviz \
+  -i fans_a.bam fans_b.bam fans_c.bam \
+  -v sample.vcf.gz \
+  -s sniffles.SV123 \
+  -r ref.fa \
+  -b pbmc_ctdmr.tsv \
+  -w 10000 \
+  -o out/igvviz
+```
+
+Manifest-driven mode:
+```bash
+sniffcell igvviz \
+  --anno_output anno_out \
+  -s sniffles.SV123 \
+  --batch_only
+```
+
+Notes:
+- default IGV command is `igv.sh` (override with `--igv_cmd`).
+- all overlapping reads in the window are included; supporting reads are explicitly tagged with `SC`.
+- phase grouping uses `HP`; report mode fixes `HP/SC` and keeps intermediates by default.
+- snapshot size is configurable with `--snapshot_width/--snapshot_height` (defaults `3600x1600`).
+- outputs include batch script, run manifest, summary TSV, and snapshots in the output directory.
+
 ## `report`: HTML Report for High-Confidence SVs
 `report` reads `sv_assignment.tsv` from one `anno` output folder, filters to high-confidence SVs, and writes an HTML index.
 
 Input model:
 - only `--anno_output` is required for data inputs; BAM/VCF/REF/BED/read tables are resolved from `anno_run_manifest.json`.
 - default is figure-less for speed; use `--with_figures` to render `viz` panels.
-- if figures are enabled, runtime can be long with many SVs (one `viz` render per SV). Use `--figure_threads` to parallelize.
+- use `--with_igvviz` to also render IGV screenshots per selected SV (optionally with custom `--igv_bams`).
+- use `--figure_threads` as the shared thread count for both `viz` and `igvviz` rendering.
+- if `-o/--output` ends with `.gz`, `.tgz`, or `.tar.gz`, the report folder is also archived as a gzipped tarball at that path.
 
 Example:
 ```bash
@@ -239,6 +272,18 @@ sniffcell report \
   -f png
 ```
 
+Render `viz` + `igvviz` together:
+```bash
+sniffcell report \
+  --anno_output anno_out \
+  --with_figures \
+  --with_igvviz \
+  --igv_bams fans1.bam fans2.bam fans3.bam \
+  --igv_snapshot_width 3600 \
+  --igv_snapshot_height 1600 \
+  --figure_threads 4
+```
+
 Default filtering behavior:
 - requires non-empty `assigned_code`
 - requires non-empty `linked_celltypes`
@@ -248,12 +293,15 @@ Default filtering behavior:
 Outputs under `<anno_output>/report/` by default:
 - `index.html`
 - `figures/<sv_id>.viz.<format>` (when `--with_figures` is used, or when existing figures are present)
+- `igvviz/<sv_id>/...` (when `--with_igvviz` is used)
 - `high_confidence_sv.tsv`
 - `failed_viz.tsv`
+- `failed_igvviz.tsv`
 - `report_manifest.json`
 
 HTML report behavior:
 - each SV entry includes a `Copy viz command` button so users can copy/paste an exact `sniffcell viz` command.
+- when `--with_igvviz` is used, each SV entry also shows embedded IGV screenshots (one per BAM) and a `Copy igvviz command` button.
 - in figure-less mode, this button is the default path to generate selected figures on demand.
 - includes interactive summary plots (Plotly) for genome-wide SV locations, SV length distribution, support metrics, agreement-vs-overlap, and primary cell-type counts.
 

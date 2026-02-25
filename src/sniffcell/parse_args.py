@@ -17,7 +17,7 @@ def parse_args(argv):
         version=f"sniffcell {version}"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
-    valid_commands = ["find", "deconv", "anno", "svanno", "dmsv", "viz", "report"]
+    valid_commands = ["find", "deconv", "anno", "svanno", "dmsv", "viz", "igvviz", "report"]
     # Subcommand: find
     find_parser = subparsers.add_parser("find", help="Find cell type-specific DMRs.")
     atlas_dir = os.path.abspath("atlas")
@@ -219,6 +219,108 @@ def parse_args(argv):
         help="Output figure path or prefix. Defaults to <anno_output>/<sv_id>.viz.<format> when --anno_output is set.",
     )
 
+    igvviz_parser = subparsers.add_parser(
+        "igvviz",
+        help="Use IGV batch mode to render screenshots of one SV across one or more BAM files.",
+    )
+    igvviz_parser.add_argument(
+        "--anno_output",
+        default=None,
+        help="sniffcell anno output folder; if set, igvviz can auto-load BAM/VCF/REF/BED from anno_run_manifest.json.",
+    )
+    igvviz_parser.add_argument(
+        "-i",
+        "--input",
+        nargs="+",
+        required=False,
+        default=None,
+        help="One or more input BAM files. If omitted, falls back to anno manifest BAM when --anno_output is set.",
+    )
+    igvviz_parser.add_argument("-v", "--vcf", required=False, default=None, help="Input VCF file")
+    igvviz_parser.add_argument("-s", "--sv_id", required=True, help="SV ID to visualize")
+    igvviz_parser.add_argument(
+        "-r",
+        "--reference",
+        default=None,
+        help="Reference FASTA file to load in IGV.",
+    )
+    igvviz_parser.add_argument(
+        "-b",
+        "--bed",
+        default=None,
+        help="Optional ctDMR BED/TSV file. Overlapping ctDMRs are loaded as an IGV marker track.",
+    )
+    igvviz_parser.add_argument(
+        "-krn",
+        "--kanpig_read_names",
+        type=str,
+        default=None,
+        help="Optional TSV mapping SV IDs to supporting read names; overrides VCF RNAMES when provided.",
+    )
+    igvviz_parser.add_argument(
+        "-w",
+        "--window",
+        type=int,
+        default=5000,
+        help="Window size around SV to screenshot, default=5000",
+    )
+    igvviz_parser.add_argument(
+        "--visibility_window",
+        type=int,
+        default=None,
+        help="Optional IGV alignment visibility window (bp). Defaults to --window when omitted.",
+    )
+    igvviz_parser.add_argument(
+        "--phase_tag",
+        default="HP",
+        help="Tag used for IGV grouping by phase (default=HP).",
+    )
+    igvviz_parser.add_argument(
+        "--support_tag",
+        default="SC",
+        help="Temporary BAM tag used to mark supporting reads (default=SC).",
+    )
+    igvviz_parser.add_argument(
+        "--igv_cmd",
+        default="igv.sh",
+        help="IGV executable command used to run batch mode (default=igv.sh).",
+    )
+    igvviz_parser.add_argument(
+        "--batch_only",
+        action="store_true",
+        help="Only write batch/intermediate files; do not execute IGV.",
+    )
+    igvviz_parser.add_argument(
+        "--keep_intermediates",
+        action="store_true",
+        help="Keep intermediate tagged BAM/BED files under output directory.",
+    )
+    igvviz_parser.add_argument(
+        "--snapshot_format",
+        choices=["png", "jpg", "svg"],
+        default="png",
+        help="Snapshot image format written by IGV, default=png",
+    )
+    igvviz_parser.add_argument(
+        "--snapshot_width",
+        type=int,
+        default=3600,
+        help="IGV window width in pixels for snapshots, default=3600",
+    )
+    igvviz_parser.add_argument(
+        "--snapshot_height",
+        type=int,
+        default=1600,
+        help="IGV window height in pixels for snapshots, default=1600",
+    )
+    igvviz_parser.add_argument(
+        "-o",
+        "--output",
+        required=False,
+        default=None,
+        help="Output directory for snapshots and IGV batch files. Defaults to <anno_output>/igvviz or ./igvviz.",
+    )
+
     report_parser = subparsers.add_parser(
         "report",
         help=(
@@ -298,11 +400,6 @@ def parse_args(argv):
         help="Figure DPI for report panel rendering, default=160",
     )
     report_parser.add_argument(
-        "--export_tables",
-        action="store_true",
-        help="Export viz supplementary TSV tables for each rendered SV.",
-    )
-    report_parser.add_argument(
         "--reuse_existing_viz",
         action="store_true",
         help="Reuse existing per-SV viz figure files when present instead of regenerating.",
@@ -311,12 +408,56 @@ def parse_args(argv):
         "--figure_threads",
         type=int,
         default=1,
-        help="Number of threads for figure rendering when --with_figures is set, default=1",
+        help="Shared thread count for figure and igvviz rendering, default=1",
+    )
+    report_parser.add_argument(
+        "--with_igvviz",
+        action="store_true",
+        help="Render IGV screenshots for selected SVs using sniffcell igvviz.",
+    )
+    report_parser.add_argument(
+        "--igv_bams",
+        nargs="+",
+        default=None,
+        help="One or more BAM files for igvviz. If omitted, igvviz uses anno manifest BAM.",
+    )
+    report_parser.add_argument(
+        "--igv_cmd",
+        default="igv.sh",
+        help="IGV executable command for igvviz batch rendering, default=igv.sh",
+    )
+    report_parser.add_argument(
+        "--igv_snapshot_format",
+        choices=["png", "jpg", "svg"],
+        default="png",
+        help="Snapshot format for igvviz outputs, default=png",
+    )
+    report_parser.add_argument(
+        "--igv_snapshot_width",
+        type=int,
+        default=3600,
+        help="IGV window width in pixels for igvviz snapshots, default=3600",
+    )
+    report_parser.add_argument(
+        "--igv_snapshot_height",
+        type=int,
+        default=1600,
+        help="IGV window height in pixels for igvviz snapshots, default=1600",
+    )
+    report_parser.add_argument(
+        "--reuse_existing_igvviz",
+        action="store_true",
+        help="Reuse existing igvviz manifests/snapshots when available instead of regenerating.",
     )
     report_parser.add_argument(
         "-o", "--output",
         default=None,
-        help="Report output directory or HTML file path. Defaults to <anno_output>/report/.",
+        help=(
+            "Report output directory or HTML file path. "
+            "If output ends with .gz/.tgz/.tar.gz, report files are written to a sibling folder and "
+            "a gzipped tar archive is also produced at the provided output path. "
+            "Defaults to <anno_output>/report/."
+        ),
     )
 
 
@@ -343,6 +484,9 @@ def parse_args(argv):
         sys.exit(1)
     elif len(argv) == 1 and argv[0] == "viz":
         viz_parser.print_help(sys.stderr)
+        sys.exit(1)
+    elif len(argv) == 1 and argv[0] == "igvviz":
+        igvviz_parser.print_help(sys.stderr)
         sys.exit(1)
     elif len(argv) == 1 and argv[0] == "report":
         report_parser.print_help(sys.stderr)

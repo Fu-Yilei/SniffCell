@@ -456,6 +456,50 @@ class TestParseArgs(unittest.TestCase):
         self.assertIsNone(args.vcf)
         self.assertIsNone(args.output)
 
+    def test_igvviz_subcommand_parses_with_multiple_bams(self):
+        args = parse_args(
+            [
+                "igvviz",
+                "-i",
+                "a.bam",
+                "b.bam",
+                "-v",
+                "input.vcf.gz",
+                "-s",
+                "sv123",
+                "-o",
+                "out_dir",
+            ]
+        )
+        self.assertEqual(args.command, "igvviz")
+        self.assertEqual(args.input, ["a.bam", "b.bam"])
+        self.assertEqual(args.vcf, "input.vcf.gz")
+        self.assertEqual(args.sv_id, "sv123")
+        self.assertEqual(args.output, "out_dir")
+        self.assertEqual(args.support_tag, "SC")
+        self.assertEqual(args.phase_tag, "HP")
+        self.assertEqual(args.snapshot_width, 3600)
+        self.assertEqual(args.snapshot_height, 1600)
+        self.assertFalse(args.batch_only)
+
+    def test_igvviz_subcommand_parses_with_anno_output_only(self):
+        args = parse_args(
+            [
+                "igvviz",
+                "--anno_output",
+                "anno_out",
+                "-s",
+                "sv123",
+                "--batch_only",
+            ]
+        )
+        self.assertEqual(args.command, "igvviz")
+        self.assertEqual(args.anno_output, "anno_out")
+        self.assertEqual(args.sv_id, "sv123")
+        self.assertIsNone(args.input)
+        self.assertIsNone(args.vcf)
+        self.assertTrue(args.batch_only)
+
     def test_anno_assignment_defaults_are_strict_all_rows(self):
         args = parse_args(
             [
@@ -530,7 +574,19 @@ class TestParseArgs(unittest.TestCase):
         self.assertEqual(args.max_sv, 0)
         self.assertFalse(args.with_figures)
         self.assertEqual(args.figure_threads, 1)
+        self.assertFalse(args.with_igvviz)
+        self.assertEqual(args.igv_cmd, "igv.sh")
+        self.assertEqual(args.igv_snapshot_format, "png")
+        self.assertEqual(args.igv_snapshot_width, 3600)
+        self.assertEqual(args.igv_snapshot_height, 1600)
         self.assertEqual(args.format, "png")
+        self.assertFalse(hasattr(args, "export_tables"))
+        self.assertFalse(hasattr(args, "igv_threads"))
+        self.assertFalse(hasattr(args, "igv_visibility_window"))
+        self.assertFalse(hasattr(args, "igv_phase_tag"))
+        self.assertFalse(hasattr(args, "igv_support_tag"))
+        self.assertFalse(hasattr(args, "igv_keep_intermediates"))
+        self.assertFalse(hasattr(args, "igv_batch_only"))
         self.assertFalse(hasattr(args, "input"))
         self.assertFalse(hasattr(args, "vcf"))
         self.assertFalse(hasattr(args, "reference"))

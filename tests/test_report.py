@@ -1,4 +1,5 @@
 import json
+import tarfile
 import tempfile
 import unittest
 from pathlib import Path
@@ -103,7 +104,6 @@ class TestReportMain(unittest.TestCase):
             window=5000,
             max_reads=250,
             format="png",
-            export_tables=False,
             reuse_existing_viz=reuse,
             figure_threads=1,
             output=output,
@@ -249,6 +249,41 @@ class TestReportMain(unittest.TestCase):
             selected = pd.read_csv(selected_path, sep="\t")
             self.assertEqual(len(selected), 0)
 
+    def test_report_main_writes_gz_archive_when_output_has_gz_suffix(self):
+        with tempfile.TemporaryDirectory() as td:
+            anno_dir = Path(td) / "anno_out"
+            anno_dir.mkdir(parents=True, exist_ok=True)
+            (anno_dir / "anno_run_manifest.json").write_text(json.dumps({"inputs": {}, "outputs": {}}), encoding="utf-8")
+
+            sv_df = pd.DataFrame(
+                [
+                    {
+                        "id": "sv_archive",
+                        "assigned_code": "10",
+                        "linked_celltypes": "A",
+                        "primary_celltype": "A",
+                        "has_hard_conflict": False,
+                        "overlap_pct": 0.9,
+                        "majority_pct": 1.0,
+                        "n_supporting": 9,
+                        "n_overlapped": 9,
+                    }
+                ]
+            )
+            sv_df.to_csv(anno_dir / "sv_assignment.tsv", sep="\t", index=False)
+
+            archive_output = anno_dir / "report_bundle.gz"
+            args = self._base_args(anno_dir, output=str(archive_output))
+            report_main(args)
+
+            report_dir = anno_dir / "report_bundle"
+            self.assertTrue(report_dir.exists())
+            self.assertTrue((report_dir / "index.html").exists())
+            self.assertTrue(archive_output.exists())
+            with tarfile.open(archive_output, mode="r:gz") as tf:
+                names = tf.getnames()
+            self.assertIn("report_bundle/index.html", names)
+
     def test_report_main_defaults_to_figureless_and_writes_copy_commands(self):
         with tempfile.TemporaryDirectory() as td:
             anno_dir = Path(td) / "anno_out"
@@ -295,6 +330,117 @@ class TestReportMain(unittest.TestCase):
             self.assertIn("setSvReview(this)", text)
             self.assertIn("function exportReviewTable()", text)
             self.assertIn("review_status", text)
+
+    def test_report_main_runs_igvviz_and_records_status(self):
+        with tempfile.TemporaryDirectory() as td:
+            anno_dir = Path(td) / "anno_out"
+            anno_dir.mkdir(parents=True, exist_ok=True)
+            (anno_dir / "anno_run_manifest.json").write_text(json.dumps({"inputs": {}, "outputs": {}}), encoding="utf-8")
+
+            sv_df = pd.DataFrame(
+                [
+                    {
+                        "id": "sv_igv",
+                        "assigned_code": "10",
+                        "linked_celltypes": "A",
+                        "primary_celltype": "A",
+                        "has_hard_conflict": False,
+                        "overlap_pct": 0.8,
+                        "majority_pct": 0.9,
+                        "n_supporting": 8,
+                        "n_overlapped": 6,
+                    }
+                ]
+            )
+            sv_df.to_csv(anno_dir / "sv_assignment.tsv", sep="\t", index=False)
+
+            args = self._base_args(anno_dir)
+            args.with_igvviz = True
+            args.igv_bams = ["a.bam", "b.bam"]
+            args.igv_cmd = "igv.sh"
+            args.igv_snapshot_format = "png"
+            args.reuse_existing_igvviz = False
+
+            def _fake_igvviz(igv_args):
+                out_dir = Path(igv_args.output)
+                out_dir.mkdir(parents=True, exist_ok=True)
+                snap = out_dir / "sv_igv.01.a.igv.png"
+                snap.write_text("fake image", encoding="utf-8")
+                manifest = out_dir / "sv_igv.igvviz.manifest.json"
+                manifest.write_text(
+                    json.dumps({"jobs": [{"snapshot": str(snap)}]}),
+                    encoding="utf-8",
+                )
+
+            with patch("sniffcell.report.report.igvviz_module.igvviz_main", side_effect=_fake_igvviz) as mock_igv:
+                report_main(args)
+                self.assertEqual(mock_igv.call_count, 1)
+                self.assertEqual(mock_igv.call_args[0][0].sv_id, "sv_igv")
+                self.assertEqual(mock_igv.call_args[0][0].visibility_window, 5000)
+                self.assertEqual(mock_igv.call_args[0][0].phase_tag, "HP")
+                self.assertEqual(mock_igv.call_args[0][0].support_tag, "SC")
+                self.assertTrue(mock_igv.call_args[0][0].keep_intermediates)
+                self.assertFalse(mock_igv.call_args[0][0].batch_only)
+
+            selected = pd.read_csv(anno_dir / "report" / "high_confidence_sv.tsv", sep="\t")
+            self.assertEqual(selected["igvviz_status"].tolist(), ["rendered"])
+            self.assertIn("sniffcell igvviz --anno_output", str(selected.iloc[0]["igvviz_command"]))
+
+    def test_report_main_embeds_igvviz_snapshots_in_html(self):
+        with tempfile.TemporaryDirectory() as td:
+            anno_dir = Path(td) / "anno_out"
+            anno_dir.mkdir(parents=True, exist_ok=True)
+            (anno_dir / "anno_run_manifest.json").write_text(json.dumps({"inputs": {}, "outputs": {}}), encoding="utf-8")
+
+            sv_df = pd.DataFrame(
+                [
+                    {
+                        "id": "sv_img",
+                        "assigned_code": "10",
+                        "linked_celltypes": "A",
+                        "primary_celltype": "A",
+                        "has_hard_conflict": False,
+                        "overlap_pct": 0.8,
+                        "majority_pct": 0.9,
+                        "n_supporting": 8,
+                        "n_overlapped": 6,
+                    }
+                ]
+            )
+            sv_df.to_csv(anno_dir / "sv_assignment.tsv", sep="\t", index=False)
+
+            args = self._base_args(anno_dir)
+            args.with_igvviz = True
+            args.igv_bams = ["a.bam"]
+            args.igv_cmd = "igv.sh"
+            args.igv_snapshot_format = "png"
+            args.igv_snapshot_width = 3600
+            args.igv_snapshot_height = 1600
+            args.reuse_existing_igvviz = False
+
+            def _fake_igvviz(igv_args):
+                out_dir = Path(igv_args.output)
+                out_dir.mkdir(parents=True, exist_ok=True)
+                snap = out_dir / "sv_img.01.a.igv.png"
+                snap.write_text("fake image", encoding="utf-8")
+                manifest = out_dir / "sv_img.igvviz.manifest.json"
+                manifest.write_text(
+                    json.dumps({"jobs": [{"bam": "/tmp/a.bam", "snapshot": str(snap)}]}),
+                    encoding="utf-8",
+                )
+
+            with patch("sniffcell.report.report.igvviz_module.igvviz_main", side_effect=_fake_igvviz):
+                report_main(args)
+
+            report_dir = anno_dir / "report"
+            html_text = (report_dir / "index.html").read_text(encoding="utf-8")
+            self.assertIn("sv_img.01.a.igv.png", html_text)
+            self.assertIn("<img src=", html_text)
+            self.assertIn(".igv-grid{display:flex;flex-direction:column;", html_text)
+
+            selected = pd.read_csv(report_dir / "high_confidence_sv.tsv", sep="\t")
+            self.assertEqual(selected["igvviz_status"].tolist(), ["rendered"])
+            self.assertIn("sv_img.01.a.igv.png", str(selected.iloc[0]["igvviz_snapshots_rel"]))
 
 
 if __name__ == "__main__":

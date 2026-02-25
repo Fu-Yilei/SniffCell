@@ -6,6 +6,7 @@ from sniffcell.parse_args import parse_args  # assuming you defined parse_args i
 from sniffcell.deconv import deconv  # assuming these modules exist
 from sniffcell.dmsv import dmsv
 from sniffcell.viz import viz
+from sniffcell.viz import igvviz
 from sniffcell.report import report_main
 
 def main(argv=None):
@@ -29,6 +30,8 @@ def main(argv=None):
         dmsv.dmsv_main(args)
     elif args.command == "viz":
         viz.viz_main(args)
+    elif args.command == "igvviz":
+        igvviz.igvviz_main(args)
     elif args.command == "report":
         report_main(args)
     return 0
