@@ -22,7 +22,8 @@ from sniffcell.viz.viz import (
 
 _BASEMOD_BINARY_THRESHOLD = 0.70
 _BASEMOD_BINARY_ON_COLOR = "220,38,38"
-_BASEMOD_BINARY_OFF_COLOR = "255,255,255"
+_BASEMOD_BINARY_OFF_COLOR = "65,105,225"
+_HG38_GENE_TRACK = "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/database/ncbiRefSeqSelect.txt.gz"
 _BASEMOD_MOD_COLOR_KEYS = (
     "BASEMOD.M_COLOR",
     "BASEMOD.H_COLOR",
@@ -340,11 +341,24 @@ def _igv_locus(chrom: str, start0: int, end0: int) -> str:
     return f"{chrom}:{int(start0) + 1}-{int(end0)}"
 
 
+def _infer_gene_track(reference_path: str | None) -> str | None:
+    if not reference_path:
+        return None
+    ref_text = str(reference_path).strip().lower()
+    if not ref_text:
+        return None
+    # Auto-enable compact gene labels for hg38 references.
+    if any(token in ref_text for token in ("hg38", "grch38", "gca_000001405.15", "gcf_000001405.26")):
+        return _HG38_GENE_TRACK
+    return None
+
+
 def _build_igv_batch_lines(
     *,
     jobs: list[dict],
     snapshot_dir: Path,
     reference_path: str | None,
+    gene_track_path: str | None,
     visibility_window: int,
     phase_tag: str,
     support_phase_group_tag: str,
@@ -363,7 +377,6 @@ def _build_igv_batch_lines(
     if reference_path:
         lines.append(f"genome {_igv_quote(reference_path)}")
     lines.append(f"snapshotDirectory {_igv_quote(snapshot_dir.resolve())}")
-    lines.append(f"setWindowBounds 50 50 {int(snapshot_width)} {int(snapshot_height)}")
     lines.append("maxPanelHeight 2000")
     lines.append("setSleepInterval 500")
     if int(visibility_window) > 0:
@@ -375,12 +388,13 @@ def _build_igv_batch_lines(
         if reference_path:
             lines.append(f"genome {_igv_quote(reference_path)}")
         lines.append(f"snapshotDirectory {_igv_quote(snapshot_dir.resolve())}")
-        lines.append(f"setWindowBounds 50 50 {int(snapshot_width)} {int(snapshot_height)}")
         lines.append("maxPanelHeight 2000")
         lines.append("setSleepInterval 500")
         if int(visibility_window) > 0:
             lines.append(f"preference SAM.MAX_VISIBLE_RANGE {int(visibility_window)}")
         _append_binary_basemod_preferences(lines)
+        if gene_track_path:
+            lines.append(f"load {_igv_quote(gene_track_path)}")
         lines.append(f"load {_igv_quote(job['tagged_bam'])}")
         ctdmr_track = str(job.get("ctdmr_track", "")).strip()
         if ctdmr_track:
@@ -397,12 +411,34 @@ def _build_igv_batch_lines(
     return lines
 
 
+def _prepare_igv_subprocess_env(work_dir: Path) -> dict[str, str]:
+    env_root = work_dir / "igv_runtime_env"
+    home_dir = env_root / "home"
+    igv_user_dir = home_dir / "igv"
+    xdg_runtime_dir = env_root / "xdg_runtime"
+    igv_user_dir.mkdir(parents=True, exist_ok=True)
+    xdg_runtime_dir.mkdir(parents=True, exist_ok=True)
+    prefs_path = igv_user_dir / "prefs.properties"
+    prefs_path.write_text(
+        "PORT_ENABLED=false\n"
+        "PORT_NUMBER=0\n"
+        "CIRC_VIEW_ENABLED=false\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env["HOME"] = str(home_dir)
+    env["XDG_RUNTIME_DIR"] = str(xdg_runtime_dir)
+    env.setdefault("DBUS_SESSION_BUS_ADDRESS", "")
+    return env
+
+
 def _run_igv_batch(
     igv_cmd: str,
     batch_path: Path,
     *,
     snapshot_width: int,
     snapshot_height: int,
+    env: dict[str, str] | None = None,
 ) -> tuple[str, str]:
     cmd = shlex.split(str(igv_cmd).strip())
     if not cmd:
@@ -415,8 +451,15 @@ def _run_igv_batch(
             screen_h = max(1080, int(snapshot_height) + 200)
             cmd = ["xvfb-run", "-a", "-s", f"-screen 0 {screen_w}x{screen_h}x24", *cmd]
     cmd += ["-b", str(batch_path.resolve())]
-    proc = subprocess.run(cmd, check=False, capture_output=True, text=True)
+    proc = subprocess.run(cmd, check=False, capture_output=True, text=True, env=env)
     if proc.returncode != 0:
+        stderr_text = str(proc.stderr or "")
+        harmless_xvfb_teardown = (
+            "/usr/bin/xvfb-run: line 186: kill:" in stderr_text
+            and "No such process" in stderr_text
+        )
+        if harmless_xvfb_teardown:
+            return proc.stdout, proc.stderr
         raise RuntimeError(
             f"IGV batch execution failed (exit={proc.returncode}). "
             f"cmd={' '.join(cmd)}\nstdout:\n{proc.stdout}\nstderr:\n{proc.stderr}"
@@ -451,6 +494,7 @@ def igvviz_main(args) -> None:
         support_phase_group_tag = "SX"
     if str(args.support_tag).strip().upper() == support_phase_group_tag:
         support_phase_group_tag = "SY"
+    gene_track_path = _infer_gene_track(resolved["reference_path"])
 
     sv = _get_sv_payload(resolved["vcf_path"], args.sv_id)
     override_support = _load_kanpig_supporting_reads(resolved["kanpig_read_names"], args.sv_id)
@@ -486,6 +530,7 @@ def igvviz_main(args) -> None:
     jobs: list[dict] = []
     summary_rows: list[dict] = []
     try:
+        igv_subprocess_env = _prepare_igv_subprocess_env(work_dir)
         for idx, bam in enumerate(resolved["bam_paths"], start=1):
             bam_path = str(Path(bam).expanduser().resolve())
             bam_slug = _sanitize_token(Path(bam_path).stem)
@@ -537,6 +582,7 @@ def igvviz_main(args) -> None:
             jobs=jobs,
             snapshot_dir=output_dir,
             reference_path=resolved["reference_path"],
+            gene_track_path=gene_track_path,
             visibility_window=visibility_window,
             phase_tag=str(args.phase_tag),
             support_phase_group_tag=str(support_phase_group_tag),
@@ -564,6 +610,7 @@ def igvviz_main(args) -> None:
             "basemod_threshold": float(_BASEMOD_BINARY_THRESHOLD),
             "basemod_color_on": str(_BASEMOD_BINARY_ON_COLOR),
             "basemod_color_off": str(_BASEMOD_BINARY_OFF_COLOR),
+            "gene_track": str(gene_track_path or ""),
             "igv_cmd": str(args.igv_cmd),
             "batch_file": str(batch_path.resolve()),
             "summary_tsv": str(summary_path.resolve()),
@@ -585,6 +632,7 @@ def igvviz_main(args) -> None:
             batch_path,
             snapshot_width=int(snapshot_width),
             snapshot_height=int(snapshot_height),
+            env=igv_subprocess_env,
         )
         if stdout_text.strip():
             logger.debug("IGV stdout:\n%s", stdout_text)

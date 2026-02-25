@@ -6,6 +6,7 @@ from pathlib import Path
 
 from sniffcell.viz.igvviz import (
     _build_igv_batch_lines,
+    _infer_gene_track,
     _resolve_igvviz_runtime_inputs,
     _split_bam_args,
 )
@@ -61,6 +62,7 @@ class TestIgvVizHelpers(unittest.TestCase):
             ],
             snapshot_dir=Path("/tmp/out"),
             reference_path="/tmp/ref.fa",
+            gene_track_path="https://hgdownload.soe.ucsc.edu/goldenPath/hg38/database/ncbiRefSeqSelect.txt.gz",
             visibility_window=250000,
             phase_tag="HP",
             support_phase_group_tag="SG",
@@ -73,10 +75,18 @@ class TestIgvVizHelpers(unittest.TestCase):
         self.assertIn("colorBy BASE_MODIFICATION_2COLOR", text)
         self.assertIn("preference BASEMOD.THRESHOLD 0.7", text)
         self.assertIn("preference BASEMOD.M_COLOR 220,38,38", text)
-        self.assertIn("preference BASEMOD.NONE_C_COLOR 255,255,255", text)
+        self.assertIn("preference BASEMOD.NONE_C_COLOR 65,105,225", text)
+        self.assertIn("load https://hgdownload.soe.ucsc.edu/goldenPath/hg38/database/ncbiRefSeqSelect.txt.gz", text)
         self.assertIn("snapshot sv1.a.igv.png", text)
         self.assertIn("preference SAM.MAX_VISIBLE_RANGE 250000", text)
-        self.assertIn("setWindowBounds 50 50 2800 1500", text)
+        self.assertNotIn("setWindowBounds 50 50 2800 1500", text)
+
+    def test_infer_gene_track_for_hg38_reference(self):
+        self.assertEqual(
+            _infer_gene_track("/tmp/GCA_000001405.15_GRCh38_no_alt_analysis_set.fa"),
+            "https://hgdownload.soe.ucsc.edu/goldenPath/hg38/database/ncbiRefSeqSelect.txt.gz",
+        )
+        self.assertIsNone(_infer_gene_track("/tmp/mm39.fa"))
 
 
 if __name__ == "__main__":
