@@ -252,7 +252,10 @@ Input model:
 - only `--anno_output` is required for data inputs; BAM/VCF/REF/BED/read tables are resolved from `anno_run_manifest.json`.
 - default is figure-less for speed; use `--with_figures` to render `viz` panels.
 - use `--with_igvviz` to also render IGV screenshots per selected SV (optionally with custom `--igv_bams`).
+- use `--with_igvreport` to also write an alternate `igv-reports` HTML page under `report/igvreport/` for quick IGV.js review.
+- the alternate `igvreport` page defaults alignment tracks to DNA methylation two-color mode and highlights SV-supporting reads when read names are available.
 - use `--figure_threads` as the shared thread count for both `viz` and `igvviz` rendering.
+- `--with_igvreport` needs `igv-reports` installed (`pip install igv-reports`).
 - if `-o/--output` ends with `.gz`, `.tgz`, or `.tar.gz`, the report folder is also archived as a gzipped tarball at that path.
 
 Example:
@@ -284,6 +287,14 @@ sniffcell report \
   --figure_threads 4
 ```
 
+Generate the native report plus an alternate `igv-reports` page:
+```bash
+sniffcell report \
+  --anno_output anno_out \
+  --with_igvreport \
+  --igv_bams fans1.bam fans2.bam
+```
+
 Default filtering behavior:
 - requires non-empty `assigned_code`
 - requires non-empty `linked_celltypes`
@@ -294,6 +305,8 @@ Outputs under `<anno_output>/report/` by default:
 - `index.html`
 - `figures/<sv_id>.viz.<format>` (when `--with_figures` is used, or when existing figures are present)
 - `igvviz/<sv_id>/...` (when `--with_igvviz` is used)
+- `igvreport/index.html` (when `--with_igvreport` is used, or when an existing alternate IGV report is present)
+- `igvreport/igvreport_manifest.json`
 - `high_confidence_sv.tsv`
 - `failed_viz.tsv`
 - `failed_igvviz.tsv`
@@ -302,8 +315,15 @@ Outputs under `<anno_output>/report/` by default:
 HTML report behavior:
 - each SV entry includes a `Copy viz command` button so users can copy/paste an exact `sniffcell viz` command.
 - when `--with_igvviz` is used, each SV entry also shows embedded IGV screenshots (one per BAM) and a `Copy igvviz command` button.
+- when `--with_igvreport` is used, the report header links to a second `igv-reports` HTML page and includes a `Copy igvreport command` button.
+- the alternate `igvreport` page includes `Highlight supporting reads` / `Clear support highlight` controls when supporting read names are available; this uses IGV.js highlighting rather than true read filtering.
+- when IGV screenshots are present, each SV card includes a second `Real/Not real/Undecided` button group beside the IGV panel for faster review.
 - in figure-less mode, this button is the default path to generate selected figures on demand.
 - includes interactive summary plots (Plotly) for genome-wide SV locations, SV length distribution, support metrics, agreement-vs-overlap, and primary cell-type counts.
+- review controls include both review-status filtering and assigned-cell-type filtering.
+- review persistence uses browser `localStorage` with key `sniffcell_report_review::<resolved anno_output path>`.
+- review labels auto-save on each click (`Real/Not real/Undecided`) and auto-load when you reopen the report in the same browser profile.
+- if browser storage is unavailable/cleared, review state falls back to the report defaults (`undecided`).
 
 ## `dmsv`: Differential Methylation Around SVs
 `dmsv` compares methylation between supporting and non-supporting reads near each SV.

@@ -184,6 +184,36 @@ def _build_sniffles_command(
     return cmd
 
 
+def _split_onepass_vcf_with_bedtools(
+    *,
+    bedtools_bin: str,
+    bcftools_bin: str,
+    input_vcf: Path,
+    tr_bed: Path,
+    tr_output_vcf: Path,
+    nontr_output_vcf: Path,
+    genome_fai: Path,
+    runner: CommandRunner,
+) -> None:
+    tr_cmd = (
+        "set -euo pipefail; "
+        f"{shlex.quote(bedtools_bin)} intersect -header -sorted -g {shlex.quote(str(genome_fai))} "
+        f"-a {shlex.quote(str(input_vcf))} -b {shlex.quote(str(tr_bed))} | "
+        f"{shlex.quote(bcftools_bin)} view -Oz -o {shlex.quote(str(tr_output_vcf))} -"
+    )
+    runner.run(tr_cmd, shell=True)
+    _index_vcf(tr_output_vcf, bcftools_bin, runner)
+
+    nontr_cmd = (
+        "set -euo pipefail; "
+        f"{shlex.quote(bedtools_bin)} intersect -header -sorted -v -g {shlex.quote(str(genome_fai))} "
+        f"-a {shlex.quote(str(input_vcf))} -b {shlex.quote(str(tr_bed))} | "
+        f"{shlex.quote(bcftools_bin)} view -Oz -o {shlex.quote(str(nontr_output_vcf))} -"
+    )
+    runner.run(nontr_cmd, shell=True)
+    _index_vcf(nontr_output_vcf, bcftools_bin, runner)
+
+
 def _bcftools_view(
     *,
     bcftools_bin: str,
@@ -339,6 +369,26 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     )
 
     parser.add_argument(
+        "--run-mode",
+        choices=["two-pass", "one-pass"],
+        default="two-pass",
+        help=(
+            "SV discovery strategy: 'two-pass' runs Sniffles separately on TR and non-TR; "
+            "'one-pass' runs Sniffles once genome-wide then splits TR/non-TR."
+        ),
+    )
+    parser.add_argument(
+        "--onepass-splitter",
+        choices=["bedtools", "bcftools"],
+        default="bedtools",
+        help="Tool used to split one-pass raw VCF into TR/non-TR sets.",
+    )
+    parser.add_argument(
+        "--no-onepass-reuse-raw",
+        action="store_true",
+        help="Force rerunning one-pass Sniffles even if raw VCF already exists.",
+    )
+    parser.add_argument(
         "--nontr-region-mode",
         choices=["auto", "complement", "postfilter"],
         default="auto",
@@ -458,16 +508,29 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     nontr_mode = args.nontr_region_mode
     bedtools_present = shutil.which(args.bedtools_bin) is not None
-    if nontr_mode == "auto":
-        nontr_mode = "complement" if bedtools_present else "postfilter"
-    if nontr_mode == "complement":
-        if not bedtools_present:
-            raise FileNotFoundError(
-                f"Requested non-TR mode '{nontr_mode}' requires bedtools, but it is not available: {args.bedtools_bin}"
-            )
-        bedtools_bin = _ensure_executable(args.bedtools_bin)
+    if args.run_mode == "two-pass":
+        if nontr_mode == "auto":
+            nontr_mode = "complement" if bedtools_present else "postfilter"
+        if nontr_mode == "complement":
+            if not bedtools_present:
+                raise FileNotFoundError(
+                    f"Requested non-TR mode '{nontr_mode}' requires bedtools, but it is not available: {args.bedtools_bin}"
+                )
+            bedtools_bin = _ensure_executable(args.bedtools_bin)
+        else:
+            bedtools_bin = args.bedtools_bin
     else:
-        bedtools_bin = args.bedtools_bin
+        # one-pass mode does not build non-TR complement BEDs.
+        nontr_mode = f"one-pass-split-{args.onepass_splitter}"
+        if args.onepass_splitter == "bedtools":
+            if not bedtools_present:
+                raise FileNotFoundError(
+                    f"Requested one-pass splitter '{args.onepass_splitter}' requires bedtools, "
+                    f"but it is not available: {args.bedtools_bin}"
+                )
+            bedtools_bin = _ensure_executable(args.bedtools_bin)
+        else:
+            bedtools_bin = args.bedtools_bin
 
     input_bam = _expand_path(args.input)
     reference = _expand_path(args.reference)
@@ -520,6 +583,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     nontr_include_germline = not args.nontr_exclude_germline
     runner = CommandRunner(dry_run=args.dry_run)
 
+    logging.info("Run mode resolved to: %s", args.run_mode)
+    if args.run_mode == "one-pass":
+        logging.info("One-pass splitter resolved to: %s", args.onepass_splitter)
     logging.info("Non-TR mode resolved to: %s", nontr_mode)
     if args.disable_q100_filter:
         logging.info("Q100 filter disabled")
@@ -536,78 +602,165 @@ def main(argv: Sequence[str] | None = None) -> int:
     nontr_raw_snf = nontr_dir / "sniffles.nontr.raw.snf"
     nontr_conf_vcf = nontr_dir / "sniffles.nontr.confident.vcf.gz"
 
-    tr_cmd = _build_sniffles_command(
-        sniffles_bin=sniffles_bin,
-        input_bam=input_bam,
-        reference_fa=reference,
-        output_vcf=tr_raw_vcf,
-        output_snf=tr_raw_snf,
-        threads=args.threads,
-        mosaic_af_min=args.tr_mosaic_af_min,
-        include_germline=tr_include_germline,
-        no_qc=tr_no_qc,
-        regions_bed=tr_bed,
-        cluster_merge_len=args.tr_cluster_merge_len,
-        extra_args=tuple(shlex.split(args.extra_tr_args)),
-    )
-    runner.run(tr_cmd)
-    _index_vcf(tr_raw_vcf, bcftools_bin, runner)
-
-    _apply_confidence_filters(
-        bcftools_bin=bcftools_bin,
-        input_vcf=tr_raw_vcf,
-        output_vcf=tr_conf_vcf,
-        runner=runner,
-        svtypes=svtypes,
-        pass_only=pass_only,
-        include_bed=None if args.disable_q100_filter else q100_bed,
-        exclude_bed=None,
-        include_expr=additional_filter_expr,
-    )
-
     nontr_regions_bed: Path | None = None
-    nontr_exclude_tr_bed: Path | None = None
-    if nontr_mode == "complement":
-        genome_fai = _ensure_fasta_index(reference, samtools_bin, runner)
-        nontr_regions_bed = regions_dir / "non_tr.complement.bed"
-        _write_complement_bed(
-            tr_bed=tr_bed,
-            genome_fai=genome_fai,
-            output_bed=nontr_regions_bed,
-            bedtools_bin=bedtools_bin,
+    if args.run_mode == "two-pass":
+        tr_cmd = _build_sniffles_command(
+            sniffles_bin=sniffles_bin,
+            input_bam=input_bam,
+            reference_fa=reference,
+            output_vcf=tr_raw_vcf,
+            output_snf=tr_raw_snf,
+            threads=args.threads,
+            mosaic_af_min=args.tr_mosaic_af_min,
+            include_germline=tr_include_germline,
+            no_qc=tr_no_qc,
+            regions_bed=tr_bed,
+            cluster_merge_len=args.tr_cluster_merge_len,
+            extra_args=tuple(shlex.split(args.extra_tr_args)),
+        )
+        runner.run(tr_cmd)
+        _index_vcf(tr_raw_vcf, bcftools_bin, runner)
+
+        _apply_confidence_filters(
+            bcftools_bin=bcftools_bin,
+            input_vcf=tr_raw_vcf,
+            output_vcf=tr_conf_vcf,
             runner=runner,
-            force_recompute=args.force_recompute_complement,
+            svtypes=svtypes,
+            pass_only=pass_only,
+            include_bed=None if args.disable_q100_filter else q100_bed,
+            exclude_bed=None,
+            include_expr=additional_filter_expr,
+        )
+
+        nontr_exclude_tr_bed: Path | None = None
+        if nontr_mode == "complement":
+            genome_fai = _ensure_fasta_index(reference, samtools_bin, runner)
+            nontr_regions_bed = regions_dir / "non_tr.complement.bed"
+            _write_complement_bed(
+                tr_bed=tr_bed,
+                genome_fai=genome_fai,
+                output_bed=nontr_regions_bed,
+                bedtools_bin=bedtools_bin,
+                runner=runner,
+                force_recompute=args.force_recompute_complement,
+            )
+        else:
+            nontr_exclude_tr_bed = tr_bed
+
+        nontr_cmd = _build_sniffles_command(
+            sniffles_bin=sniffles_bin,
+            input_bam=input_bam,
+            reference_fa=reference,
+            output_vcf=nontr_raw_vcf,
+            output_snf=nontr_raw_snf,
+            threads=args.threads,
+            mosaic_af_min=args.nontr_mosaic_af_min,
+            include_germline=nontr_include_germline,
+            no_qc=args.nontr_no_qc,
+            regions_bed=nontr_regions_bed,
+            extra_args=tuple(shlex.split(args.extra_nontr_args)),
+        )
+        runner.run(nontr_cmd)
+        _index_vcf(nontr_raw_vcf, bcftools_bin, runner)
+
+        _apply_confidence_filters(
+            bcftools_bin=bcftools_bin,
+            input_vcf=nontr_raw_vcf,
+            output_vcf=nontr_conf_vcf,
+            runner=runner,
+            svtypes=svtypes,
+            pass_only=pass_only,
+            include_bed=None if args.disable_q100_filter else q100_bed,
+            exclude_bed=nontr_exclude_tr_bed,
+            include_expr=additional_filter_expr,
         )
     else:
-        nontr_exclude_tr_bed = tr_bed
+        raw_dir = output_dir / "raw"
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        raw_vcf = raw_dir / "sniffles.raw.vcf.gz"
+        raw_snf = raw_dir / "sniffles.raw.snf"
+        reuse_onepass_raw = not args.no_onepass_reuse_raw
 
-    nontr_cmd = _build_sniffles_command(
-        sniffles_bin=sniffles_bin,
-        input_bam=input_bam,
-        reference_fa=reference,
-        output_vcf=nontr_raw_vcf,
-        output_snf=nontr_raw_snf,
-        threads=args.threads,
-        mosaic_af_min=args.nontr_mosaic_af_min,
-        include_germline=nontr_include_germline,
-        no_qc=args.nontr_no_qc,
-        regions_bed=nontr_regions_bed,
-        extra_args=tuple(shlex.split(args.extra_nontr_args)),
-    )
-    runner.run(nontr_cmd)
-    _index_vcf(nontr_raw_vcf, bcftools_bin, runner)
+        # one-pass mode uses the most sensitive AF floor and TR cluster merge setting.
+        onepass_af_min = min(args.tr_mosaic_af_min, args.nontr_mosaic_af_min)
+        # one-pass cannot differ by TR/non-TR germline flag; include if either pass would include.
+        onepass_include_germline = tr_include_germline or nontr_include_germline
+        # one-pass cannot differ by TR/non-TR QC flag; default to TR behavior for sensitivity.
+        onepass_no_qc = tr_no_qc
 
-    _apply_confidence_filters(
-        bcftools_bin=bcftools_bin,
-        input_vcf=nontr_raw_vcf,
-        output_vcf=nontr_conf_vcf,
-        runner=runner,
-        svtypes=svtypes,
-        pass_only=pass_only,
-        include_bed=None if args.disable_q100_filter else q100_bed,
-        exclude_bed=nontr_exclude_tr_bed,
-        include_expr=additional_filter_expr,
-    )
+        if reuse_onepass_raw and raw_vcf.exists():
+            logging.info("Reusing existing one-pass raw VCF: %s", raw_vcf)
+            _index_vcf(raw_vcf, bcftools_bin, runner)
+        else:
+            onepass_cmd = _build_sniffles_command(
+                sniffles_bin=sniffles_bin,
+                input_bam=input_bam,
+                reference_fa=reference,
+                output_vcf=raw_vcf,
+                output_snf=raw_snf,
+                threads=args.threads,
+                mosaic_af_min=onepass_af_min,
+                include_germline=onepass_include_germline,
+                no_qc=onepass_no_qc,
+                regions_bed=None,
+                cluster_merge_len=args.tr_cluster_merge_len,
+                extra_args=tuple(shlex.split(args.extra_tr_args)),
+            )
+            runner.run(onepass_cmd)
+            _index_vcf(raw_vcf, bcftools_bin, runner)
+
+        if args.onepass_splitter == "bedtools":
+            genome_fai = _ensure_fasta_index(reference, samtools_bin, runner)
+            _split_onepass_vcf_with_bedtools(
+                bedtools_bin=bedtools_bin,
+                bcftools_bin=bcftools_bin,
+                input_vcf=raw_vcf,
+                tr_bed=tr_bed,
+                tr_output_vcf=tr_raw_vcf,
+                nontr_output_vcf=nontr_raw_vcf,
+                genome_fai=genome_fai,
+                runner=runner,
+            )
+        else:
+            _bcftools_view(
+                bcftools_bin=bcftools_bin,
+                input_vcf=raw_vcf,
+                output_vcf=tr_raw_vcf,
+                runner=runner,
+                include_bed=tr_bed,
+            )
+            _bcftools_view(
+                bcftools_bin=bcftools_bin,
+                input_vcf=raw_vcf,
+                output_vcf=nontr_raw_vcf,
+                runner=runner,
+                exclude_bed=tr_bed,
+            )
+
+        _apply_confidence_filters(
+            bcftools_bin=bcftools_bin,
+            input_vcf=tr_raw_vcf,
+            output_vcf=tr_conf_vcf,
+            runner=runner,
+            svtypes=svtypes,
+            pass_only=pass_only,
+            include_bed=None if args.disable_q100_filter else q100_bed,
+            exclude_bed=None,
+            include_expr=additional_filter_expr,
+        )
+
+        _apply_confidence_filters(
+            bcftools_bin=bcftools_bin,
+            input_vcf=nontr_raw_vcf,
+            output_vcf=nontr_conf_vcf,
+            runner=runner,
+            svtypes=svtypes,
+            pass_only=pass_only,
+            include_bed=None if args.disable_q100_filter else q100_bed,
+            exclude_bed=None,
+            include_expr=additional_filter_expr,
+        )
 
     merged_vcf: Path | None = None
     if not args.no_merge:
@@ -629,6 +782,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             "q100_bed": None if args.disable_q100_filter else str(q100_bed),
         },
         "settings": {
+            "run_mode": args.run_mode,
+            "onepass_splitter": args.onepass_splitter,
+            "onepass_reuse_raw": reuse_onepass_raw if args.run_mode == "one-pass" else None,
             "threads": args.threads,
             "svtypes": list(svtypes),
             "pass_only": pass_only,

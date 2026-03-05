@@ -15,6 +15,7 @@ import pandas as pd
 
 from sniffcell.viz import viz as viz_module
 from sniffcell.viz import igvviz as igvviz_module
+from . import igvreport as igvreport_module
 
 try:
     from tqdm.auto import tqdm
@@ -72,6 +73,16 @@ def _to_json_scalar(value: object) -> object:
     return value
 
 
+def _load_json_dict(path: Path) -> dict[str, object]:
+    if not path.exists():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _build_dashboard_records(selected_report_df: pd.DataFrame) -> list[dict[str, object]]:
     if selected_report_df.empty:
         return []
@@ -105,6 +116,38 @@ def _safe_slug(text: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9._-]+", "_", str(text).strip())
     slug = slug.strip("._")
     return slug or "sv"
+
+
+def _normalize_review_status(value: object) -> str:
+    try:
+        if pd.isna(value):
+            return "undecided"
+    except TypeError:
+        pass
+    text = str(value).strip().lower().replace("-", "_").replace(" ", "_")
+    if text == "real":
+        return "real"
+    if text in {"not_real", "notreal"}:
+        return "not_real"
+    return "undecided"
+
+
+def _review_state_class(status: str) -> str:
+    normalized = _normalize_review_status(status)
+    if normalized == "real":
+        return "review-state-real"
+    if normalized == "not_real":
+        return "review-state-not-real"
+    return "review-state-undecided"
+
+
+def _review_state_label(status: str) -> str:
+    normalized = _normalize_review_status(status)
+    if normalized == "real":
+        return "real"
+    if normalized == "not_real":
+        return "not real"
+    return "undecided"
 
 
 def _load_sv_assignment(path: Path) -> pd.DataFrame:
@@ -490,8 +533,10 @@ def _build_report_html(
     generated_at: str,
     anno_output: Path,
     sv_assignment_path: Path,
+    review_storage_key: str,
     filters: dict[str, object],
     viz: dict[str, object],
+    igvreport: dict[str, object],
     total_sv: int,
     selected_count: int,
     rendered_count: int,
@@ -536,16 +581,13 @@ def _build_report_html(
         "code{background:#edf2f7;padding:1px 4px;border-radius:4px;}"
         ".review-controls{background:#ffffff;border-radius:10px;padding:14px;margin:14px 0;"
         "box-shadow:0 1px 2px rgba(0,0,0,0.08);}"
+        ".alt-report{background:#ffffff;border-radius:10px;padding:14px;margin:14px 0;"
+        "box-shadow:0 1px 2px rgba(0,0,0,0.08);}"
+        ".alt-report h2{margin:0 0 10px 0;font-size:20px;}"
         ".review-controls h2{margin:0 0 10px 0;font-size:20px;}"
         ".review-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:8px;}"
         ".review-select{border:1px solid #c8d1da;border-radius:6px;padding:6px 10px;background:#fff;color:#14212c;font-size:14px;}"
-        ".review-export-btn{border:0;border-radius:6px;padding:7px 12px;background:#0a7f5a;color:#fff;cursor:pointer;font-size:13px;}"
-        ".review-export-btn:hover{background:#076d4d;}"
         ".review-summary{font-size:13px;color:#405160;margin:4px 0 10px 0;}"
-        ".review-export-wrap{overflow:auto;max-height:320px;border:1px solid #d8dee4;border-radius:8px;background:#fff;}"
-        ".review-table{width:100%;border-collapse:collapse;font-size:13px;}"
-        ".review-table th,.review-table td{padding:6px 8px;border-bottom:1px solid #e9eef2;text-align:left;white-space:nowrap;}"
-        ".review-table th{position:sticky;top:0;background:#f8fafc;z-index:1;}"
         ".review-buttons{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 10px 0;}"
         ".review-btn{border:1px solid #c2ccd6;border-radius:999px;padding:4px 10px;background:#fff;color:#243746;cursor:pointer;font-size:12px;}"
         ".review-btn:hover{border-color:#8fa4b6;}"
@@ -557,7 +599,10 @@ def _build_report_html(
         ".review-state-not-real{border-left:6px solid #b42318;}"
         ".review-state-undecided{border-left:6px solid #98a2b3;}"
         ".review-badge{text-transform:lowercase;font-weight:700;}"
-        ".igv-grid{display:flex;flex-direction:column;gap:10px;margin-top:10px;}"
+        ".igv-review-layout{display:flex;flex-direction:column;gap:10px;margin-top:10px;}"
+        ".igv-side-actions{background:#f8fafc;border:1px solid #d8dee4;border-radius:8px;padding:8px;}"
+        ".igv-side-actions .review-buttons{margin-top:6px;margin-bottom:0;}"
+        ".igv-grid{display:flex;flex-direction:column;gap:10px;}"
         ".igv-card{background:#f8fafc;border:1px solid #d8dee4;border-radius:8px;padding:8px;}"
         ".igv-card img{display:block;width:100%;}"
     )
@@ -591,9 +636,41 @@ def _build_report_html(
         f"figure_profile={viz['figure_profile']}, "
         f"figure_dpi={viz['figure_dpi']}, "
         f"skip_methylation_overlay={viz['skip_methylation_overlay']}, "
-        f"exact_window={viz['exact_window']}"
+        f"exact_window={viz['exact_window']}, "
+        f"with_igvreport={igvreport['enabled']}"
         "</div>"
     )
+    igvreport_status = str(igvreport.get("status", "")).strip()
+    if bool(igvreport.get("enabled")) or igvreport_status in {"existing", "rendered", "reused", "failed", "failed_no_output"}:
+        page.append("<section class=\"alt-report\">")
+        page.append("<h2>Alternate IGV Report</h2>")
+        page.append(f"<div class=\"kv\"><b>igvreport status:</b> {html.escape(igvreport_status or 'not_rendered')}</div>")
+        igvreport_error = str(igvreport.get("error", "")).strip()
+        if igvreport_error:
+            page.append(f"<div class=\"kv err\">igvreport error: {html.escape(igvreport_error)}</div>")
+        igvreport_html_rel = str(igvreport.get("html_rel", "")).strip()
+        if igvreport_html_rel:
+            page.append(
+                f"<div class=\"kv\"><b>igvreport HTML:</b> "
+                f"<a href=\"{html.escape(igvreport_html_rel)}\" target=\"_blank\" rel=\"noopener\">"
+                f"{html.escape(igvreport_html_rel)}</a></div>"
+            )
+        igvreport_manifest_rel = str(igvreport.get("manifest_rel", "")).strip()
+        if igvreport_manifest_rel:
+            page.append(
+                f"<div class=\"kv\"><b>igvreport manifest:</b> "
+                f"<a href=\"{html.escape(igvreport_manifest_rel)}\" target=\"_blank\" rel=\"noopener\">"
+                f"{html.escape(igvreport_manifest_rel)}</a></div>"
+            )
+        igvreport_command = str(igvreport.get("command", "")).strip()
+        if igvreport_command:
+            escaped_igvreport_command = html.escape(igvreport_command, quote=True)
+            page.append(f"<div class=\"cmd\"><code>{html.escape(igvreport_command)}</code></div>")
+            page.append(
+                f"<button class=\"copy\" type=\"button\" data-cmd=\"{escaped_igvreport_command}\" "
+                "onclick=\"copyVizCommand(this)\">Copy igvreport command</button>"
+            )
+        page.append("</section>")
     page.append("<section class=\"review-controls\">")
     page.append("<h2>SV Review Controls</h2>")
     page.append("<div class=\"review-row\">")
@@ -606,13 +683,15 @@ def _build_report_html(
         "<option value=\"undecided\">Undecided</option>"
         "</select>"
     )
+    page.append("<label for=\"celltype-filter\"><b>Assigned cell type:</b></label>")
     page.append(
-        "<button id=\"export-review\" class=\"review-export-btn\" type=\"button\" "
-        "onclick=\"exportReviewTable()\">Export review table</button>"
+        "<select id=\"celltype-filter\" class=\"review-select\" onchange=\"applyReviewFilter()\">"
+        "<option value=\"all\">All assigned cell types</option>"
+        "</select>"
     )
     page.append("</div>")
     page.append("<div id=\"review-summary\" class=\"review-summary\"></div>")
-    page.append("<div id=\"review-export-container\" class=\"review-export-wrap\"></div>")
+    page.append("<div id=\"review-persist-status\" class=\"review-summary\"></div>")
     page.append("</section>")
     page.append("<section class=\"dash\">")
     page.append("<h2>Interactive Summaries</h2>")
@@ -679,10 +758,16 @@ def _build_report_html(
             except Exception:
                 sv_igv_text = "NA"
 
+            review_status = _normalize_review_status(item.get("review_status", "undecided"))
+            review_class = _review_state_class(review_status)
+            review_label = _review_state_label(review_status)
+            real_active = " is-active" if review_status == "real" else ""
+            not_real_active = " is-active" if review_status == "not_real" else ""
+            undecided_active = " is-active" if review_status == "undecided" else ""
             page.append(
-                "<section class=\"sv review-state-undecided\" "
+                f"<section class=\"sv {review_class}\" "
                 f"data-sv-id=\"{sv_id_attr}\" "
-                "data-review-status=\"undecided\" "
+                f"data-review-status=\"{html.escape(review_status, quote=True)}\" "
                 f"data-primary-celltype=\"{html.escape(primary_text, quote=True)}\" "
                 f"data-linked-celltypes=\"{html.escape(linked_text, quote=True)}\" "
                 f"data-assigned-code=\"{html.escape(assigned_code_text, quote=True)}\" "
@@ -696,19 +781,19 @@ def _build_report_html(
             page.append(f"<h2>{sv_id}</h2>")
             page.append("<div class=\"review-buttons\">")
             page.append(
-                "<button class=\"review-btn review-real\" type=\"button\" data-review-value=\"real\" "
+                f"<button class=\"review-btn review-real{real_active}\" type=\"button\" data-review-value=\"real\" "
                 "onclick=\"setSvReview(this)\">Real</button>"
             )
             page.append(
-                "<button class=\"review-btn review-not-real\" type=\"button\" data-review-value=\"not_real\" "
+                f"<button class=\"review-btn review-not-real{not_real_active}\" type=\"button\" data-review-value=\"not_real\" "
                 "onclick=\"setSvReview(this)\">Not real</button>"
             )
             page.append(
-                "<button class=\"review-btn review-undecided is-active\" type=\"button\" data-review-value=\"undecided\" "
+                f"<button class=\"review-btn review-undecided{undecided_active}\" type=\"button\" data-review-value=\"undecided\" "
                 "onclick=\"setSvReview(this)\">Undecided</button>"
             )
             page.append("</div>")
-            page.append("<div class=\"kv\"><b>Review:</b> <span class=\"review-badge\">undecided</span></div>")
+            page.append(f"<div class=\"kv\"><b>Review:</b> <span class=\"review-badge\">{html.escape(review_label)}</span></div>")
             page.append(f"<div class=\"kv\"><b>Primary cell type:</b> {primary}</div>")
             page.append(f"<div class=\"kv\"><b>Linked cell types:</b> {linked}</div>")
             page.append(f"<div class=\"kv\"><b>Assigned code:</b> {assigned_code}</div>")
@@ -743,6 +828,24 @@ def _build_report_html(
             if isinstance(igv_snapshots, list):
                 shown = [x for x in igv_snapshots if isinstance(x, dict) and str(x.get("snapshot_rel", "")).strip()]
                 if shown:
+                    page.append("<div class=\"igv-review-layout\">")
+                    page.append("<div class=\"igv-side-actions\">")
+                    page.append("<div class=\"kv\"><b>Review controls (IGV):</b></div>")
+                    page.append("<div class=\"review-buttons\">")
+                    page.append(
+                        f"<button class=\"review-btn review-real{real_active}\" type=\"button\" data-review-value=\"real\" "
+                        "onclick=\"setSvReview(this)\">Real</button>"
+                    )
+                    page.append(
+                        f"<button class=\"review-btn review-not-real{not_real_active}\" type=\"button\" data-review-value=\"not_real\" "
+                        "onclick=\"setSvReview(this)\">Not real</button>"
+                    )
+                    page.append(
+                        f"<button class=\"review-btn review-undecided{undecided_active}\" type=\"button\" data-review-value=\"undecided\" "
+                        "onclick=\"setSvReview(this)\">Undecided</button>"
+                    )
+                    page.append("</div>")
+                    page.append("</div>")
                     page.append("<div class=\"igv-grid\">")
                     for snap in shown:
                         snap_rel = html.escape(str(snap.get("snapshot_rel", "")).strip())
@@ -751,6 +854,7 @@ def _build_report_html(
                         page.append(f"<div class=\"kv\"><b>{bam_label}</b></div>")
                         page.append(f"<img src=\"{snap_rel}\" alt=\"IGV snapshot {bam_label} for {sv_id}\" loading=\"lazy\">")
                         page.append("</div>")
+                    page.append("</div>")
                     page.append("</div>")
 
             viz_command = str(item.get("viz_command", "")).strip()
@@ -775,244 +879,445 @@ def _build_report_html(
     page.append(
         "<script src=\"https://cdn.plot.ly/plotly-2.35.2.min.js\"></script>"
     )
-    page.append(
-        "<script>"
-        f"const dashboardData={json.dumps(dashboard_records)};"
-        f"const dashboardFilters={json.dumps(filters)};"
-        "function chrSortKey(chr){"
-        "const t=String(chr||'').replace(/^chr/i,'');"
-        "if(/^\\d+$/.test(t)) return [0, parseInt(t,10), t];"
-        "if(t==='X') return [1,23,t];"
-        "if(t==='Y') return [1,24,t];"
-        "if(t==='M'||t==='MT') return [1,25,t];"
-        "return [2, Number.MAX_SAFE_INTEGER, t];"
-        "}"
-        "function sortChromLabels(labels){"
-        "return labels.slice().sort((a,b)=>{const ka=chrSortKey(a), kb=chrSortKey(b);"
-        "if(ka[0]!==kb[0]) return ka[0]-kb[0]; if(ka[1]!==kb[1]) return ka[1]-kb[1];"
-        "return String(ka[2]).localeCompare(String(kb[2]));});"
-        "}"
-        "function selectedReviewFilter(){const sel=document.getElementById('review-filter');return sel?String(sel.value||'all'):'all';}"
-        "function filteredDashboardData(filterValue){"
-        "const wanted=String(filterValue||'all');"
-        "const base=Array.isArray(dashboardData)?dashboardData:[];"
-        "if(wanted==='all'){return base;}"
-        "return base.filter(r=>{"
-        "const id=String((r&&r.id!=null)?r.id:'');"
-        "const status=normalizeReviewStatus(reviewState[id]);"
-        "return status===wanted;"
-        "});"
-        "}"
-        "function summaryScopeLabel(filterValue){"
-        "const wanted=String(filterValue||'all');"
-        "if(wanted==='real') return 'real';"
-        "if(wanted==='not_real') return 'not real';"
-        "if(wanted==='undecided') return 'undecided';"
-        "return 'all';"
-        "}"
-        "function renderSummaries(filterValue){"
-        "if(typeof Plotly==='undefined'){"
-        "const msg='Plotly failed to load; interactive plots unavailable.';"
-        "['chart-genome-location','chart-chrom-counts','chart-svlen','chart-support','chart-overlap-majority','chart-celltype']"
-        ".forEach(id=>{const el=document.getElementById(id); if(el){el.textContent=msg;}}); return;}"
-        "const data=filteredDashboardData(filterValue);"
-        "const scope=summaryScopeLabel(filterValue);"
-        "const titleSuffix=(scope==='all')?'':` [${scope}]`;"
-        "if(data.length===0){"
-        "const msg=(scope==='all')?'No selected SVs for summary plots.':`No SVs in '${scope}' for summary plots.`;"
-        "['chart-genome-location','chart-chrom-counts','chart-svlen','chart-support','chart-overlap-majority','chart-celltype']"
-        ".forEach(id=>{const el=document.getElementById(id); if(el){el.textContent=msg;}}); return;}"
-        "const posRows=data.filter(r=>r.sv_chr!=null&&r.sv_pos!=null&&Number.isFinite(Number(r.sv_pos)));"
-        "if(posRows.length>0){"
-        "const yMb=posRows.map(r=>Number(r.sv_pos)/1e6);"
-        "const txt=posRows.map(r=>`${r.id||'NA'}<br>${r.sv_chr}:${r.sv_pos}`);"
-        "Plotly.newPlot('chart-genome-location',[{type:'scatter',mode:'markers',x:posRows.map(r=>String(r.sv_chr)),y:yMb,text:txt,hovertemplate:'%{text}<br>Position(Mb): %{y:.3f}<extra></extra>',marker:{size:8,color:'#1f77b4',opacity:0.75}}],"
-        "{title:'Genome-wide SV Locations (selected)'+titleSuffix,xaxis:{title:'Chromosome',categoryorder:'array',categoryarray:sortChromLabels(posRows.map(r=>String(r.sv_chr)))},yaxis:{title:'SV position (Mb)'}},{responsive:true,displaylogo:false});"
-        "}else{document.getElementById('chart-genome-location').textContent='No sv_chr/sv_pos data.';}"
-        "const chrCounts={};"
-        "data.forEach(r=>{const c=(r.sv_chr==null||String(r.sv_chr).trim()==='')?'NA':String(r.sv_chr); chrCounts[c]=(chrCounts[c]||0)+1;});"
-        "const chrLabels=sortChromLabels(Object.keys(chrCounts));"
-        "Plotly.newPlot('chart-chrom-counts',[{type:'bar',x:chrLabels,y:chrLabels.map(c=>chrCounts[c]),marker:{color:'#2ca02c'}}],{title:'SV Count by Chromosome'+titleSuffix,xaxis:{title:'Chromosome'},yaxis:{title:'SV count'}},{responsive:true,displaylogo:false});"
-        "const lenVals=data.map(r=>Math.abs(Number(r.sv_len))).filter(v=>Number.isFinite(v)&&v>0).map(v=>Math.log10(v));"
-        "if(lenVals.length>0){"
-        "Plotly.newPlot('chart-svlen',[{type:'histogram',x:lenVals,marker:{color:'#9467bd'}}],{title:'SV Length Distribution'+titleSuffix,xaxis:{title:'log10(|sv_len| bp)'},yaxis:{title:'Count'}},{responsive:true,displaylogo:false});"
-        "}else{document.getElementById('chart-svlen').textContent='No sv_len data.';}"
-        "const nSup=data.map(r=>Number(r.n_supporting)).filter(v=>Number.isFinite(v));"
-        "const nOvl=data.map(r=>Number(r.n_overlapped)).filter(v=>Number.isFinite(v));"
-        "if(nSup.length+nOvl.length>0){"
-        "Plotly.newPlot('chart-support',[{type:'histogram',x:nSup,name:'n_supporting',opacity:0.65,marker:{color:'#ff7f0e'}},{type:'histogram',x:nOvl,name:'n_overlapped',opacity:0.65,marker:{color:'#17becf'}}],"
-        "{title:'Read Support Distribution'+titleSuffix,xaxis:{title:'Read count'},yaxis:{title:'SV count'},barmode:'overlay'},{responsive:true,displaylogo:false});"
-        "}else{document.getElementById('chart-support').textContent='No read support data.';}"
-        "const omRows=data.filter(r=>Number.isFinite(Number(r.overlap_pct))&&Number.isFinite(Number(r.majority_pct)));"
-        "if(omRows.length>0){"
-        "Plotly.newPlot('chart-overlap-majority',[{type:'scatter',mode:'markers',x:omRows.map(r=>Number(r.overlap_pct)),y:omRows.map(r=>Number(r.majority_pct)),text:omRows.map(r=>String(r.id||'')),"
-        "hovertemplate:'%{text}<br>overlap=%{x:.3f}<br>majority=%{y:.3f}<extra></extra>',marker:{size:9,color:omRows.map(r=>Number.isFinite(Number(r.n_supporting))?Number(r.n_supporting):0),colorscale:'Viridis',showscale:true,colorbar:{title:'n_supporting'}}}],"
-        "{title:'Agreement vs Overlap'+titleSuffix,xaxis:{title:'overlap_pct',range:[0,1]},yaxis:{title:'majority_pct',range:[0,1]},"
-        "shapes:[{type:'line',x0:Number(dashboardFilters.min_overlap_pct||0),x1:Number(dashboardFilters.min_overlap_pct||0),y0:0,y1:1,line:{dash:'dot',color:'#444'}},"
-        "{type:'line',y0:Number(dashboardFilters.min_majority_pct||0),y1:Number(dashboardFilters.min_majority_pct||0),x0:0,x1:1,line:{dash:'dot',color:'#444'}}]},"
-        "{responsive:true,displaylogo:false});"
-        "}else{document.getElementById('chart-overlap-majority').textContent='No overlap/majority data.';}"
-        "const ctCounts={};"
-        "data.forEach(r=>{const ct=(r.primary_celltype==null||String(r.primary_celltype).trim()==='')?'NA':String(r.primary_celltype); ctCounts[ct]=(ctCounts[ct]||0)+1;});"
-        "const ctPairs=Object.entries(ctCounts).sort((a,b)=>b[1]-a[1]).slice(0,15);"
-        "Plotly.newPlot('chart-celltype',[{type:'bar',orientation:'h',x:ctPairs.map(p=>p[1]).reverse(),y:ctPairs.map(p=>p[0]).reverse(),marker:{color:'#8c564b'}}],"
-        "{title:'Top Primary Cell Types'+titleSuffix,xaxis:{title:'SV count'},yaxis:{title:'Cell type'}},{responsive:true,displaylogo:false});"
-        "}"
-        "const REVIEW_STORAGE_KEY='sniffcell_review::'+(window.location.pathname||'report');"
-        "const REVIEW_STATUS_LABELS={real:'real',not_real:'not real',undecided:'undecided'};"
-        "let reviewState={};"
-        "function getSvCards(){return Array.from(document.querySelectorAll('.sv[data-sv-id]'));}"
-        "function normalizeReviewStatus(value){const v=String(value||'').toLowerCase();"
-        "if(v==='real') return 'real'; if(v==='not_real'||v==='not-real'||v==='not real') return 'not_real'; return 'undecided';}"
-        "function reviewLabel(status){return REVIEW_STATUS_LABELS[status]||'undecided';}"
-        "function escapeHtml(text){const span=document.createElement('span');span.textContent=String(text==null?'':text);return span.innerHTML;}"
-        "function loadReviewState(){"
-        "try{const raw=window.localStorage.getItem(REVIEW_STORAGE_KEY);"
-        "if(!raw){return {};}"
-        "const parsed=JSON.parse(raw);"
-        "if(parsed&&typeof parsed==='object'){return parsed;}"
-        "}catch(e){}"
-        "return {};"
-        "}"
-        "function saveReviewState(){"
-        "try{window.localStorage.setItem(REVIEW_STORAGE_KEY, JSON.stringify(reviewState));}catch(e){}"
-        "}"
-        "function applyReviewToCard(card,status){"
-        "card.setAttribute('data-review-status', status);"
-        "card.classList.toggle('review-state-real', status==='real');"
-        "card.classList.toggle('review-state-not-real', status==='not_real');"
-        "card.classList.toggle('review-state-undecided', status==='undecided');"
-        "const badge=card.querySelector('.review-badge');"
-        "if(badge){badge.textContent=reviewLabel(status);}"
-        "card.querySelectorAll('.review-btn').forEach(btn=>{"
-        "const active=btn.getAttribute('data-review-value')===status;"
-        "btn.classList.toggle('is-active', active);"
-        "});"
-        "}"
-        "function syncReviewSummary(){"
-        "const cards=getSvCards();"
-        "const counts={real:0,not_real:0,undecided:0};"
-        "let visible=0;"
-        "cards.forEach(card=>{"
-        "const status=normalizeReviewStatus(card.getAttribute('data-review-status'));"
-        "counts[status]=(counts[status]||0)+1;"
-        "if(card.style.display!=='none'){visible+=1;}"
-        "});"
-        "const el=document.getElementById('review-summary');"
-        "if(el){"
-        "el.textContent=`real: ${counts.real} | not real: ${counts.not_real} | undecided: ${counts.undecided} | visible: ${visible}/${cards.length}`;"
-        "}"
-        "}"
-        "function applyReviewFilter(){"
-        "const sel=document.getElementById('review-filter');"
-        "const wanted=sel?String(sel.value||'all'):'all';"
-        "getSvCards().forEach(card=>{"
-        "const status=normalizeReviewStatus(card.getAttribute('data-review-status'));"
-        "const show=(wanted==='all'||wanted===status);"
-        "card.style.display=show?'':'none';"
-        "});"
-        "syncReviewSummary();"
-        "renderSummaries(wanted);"
-        "}"
-        "function setSvReview(btn){"
-        "const card=btn.closest('.sv[data-sv-id]');"
-        "if(!card){return;}"
-        "const svId=card.getAttribute('data-sv-id')||'';"
-        "const status=normalizeReviewStatus(btn.getAttribute('data-review-value'));"
-        "reviewState[svId]=status;"
-        "applyReviewToCard(card, status);"
-        "saveReviewState();"
-        "applyReviewFilter();"
-        "}"
-        "function collectReviewRows(filterValue){"
-        "const rows=[];"
-        "getSvCards().forEach(card=>{"
-        "const status=normalizeReviewStatus(card.getAttribute('data-review-status'));"
-        "if(filterValue!=='all'&&status!==filterValue){return;}"
-        "rows.push({"
-        "id:card.getAttribute('data-sv-id')||'',"
-        "sv_len:card.getAttribute('data-sv-len')||'NA',"
-        "review_status:reviewLabel(status),"
-        "primary_celltype:card.getAttribute('data-primary-celltype')||'NA',"
-        "linked_celltypes:card.getAttribute('data-linked-celltypes')||'NA',"
-        "assigned_code:card.getAttribute('data-assigned-code')||'NA',"
-        "majority_pct:card.getAttribute('data-majority-pct')||'NA',"
-        "overlap_pct:card.getAttribute('data-overlap-pct')||'NA',"
-        "n_supporting:card.getAttribute('data-n-supporting')||'NA',"
-        "n_overlapped:card.getAttribute('data-n-overlapped')||'NA',"
-        "viz_status:card.getAttribute('data-viz-status')||'NA'"
-        "});"
-        "});"
-        "return rows;"
-        "}"
-        "function renderExportTable(rows){"
-        "const wrap=document.getElementById('review-export-container');"
-        "if(!wrap){return;}"
-        "if(rows.length===0){"
-        "wrap.innerHTML='<div class=\"kv\">No SVs match the selected review filter.</div>';"
-        "return;"
-        "}"
-        "const cols=['id','sv_len','review_status','primary_celltype','linked_celltypes','assigned_code','majority_pct','overlap_pct','n_supporting','n_overlapped','viz_status'];"
-        "const labels={id:'SV ID',sv_len:'sv_len',review_status:'review_status',primary_celltype:'primary_celltype',linked_celltypes:'linked_celltypes',assigned_code:'assigned_code',majority_pct:'majority_pct',overlap_pct:'overlap_pct',n_supporting:'n_supporting',n_overlapped:'n_overlapped',viz_status:'viz_status'};"
-        "const chunks=['<table class=\"review-table\"><thead><tr>'];"
-        "cols.forEach(col=>{chunks.push(`<th>${escapeHtml(labels[col]||col)}</th>`);});"
-        "chunks.push('</tr></thead><tbody>');"
-        "rows.forEach(row=>{"
-        "chunks.push('<tr>');"
-        "cols.forEach(col=>{chunks.push(`<td>${escapeHtml(row[col])}</td>`);});"
-        "chunks.push('</tr>');"
-        "});"
-        "chunks.push('</tbody></table>');"
-        "wrap.innerHTML=chunks.join('');"
-        "}"
-        "function downloadReviewRows(rows, filterValue){"
-        "const cols=['id','sv_len','review_status','primary_celltype','linked_celltypes','assigned_code','majority_pct','overlap_pct','n_supporting','n_overlapped','viz_status'];"
-        "const header=['SV ID','sv_len','review_status','primary_celltype','linked_celltypes','assigned_code','majority_pct','overlap_pct','n_supporting','n_overlapped','viz_status'];"
-        "const lines=[header.join('\\t')];"
-        "rows.forEach(row=>{"
-        "lines.push(cols.map(col=>String(row[col]==null?'':row[col]).replace(/[\\t\\n\\r]+/g,' ')).join('\\t'));"
-        "});"
-        "const blob=new Blob([lines.join('\\n')+'\\n'],{type:'text/tab-separated-values;charset=utf-8'});"
-        "const url=URL.createObjectURL(blob);"
-        "const a=document.createElement('a');"
-        "const stamp=new Date().toISOString().replace(/[:.]/g,'-');"
-        "a.href=url;"
-        "a.download=`sniffcell_sv_review_${filterValue||'all'}_${stamp}.tsv`;"
-        "document.body.appendChild(a);"
-        "a.click();"
-        "document.body.removeChild(a);"
-        "URL.revokeObjectURL(url);"
-        "}"
-        "function exportReviewTable(){"
-        "const sel=document.getElementById('review-filter');"
-        "const filterValue=sel?String(sel.value||'all'):'all';"
-        "const rows=collectReviewRows(filterValue);"
-        "renderExportTable(rows);"
-        "downloadReviewRows(rows, filterValue);"
-        "}"
-        "function initReviewControls(){"
-        "reviewState=loadReviewState();"
-        "getSvCards().forEach(card=>{"
-        "const svId=card.getAttribute('data-sv-id')||'';"
-        "const status=normalizeReviewStatus(reviewState[svId]);"
-        "reviewState[svId]=status;"
-        "applyReviewToCard(card, status);"
-        "});"
-        "saveReviewState();"
-        "applyReviewFilter();"
-        "renderExportTable(collectReviewRows('all'));"
-        "}"
-        "initReviewControls();"
-        "function copyVizCommand(btn){"
-        "const cmd=btn.getAttribute('data-cmd')||'';"
-        "const done=()=>{const old=btn.textContent;btn.textContent='Copied';setTimeout(()=>{btn.textContent=old;},1200);};"
-        "if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(cmd).then(done).catch(()=>{});return;}"
-        "const ta=document.createElement('textarea');ta.value=cmd;document.body.appendChild(ta);ta.select();"
-        "try{document.execCommand('copy');done();}catch(e){}"
-        "document.body.removeChild(ta);"
-        "}"
-        "</script>"
+    script_text = (
+        """
+const dashboardData=__DASHBOARD_DATA__;
+const dashboardFilters=__DASHBOARD_FILTERS__;
+const REVIEW_STORAGE_KEY=__REVIEW_STORAGE_KEY__;
+const REVIEW_STATUS_LABELS={real:'real',not_real:'not real',undecided:'undecided'};
+let reviewState={};
+
+function chrSortKey(chr){
+  const t=String(chr||'').replace(/^chr/i,'');
+  if(/^\\d+$/.test(t)) return [0, parseInt(t,10), t];
+  if(t==='X') return [1,23,t];
+  if(t==='Y') return [1,24,t];
+  if(t==='M'||t==='MT') return [1,25,t];
+  return [2, Number.MAX_SAFE_INTEGER, t];
+}
+
+function sortChromLabels(labels){
+  return labels.slice().sort((a,b)=>{
+    const ka=chrSortKey(a);
+    const kb=chrSortKey(b);
+    if(ka[0]!==kb[0]) return ka[0]-kb[0];
+    if(ka[1]!==kb[1]) return ka[1]-kb[1];
+    return String(ka[2]).localeCompare(String(kb[2]));
+  });
+}
+
+function getSvCards(){
+  return Array.from(document.querySelectorAll('.sv[data-sv-id]'));
+}
+
+function normalizeReviewStatus(value){
+  const v=String(value||'').toLowerCase();
+  if(v==='real') return 'real';
+  if(v==='not_real'||v==='not-real'||v==='not real') return 'not_real';
+  return 'undecided';
+}
+
+function reviewLabel(status){
+  return REVIEW_STATUS_LABELS[status]||'undecided';
+}
+
+function escapeHtml(text){
+  const span=document.createElement('span');
+  span.textContent=String(text==null?'':text);
+  return span.innerHTML;
+}
+
+function normalizeCelltypeToken(value){
+  return String(value==null?'':value).trim().toLowerCase();
+}
+
+function splitCelltypeList(text){
+  return String(text==null?'':text)
+    .split(/[;,|]+/)
+    .map(part=>String(part||'').trim())
+    .filter(part=>part!==''&&part.toLowerCase()!=='na');
+}
+
+function selectedReviewFilter(){
+  const sel=document.getElementById('review-filter');
+  return sel?String(sel.value||'all'):'all';
+}
+
+function selectedCelltypeFilter(){
+  const sel=document.getElementById('celltype-filter');
+  return sel?String(sel.value||'all'):'all';
+}
+
+function cardCelltypeTokens(card){
+  const out=new Set();
+  splitCelltypeList(card.getAttribute('data-primary-celltype')||'')
+    .forEach(v=>out.add(normalizeCelltypeToken(v)));
+  splitCelltypeList(card.getAttribute('data-linked-celltypes')||'')
+    .forEach(v=>out.add(normalizeCelltypeToken(v)));
+  return out;
+}
+
+function rowCelltypeTokens(row){
+  const out=new Set();
+  splitCelltypeList(row&&row.primary_celltype)
+    .forEach(v=>out.add(normalizeCelltypeToken(v)));
+  splitCelltypeList(row&&row.linked_celltypes)
+    .forEach(v=>out.add(normalizeCelltypeToken(v)));
+  return out;
+}
+
+function cardMatchesCelltype(card, wantedToken){
+  const wanted=normalizeCelltypeToken(wantedToken);
+  if(wanted===''||wanted==='all') return true;
+  return cardCelltypeTokens(card).has(wanted);
+}
+
+function rowMatchesCelltype(row, wantedToken){
+  const wanted=normalizeCelltypeToken(wantedToken);
+  if(wanted===''||wanted==='all') return true;
+  return rowCelltypeTokens(row).has(wanted);
+}
+
+function filteredDashboardData(reviewFilter, celltypeFilter){
+  const wantedReview=String(reviewFilter||'all');
+  const wantedCelltype=String(celltypeFilter||'all');
+  const base=Array.isArray(dashboardData)?dashboardData:[];
+  return base.filter(r=>{
+    const id=String((r&&r.id!=null)?r.id:'');
+    const status=normalizeReviewStatus(reviewState[id]);
+    if(wantedReview!=='all'&&status!==wantedReview) return false;
+    if(!rowMatchesCelltype(r, wantedCelltype)) return false;
+    return true;
+  });
+}
+
+function summaryScopeLabel(reviewFilter, celltypeFilter){
+  const parts=[];
+  const wantedReview=String(reviewFilter||'all');
+  const wantedCelltype=String(celltypeFilter||'all');
+  if(wantedReview==='real') parts.push('real');
+  else if(wantedReview==='not_real') parts.push('not real');
+  else if(wantedReview==='undecided') parts.push('undecided');
+  if(wantedCelltype!=='all'){
+    let cellLabel=wantedCelltype;
+    const sel=document.getElementById('celltype-filter');
+    if(sel&&sel.selectedOptions&&sel.selectedOptions.length>0){
+      cellLabel=String(sel.selectedOptions[0].textContent||wantedCelltype);
+    }
+    parts.push(`cell type: ${cellLabel}`);
+  }
+  return parts.length===0?'all':parts.join(' | ');
+}
+
+function renderSummaries(reviewFilter, celltypeFilter){
+  if(typeof Plotly==='undefined'){
+    const msg='Plotly failed to load; interactive plots unavailable.';
+    ['chart-genome-location','chart-chrom-counts','chart-svlen','chart-support','chart-overlap-majority','chart-celltype']
+      .forEach(id=>{const el=document.getElementById(id); if(el){el.textContent=msg;}});
+    return;
+  }
+  const data=filteredDashboardData(reviewFilter, celltypeFilter);
+  const scope=summaryScopeLabel(reviewFilter, celltypeFilter);
+  const titleSuffix=(scope==='all')?'':` [${scope}]`;
+  if(data.length===0){
+    const msg=(scope==='all')
+      ?'No selected SVs for summary plots.'
+      :`No SVs in '${scope}' for summary plots.`;
+    ['chart-genome-location','chart-chrom-counts','chart-svlen','chart-support','chart-overlap-majority','chart-celltype']
+      .forEach(id=>{const el=document.getElementById(id); if(el){el.textContent=msg;}});
+    return;
+  }
+
+  const posRows=data.filter(r=>r.sv_chr!=null&&r.sv_pos!=null&&Number.isFinite(Number(r.sv_pos)));
+  if(posRows.length>0){
+    const yMb=posRows.map(r=>Number(r.sv_pos)/1e6);
+    const txt=posRows.map(r=>`${r.id||'NA'}<br>${r.sv_chr}:${r.sv_pos}`);
+    Plotly.newPlot(
+      'chart-genome-location',
+      [{type:'scatter',mode:'markers',x:posRows.map(r=>String(r.sv_chr)),y:yMb,text:txt,hovertemplate:'%{text}<br>Position(Mb): %{y:.3f}<extra></extra>',marker:{size:8,color:'#1f77b4',opacity:0.75}}],
+      {title:'Genome-wide SV Locations (selected)'+titleSuffix,xaxis:{title:'Chromosome',categoryorder:'array',categoryarray:sortChromLabels(posRows.map(r=>String(r.sv_chr)))},yaxis:{title:'SV position (Mb)'}},
+      {responsive:true,displaylogo:false}
+    );
+  } else {
+    document.getElementById('chart-genome-location').textContent='No sv_chr/sv_pos data.';
+  }
+
+  const chrCounts={};
+  data.forEach(r=>{
+    const c=(r.sv_chr==null||String(r.sv_chr).trim()==='')?'NA':String(r.sv_chr);
+    chrCounts[c]=(chrCounts[c]||0)+1;
+  });
+  const chrLabels=sortChromLabels(Object.keys(chrCounts));
+  Plotly.newPlot(
+    'chart-chrom-counts',
+    [{type:'bar',x:chrLabels,y:chrLabels.map(c=>chrCounts[c]),marker:{color:'#2ca02c'}}],
+    {title:'SV Count by Chromosome'+titleSuffix,xaxis:{title:'Chromosome'},yaxis:{title:'SV count'}},
+    {responsive:true,displaylogo:false}
+  );
+
+  const lenVals=data.map(r=>Math.abs(Number(r.sv_len))).filter(v=>Number.isFinite(v)&&v>0).map(v=>Math.log10(v));
+  if(lenVals.length>0){
+    Plotly.newPlot(
+      'chart-svlen',
+      [{type:'histogram',x:lenVals,marker:{color:'#9467bd'}}],
+      {title:'SV Length Distribution'+titleSuffix,xaxis:{title:'log10(|sv_len| bp)'},yaxis:{title:'Count'}},
+      {responsive:true,displaylogo:false}
+    );
+  } else {
+    document.getElementById('chart-svlen').textContent='No sv_len data.';
+  }
+
+  const nSup=data.map(r=>Number(r.n_supporting)).filter(v=>Number.isFinite(v));
+  const nOvl=data.map(r=>Number(r.n_overlapped)).filter(v=>Number.isFinite(v));
+  if(nSup.length+nOvl.length>0){
+    Plotly.newPlot(
+      'chart-support',
+      [{type:'histogram',x:nSup,name:'n_supporting',opacity:0.65,marker:{color:'#ff7f0e'}},{type:'histogram',x:nOvl,name:'n_overlapped',opacity:0.65,marker:{color:'#17becf'}}],
+      {title:'Read Support Distribution'+titleSuffix,xaxis:{title:'Read count'},yaxis:{title:'SV count'},barmode:'overlay'},
+      {responsive:true,displaylogo:false}
+    );
+  } else {
+    document.getElementById('chart-support').textContent='No read support data.';
+  }
+
+  const omRows=data.filter(r=>Number.isFinite(Number(r.overlap_pct))&&Number.isFinite(Number(r.majority_pct)));
+  if(omRows.length>0){
+    Plotly.newPlot(
+      'chart-overlap-majority',
+      [{type:'scatter',mode:'markers',x:omRows.map(r=>Number(r.overlap_pct)),y:omRows.map(r=>Number(r.majority_pct)),text:omRows.map(r=>String(r.id||'')),hovertemplate:'%{text}<br>overlap=%{x:.3f}<br>majority=%{y:.3f}<extra></extra>',marker:{size:9,color:omRows.map(r=>Number.isFinite(Number(r.n_supporting))?Number(r.n_supporting):0),colorscale:'Viridis',showscale:true,colorbar:{title:'n_supporting'}}}],
+      {title:'Agreement vs Overlap'+titleSuffix,xaxis:{title:'overlap_pct',range:[0,1]},yaxis:{title:'majority_pct',range:[0,1]},shapes:[{type:'line',x0:Number(dashboardFilters.min_overlap_pct||0),x1:Number(dashboardFilters.min_overlap_pct||0),y0:0,y1:1,line:{dash:'dot',color:'#444'}},{type:'line',y0:Number(dashboardFilters.min_majority_pct||0),y1:Number(dashboardFilters.min_majority_pct||0),x0:0,x1:1,line:{dash:'dot',color:'#444'}}]},
+      {responsive:true,displaylogo:false}
+    );
+  } else {
+    document.getElementById('chart-overlap-majority').textContent='No overlap/majority data.';
+  }
+
+  const ctCounts={};
+  data.forEach(r=>{
+    const ct=(r.primary_celltype==null||String(r.primary_celltype).trim()==='')?'NA':String(r.primary_celltype);
+    ctCounts[ct]=(ctCounts[ct]||0)+1;
+  });
+  const ctPairs=Object.entries(ctCounts).sort((a,b)=>b[1]-a[1]).slice(0,15);
+  Plotly.newPlot(
+    'chart-celltype',
+    [{type:'bar',orientation:'h',x:ctPairs.map(p=>p[1]).reverse(),y:ctPairs.map(p=>p[0]).reverse(),marker:{color:'#8c564b'}}],
+    {title:'Top Primary Cell Types'+titleSuffix,xaxis:{title:'SV count'},yaxis:{title:'Cell type'}},
+    {responsive:true,displaylogo:false}
+  );
+}
+
+function loadDefaultReviewState(){
+  const out={};
+  getSvCards().forEach(card=>{
+    const svId=card.getAttribute('data-sv-id')||'';
+    out[svId]=normalizeReviewStatus(card.getAttribute('data-review-status'));
+  });
+  return out;
+}
+
+function hasLocalStorage(){
+  try{
+    if(typeof window==='undefined'||!window.localStorage) return false;
+    const probe='__sniffcell_localstorage_probe__';
+    window.localStorage.setItem(probe,'1');
+    window.localStorage.removeItem(probe);
+    return true;
+  }catch(err){
+    return false;
+  }
+}
+
+function loadStoredReviewState(){
+  if(!hasLocalStorage()){
+    return {state:{},loaded:0,available:false,error:''};
+  }
+  let parsed={};
+  try{
+    const raw=window.localStorage.getItem(REVIEW_STORAGE_KEY);
+    if(raw) parsed=JSON.parse(raw);
+  }catch(err){
+    return {state:{},loaded:0,available:true,error:String(err||'unknown error')};
+  }
+  if(!parsed||typeof parsed!=='object'||Array.isArray(parsed)){
+    return {state:{},loaded:0,available:true,error:''};
+  }
+  const out={};
+  let loaded=0;
+  Object.entries(parsed).forEach(([svId,status])=>{
+    const id=String(svId||'').trim();
+    if(!id) return;
+    out[id]=normalizeReviewStatus(status);
+    loaded+=1;
+  });
+  return {state:out,loaded:loaded,available:true,error:''};
+}
+
+function setPersistStatus(message, isError){
+  const el=document.getElementById('review-persist-status');
+  if(!el) return;
+  el.textContent=String(message||'');
+  el.style.color=isError?'#9b1c1c':'#405160';
+}
+
+function persistReviewState(){
+  if(!hasLocalStorage()) return false;
+  try{
+    window.localStorage.setItem(REVIEW_STORAGE_KEY, JSON.stringify(reviewState));
+    return true;
+  }catch(err){
+    setPersistStatus(`Could not save to browser localStorage (${String(err||'unknown error')}).`, true);
+    return false;
+  }
+}
+
+function applyReviewToCard(card, status){
+  card.setAttribute('data-review-status', status);
+  card.classList.toggle('review-state-real', status==='real');
+  card.classList.toggle('review-state-not-real', status==='not_real');
+  card.classList.toggle('review-state-undecided', status==='undecided');
+  const badge=card.querySelector('.review-badge');
+  if(badge) badge.textContent=reviewLabel(status);
+  card.querySelectorAll('.review-btn').forEach(btn=>{
+    const active=btn.getAttribute('data-review-value')===status;
+    btn.classList.toggle('is-active', active);
+  });
+}
+
+function populateCelltypeFilterOptions(){
+  const sel=document.getElementById('celltype-filter');
+  if(!sel) return;
+  const oldValue=String(sel.value||'all');
+  const labelByToken=new Map();
+  getSvCards().forEach(card=>{
+    splitCelltypeList(card.getAttribute('data-primary-celltype')||'').forEach(label=>{
+      const token=normalizeCelltypeToken(label);
+      if(token&&!labelByToken.has(token)) labelByToken.set(token, label);
+    });
+    splitCelltypeList(card.getAttribute('data-linked-celltypes')||'').forEach(label=>{
+      const token=normalizeCelltypeToken(label);
+      if(token&&!labelByToken.has(token)) labelByToken.set(token, label);
+    });
+  });
+  sel.innerHTML='';
+  const allOpt=document.createElement('option');
+  allOpt.value='all';
+  allOpt.textContent='All assigned cell types';
+  sel.appendChild(allOpt);
+  Array.from(labelByToken.entries())
+    .sort((a,b)=>String(a[1]).localeCompare(String(b[1])))
+    .forEach(([token,label])=>{
+      const opt=document.createElement('option');
+      opt.value=token;
+      opt.textContent=label;
+      sel.appendChild(opt);
+    });
+  if(Array.from(sel.options).some(opt=>opt.value===oldValue)) sel.value=oldValue;
+  else sel.value='all';
+}
+
+function syncReviewSummary(){
+  const cards=getSvCards();
+  const counts={real:0,not_real:0,undecided:0};
+  let visible=0;
+  cards.forEach(card=>{
+    const status=normalizeReviewStatus(card.getAttribute('data-review-status'));
+    counts[status]=(counts[status]||0)+1;
+    if(card.style.display!=='none') visible+=1;
+  });
+  const el=document.getElementById('review-summary');
+  if(el){
+    el.textContent=`real: ${counts.real} | not real: ${counts.not_real} | undecided: ${counts.undecided} | visible: ${visible}/${cards.length}`;
+  }
+}
+
+function applyReviewFilter(){
+  const wantedReview=selectedReviewFilter();
+  const wantedCelltype=selectedCelltypeFilter();
+  getSvCards().forEach(card=>{
+    const status=normalizeReviewStatus(card.getAttribute('data-review-status'));
+    const showReview=(wantedReview==='all'||wantedReview===status);
+    const showCelltype=cardMatchesCelltype(card, wantedCelltype);
+    card.style.display=(showReview&&showCelltype)?'':'none';
+  });
+  syncReviewSummary();
+  renderSummaries(wantedReview, wantedCelltype);
+}
+
+function setSvReview(btn){
+  const card=btn.closest('.sv[data-sv-id]');
+  if(!card) return;
+  const svId=card.getAttribute('data-sv-id')||'';
+  const status=normalizeReviewStatus(btn.getAttribute('data-review-value'));
+  reviewState[svId]=status;
+  applyReviewToCard(card, status);
+  if(persistReviewState()){
+    setPersistStatus('Saved review labels to browser localStorage.', false);
+  }
+  applyReviewFilter();
+}
+
+function initReviewControls(){
+  const defaults=loadDefaultReviewState();
+  const stored=loadStoredReviewState();
+  const validIds=new Set(Object.keys(defaults));
+  reviewState={...defaults};
+
+  let applied=0;
+  Object.entries(stored.state).forEach(([svId,status])=>{
+    if(!validIds.has(svId)) return;
+    reviewState[svId]=normalizeReviewStatus(status);
+    applied+=1;
+  });
+
+  if(!stored.available){
+    setPersistStatus('Browser localStorage is unavailable; review labels are session-only.', true);
+  } else if(stored.error){
+    setPersistStatus(`Could not load browser localStorage state (${stored.error}).`, true);
+  } else if(applied>0){
+    setPersistStatus(`Loaded ${applied} review labels from browser localStorage.`, false);
+  } else {
+    setPersistStatus('No saved browser review labels found for this report.', false);
+  }
+
+  getSvCards().forEach(card=>{
+    const svId=card.getAttribute('data-sv-id')||'';
+    const status=normalizeReviewStatus(reviewState[svId]);
+    reviewState[svId]=status;
+    applyReviewToCard(card, status);
+  });
+  populateCelltypeFilterOptions();
+  applyReviewFilter();
+  if(stored.available){
+    persistReviewState();
+  }
+}
+
+initReviewControls();
+
+function copyVizCommand(btn){
+  const cmd=btn.getAttribute('data-cmd')||'';
+  const done=()=>{
+    const old=btn.textContent;
+    btn.textContent='Copied';
+    setTimeout(()=>{btn.textContent=old;},1200);
+  };
+  if(navigator.clipboard&&window.isSecureContext){
+    navigator.clipboard.writeText(cmd).then(done).catch(()=>{});
+    return;
+  }
+  const ta=document.createElement('textarea');
+  ta.value=cmd;
+  document.body.appendChild(ta);
+  ta.select();
+  try{document.execCommand('copy');done();}catch(e){}
+  document.body.removeChild(ta);
+}
+    """
+        .replace("__DASHBOARD_DATA__", json.dumps(dashboard_records))
+        .replace("__DASHBOARD_FILTERS__", json.dumps(filters))
+        .replace("__REVIEW_STORAGE_KEY__", json.dumps(review_storage_key))
     )
+    page.append(f"<script>{script_text}</script>")
     page.append("</body>")
     page.append("</html>")
     return "\n".join(page)
@@ -1071,6 +1376,7 @@ def report_main(args) -> None:
     igv_snapshot_height = int(getattr(args, "igv_snapshot_height", 1600))
     reuse_existing_igvviz = bool(getattr(args, "reuse_existing_igvviz", False))
     igv_bams = igvviz_module._split_bam_args(getattr(args, "igv_bams", None))
+    with_igvreport = bool(getattr(args, "with_igvreport", False))
 
     # Fast profile intentionally trades panel detail for speed.
     if figure_profile == "fast":
@@ -1082,6 +1388,8 @@ def report_main(args) -> None:
     figure_dir.mkdir(parents=True, exist_ok=True)
     igvviz_root = report_dir / "igvviz"
     igvviz_root.mkdir(parents=True, exist_ok=True)
+    igvreport_root = report_dir / "igvreport"
+    review_storage_key = f"sniffcell_report_review::{str(anno_output.resolve())}"
 
     sv_df = _load_sv_assignment(sv_assignment_path)
     selected = _select_high_confidence_svs(
@@ -1110,6 +1418,7 @@ def report_main(args) -> None:
         int(effective_max_reads),
         bool(skip_methylation_overlay),
     )
+    logger.info("Review persistence uses browser localStorage key: %s", review_storage_key)
     if requested_max_reads != effective_max_reads:
         logger.info(
             "Fast profile capped max_reads from %d to %d for faster rendering.",
@@ -1137,6 +1446,11 @@ def report_main(args) -> None:
         igv_snapshot_width,
         igv_snapshot_height,
     )
+    logger.info(
+        "Alternate IGV report: with_igvreport=%s flanking=%d",
+        with_igvreport,
+        int(args.window),
+    )
     if bool(args.with_figures) and len(selected) >= 25:
         logger.warning(
             "Report will render %d SV panels; this can take a long time. "
@@ -1159,6 +1473,10 @@ def report_main(args) -> None:
     if (not with_igvviz) and len(selected) > 0:
         logger.info(
             "IGV rendering is disabled. Use --with_igvviz to generate igvviz screenshots per selected SV."
+        )
+    if (not with_igvreport) and len(selected) > 0:
+        logger.info(
+            "Alternate IGV.js report is disabled. Use --with_igvreport to generate an igv-reports HTML page for the selected SVs."
         )
 
     rows_for_report: list[dict[str, object]] = []
@@ -1199,6 +1517,7 @@ def report_main(args) -> None:
         )
 
         report_row = dict(row)
+        report_row["review_status"] = _normalize_review_status(report_row.get("review_status", "undecided"))
         report_row["viz_status"] = "not_rendered"
         report_row["viz_error"] = ""
         report_row["viz_figure"] = str(figure_path)
@@ -1346,10 +1665,46 @@ def report_main(args) -> None:
                 if progress is not None:
                     progress.close()
 
+    igvreport_html_path = igvreport_root / "index.html"
+    igvreport_manifest_path = igvreport_root / "igvreport_manifest.json"
+    igvreport_result: dict[str, object] = {
+        "enabled": bool(with_igvreport),
+        "status": "not_rendered",
+        "error": "",
+        "command": "",
+        "html": str(igvreport_html_path),
+        "html_rel": "",
+        "manifest": str(igvreport_manifest_path),
+        "manifest_rel": "",
+    }
+    if with_igvreport and len(selected) > 0:
+        igvreport_result.update(
+            igvreport_module.render_igvreport_bundle(
+                anno_output=anno_output,
+                selected_df=selected.copy(),
+                output_dir=igvreport_root,
+                native_report_html=html_path,
+                igv_bams=igv_bams,
+                window=int(args.window),
+            )
+        )
+    elif (not with_igvreport) and igvreport_html_path.exists() and igvreport_manifest_path.exists():
+        igvreport_result["status"] = "existing"
+
+    igvreport_payload = _load_json_dict(igvreport_manifest_path)
+    if (not str(igvreport_result.get("command", "")).strip()) and igvreport_payload:
+        igvreport_result["command"] = str(igvreport_payload.get("igvreport_command", ""))
+    if (not str(igvreport_result.get("error", "")).strip()) and igvreport_payload:
+        igvreport_result["error"] = str(igvreport_payload.get("error", ""))
+    if (not str(igvreport_result.get("status", "")).strip()) and igvreport_payload:
+        igvreport_result["status"] = str(igvreport_payload.get("status", ""))
+
     rendered_count = 0
     failed_count = 0
     igvviz_rendered_count = 0
     igvviz_failed_count = 0
+    igvreport_rendered_count = 0
+    igvreport_failed_count = 0
     for report_row in rows_for_report:
         fig_path = Path(str(report_row["viz_figure"]))
         if (not bool(args.with_figures)) and fig_path.exists():
@@ -1378,7 +1733,18 @@ def report_main(args) -> None:
         if str(report_row["igvviz_status"]).startswith("failed"):
             igvviz_failed_count += 1
 
+    if igvreport_html_path.exists():
+        igvreport_rendered_count = 1
+        igvreport_result["html_rel"] = igvreport_html_path.relative_to(html_path.parent).as_posix()
+    if igvreport_manifest_path.exists():
+        igvreport_result["manifest_rel"] = igvreport_manifest_path.relative_to(html_path.parent).as_posix()
+    if str(igvreport_result.get("status", "")).startswith("failed"):
+        igvreport_failed_count = 1
+
     selected_report_df = pd.DataFrame(rows_for_report)
+    if "review_status" not in selected_report_df.columns:
+        selected_report_df["review_status"] = pd.Series(dtype="string")
+    selected_report_df["review_status"] = selected_report_df["review_status"].map(_normalize_review_status).astype("string")
     for col in (
         "viz_status",
         "viz_error",
@@ -1397,6 +1763,7 @@ def report_main(args) -> None:
     ):
         if col not in selected_report_df.columns:
             selected_report_df[col] = pd.Series(dtype="string")
+
     selected_tsv_path = report_dir / "high_confidence_sv.tsv"
     selected_report_df.to_csv(selected_tsv_path, sep="\t", index=False)
 
@@ -1443,14 +1810,20 @@ def report_main(args) -> None:
         "igv_keep_intermediates": True,
         "igv_batch_only": False,
     }
+    igvreport_cfg = {
+        "with_igvreport": bool(with_igvreport),
+        "igvreport_flanking": int(args.window),
+    }
     dashboard_records = _build_dashboard_records(selected_report_df)
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     html_text = _build_report_html(
         generated_at=generated_at,
         anno_output=anno_output,
         sv_assignment_path=sv_assignment_path,
+        review_storage_key=review_storage_key,
         filters=filters,
         viz=viz_cfg,
+        igvreport=igvreport_result,
         total_sv=int(len(sv_df)),
         selected_count=int(len(selected)),
         rendered_count=int(rendered_count),
@@ -1471,6 +1844,12 @@ def report_main(args) -> None:
         "filters": filters,
         "viz": viz_cfg,
         "igvviz": igvviz_cfg,
+        "igvreport": {
+            **igvreport_cfg,
+            "status": str(igvreport_result.get("status", "")),
+            "error": str(igvreport_result.get("error", "")),
+            "command": str(igvreport_result.get("command", "")),
+        },
         "counts": {
             "sv_total": int(len(sv_df)),
             "sv_selected": int(len(selected)),
@@ -1478,13 +1857,19 @@ def report_main(args) -> None:
             "viz_failed": int(failed_count),
             "igvviz_rendered_or_reused": int(igvviz_rendered_count),
             "igvviz_failed": int(igvviz_failed_count),
+            "igvreport_rendered_or_reused": int(igvreport_rendered_count),
+            "igvreport_failed": int(igvreport_failed_count),
         },
         "outputs": {
             "report_dir": str(report_dir.resolve()),
             "html": str(html_path.resolve()),
             "figures_dir": str(figure_dir.resolve()),
             "igvviz_dir": str(igvviz_root.resolve()),
+            "igvreport_dir": str(igvreport_root.resolve()),
+            "igvreport_html": str(igvreport_html_path.resolve()),
+            "igvreport_manifest": str(igvreport_manifest_path.resolve()),
             "high_confidence_sv_tsv": str(selected_tsv_path.resolve()),
+            "review_storage_key": review_storage_key,
             "failed_viz_tsv": str(failed_tsv_path.resolve()),
             "failed_igvviz_tsv": str(failed_igvviz_tsv_path.resolve()),
             "report_archive": (str(archive_path.resolve()) if archive_path is not None else ""),
@@ -1499,8 +1884,16 @@ def report_main(args) -> None:
 
     logger.info("Wrote HTML report: %s", html_path)
     logger.info("Wrote selected SV table: %s", selected_tsv_path)
+    logger.info("Review state localStorage key: %s", review_storage_key)
     logger.info("Wrote failed viz table: %s", failed_tsv_path)
     logger.info("Wrote failed igvviz table: %s", failed_igvviz_tsv_path)
+    if str(igvreport_result.get("status", "")).strip() not in {"", "not_rendered"}:
+        logger.info(
+            "IGV alternate report status=%s html=%s manifest=%s",
+            igvreport_result.get("status", ""),
+            igvreport_html_path,
+            igvreport_manifest_path,
+        )
     logger.info("Wrote report manifest: %s", manifest_out)
     if archive_out is not None:
         logger.info("Wrote gzipped report archive: %s", archive_out)

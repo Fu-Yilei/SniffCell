@@ -168,6 +168,19 @@ Outputs:
 - `$OUT/anno/report/high_confidence_sv.tsv`
 - report entries include `Copy viz command` buttons for per-SV figure generation
 
+Optional alternate IGV.js report:
+
+```bash
+sniffcell report \
+  --anno_output "$OUT/anno" \
+  --with_igvreport \
+  --igv_bams fans1.bam fans2.bam
+```
+
+Additional outputs:
+- `$OUT/anno/report/igvreport/index.html`
+- `$OUT/anno/report/igvreport/igvreport_manifest.json`
+
 Enable batch figure rendering:
 
 ```bash

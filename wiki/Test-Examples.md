@@ -120,6 +120,19 @@ Checks:
 - `out/anno/report/high_confidence_sv.tsv`
 - HTML includes `Copy viz command` controls for each SV
 
+Optional alternate IGV.js report:
+
+```bash
+sniffcell report \
+  --anno_output out/anno \
+  --with_igvreport \
+  --igv_bams fans1.bam fans2.bam
+```
+
+Checks:
+- `out/anno/report/igvreport/index.html`
+- `out/anno/report/igvreport/igvreport_manifest.json`
+
 Optional figure rendering:
 
 ```bash

@@ -364,6 +364,7 @@ def _build_igv_batch_lines(
     support_phase_group_tag: str,
     snapshot_width: int,
     snapshot_height: int,
+    hide_methylation: bool,
 ) -> list[str]:
     def _append_binary_basemod_preferences(out_lines: list[str]) -> None:
         out_lines.append(f"preference BASEMOD.THRESHOLD {_BASEMOD_BINARY_THRESHOLD}")
@@ -381,7 +382,8 @@ def _build_igv_batch_lines(
     lines.append("setSleepInterval 500")
     if int(visibility_window) > 0:
         lines.append(f"preference SAM.MAX_VISIBLE_RANGE {int(visibility_window)}")
-    _append_binary_basemod_preferences(lines)
+    if not hide_methylation:
+        _append_binary_basemod_preferences(lines)
 
     for job in jobs:
         lines.append("new")
@@ -392,7 +394,8 @@ def _build_igv_batch_lines(
         lines.append("setSleepInterval 500")
         if int(visibility_window) > 0:
             lines.append(f"preference SAM.MAX_VISIBLE_RANGE {int(visibility_window)}")
-        _append_binary_basemod_preferences(lines)
+        if not hide_methylation:
+            _append_binary_basemod_preferences(lines)
         if gene_track_path:
             lines.append(f"load {_igv_quote(gene_track_path)}")
         lines.append(f"load {_igv_quote(job['tagged_bam'])}")
@@ -403,8 +406,9 @@ def _build_igv_batch_lines(
         lines.append("expand")
         lines.append(f"group TAG {support_phase_group_tag}")
         lines.append(f"sort TAG {phase_tag}")
-        # Two-color base-mod rendering: methylated marks are colored, non-methylated marks are de-emphasized.
-        lines.append("colorBy BASE_MODIFICATION_2COLOR")
+        if not hide_methylation:
+            # Two-color base-mod rendering: methylated marks are colored, non-methylated marks are de-emphasized.
+            lines.append("colorBy BASE_MODIFICATION_2COLOR")
         lines.append(f"snapshot {job['snapshot_name']}")
 
     lines.append("exit")
@@ -489,6 +493,7 @@ def igvviz_main(args) -> None:
         raise ValueError("snapshot_width must be > 0")
     if snapshot_height <= 0:
         raise ValueError("snapshot_height must be > 0")
+    hide_methylation = bool(getattr(args, "hide_methylation", False))
     support_phase_group_tag = "SG"
     if str(args.phase_tag).strip().upper() == support_phase_group_tag:
         support_phase_group_tag = "SX"
@@ -588,6 +593,7 @@ def igvviz_main(args) -> None:
             support_phase_group_tag=str(support_phase_group_tag),
             snapshot_width=snapshot_width,
             snapshot_height=snapshot_height,
+            hide_methylation=hide_methylation,
         )
         batch_path = output_dir / f"{sv_slug}.igvviz.batch.txt"
         batch_path.write_text("\n".join(batch_lines) + "\n", encoding="utf-8")
@@ -606,10 +612,11 @@ def igvviz_main(args) -> None:
             "include_non_supporting": True,
             "n_supporting_reads_listed": int(len(supporting_reads)),
             "support_phase_group_tag": str(support_phase_group_tag),
-            "basemod_scheme": "binary_methylated_vs_none",
-            "basemod_threshold": float(_BASEMOD_BINARY_THRESHOLD),
-            "basemod_color_on": str(_BASEMOD_BINARY_ON_COLOR),
-            "basemod_color_off": str(_BASEMOD_BINARY_OFF_COLOR),
+            "hide_methylation": hide_methylation,
+            "basemod_scheme": (None if hide_methylation else "binary_methylated_vs_none"),
+            "basemod_threshold": (None if hide_methylation else float(_BASEMOD_BINARY_THRESHOLD)),
+            "basemod_color_on": (None if hide_methylation else str(_BASEMOD_BINARY_ON_COLOR)),
+            "basemod_color_off": (None if hide_methylation else str(_BASEMOD_BINARY_OFF_COLOR)),
             "gene_track": str(gene_track_path or ""),
             "igv_cmd": str(args.igv_cmd),
             "batch_file": str(batch_path.resolve()),

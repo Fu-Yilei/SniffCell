@@ -106,6 +106,14 @@ class TestReportMain(unittest.TestCase):
             format="png",
             reuse_existing_viz=reuse,
             figure_threads=1,
+            with_igvviz=False,
+            igv_bams=None,
+            igv_cmd="igv.sh",
+            igv_snapshot_format="png",
+            igv_snapshot_width=3600,
+            igv_snapshot_height=1600,
+            reuse_existing_igvviz=False,
+            with_igvreport=False,
             output=output,
         )
 
@@ -326,10 +334,54 @@ class TestReportMain(unittest.TestCase):
             self.assertIn("cdn.plot.ly", text)
             self.assertIn("SV Review Controls", text)
             self.assertIn("id=\"review-filter\"", text)
-            self.assertIn("Export review table", text)
+            self.assertIn("id=\"celltype-filter\"", text)
             self.assertIn("setSvReview(this)", text)
-            self.assertIn("function exportReviewTable()", text)
-            self.assertIn("review_status", text)
+            self.assertIn("function selectedCelltypeFilter()", text)
+            self.assertIn("REVIEW_STORAGE_KEY", text)
+            self.assertIn("function persistReviewState()", text)
+            self.assertIn("localStorage", text)
+            self.assertIn("review-persist-status", text)
+            self.assertIn("data-review-status", text)
+
+    def test_report_main_does_not_load_review_status_from_disk_tsv(self):
+        with tempfile.TemporaryDirectory() as td:
+            anno_dir = Path(td) / "anno_out"
+            anno_dir.mkdir(parents=True, exist_ok=True)
+            (anno_dir / "anno_run_manifest.json").write_text(json.dumps({"inputs": {}, "outputs": {}}), encoding="utf-8")
+
+            sv_df = pd.DataFrame(
+                [
+                    {
+                        "id": "sv_disk",
+                        "assigned_code": "10",
+                        "linked_celltypes": "A",
+                        "primary_celltype": "A",
+                        "has_hard_conflict": False,
+                        "overlap_pct": 0.8,
+                        "majority_pct": 0.9,
+                        "n_supporting": 8,
+                        "n_overlapped": 6,
+                    }
+                ]
+            )
+            sv_df.to_csv(anno_dir / "sv_assignment.tsv", sep="\t", index=False)
+            pd.DataFrame(
+                [
+                    {
+                        "id": "sv_disk",
+                        "review_status": "real",
+                    }
+                ]
+            ).to_csv(anno_dir / "report_review.tsv", sep="\t", index=False)
+
+            args = self._base_args(anno_dir)
+            report_main(args)
+
+            selected = pd.read_csv(anno_dir / "report" / "high_confidence_sv.tsv", sep="\t")
+            self.assertEqual(selected["review_status"].tolist(), ["undecided"])
+            html_text = (anno_dir / "report" / "index.html").read_text(encoding="utf-8")
+            self.assertIn('data-review-status="undecided"', html_text)
+            self.assertIn("review-badge\">undecided</span>", html_text)
 
     def test_report_main_runs_igvviz_and_records_status(self):
         with tempfile.TemporaryDirectory() as td:
@@ -437,10 +489,81 @@ class TestReportMain(unittest.TestCase):
             self.assertIn("sv_img.01.a.igv.png", html_text)
             self.assertIn("<img src=", html_text)
             self.assertIn(".igv-grid{display:flex;flex-direction:column;", html_text)
+            self.assertIn("Review controls (IGV):", html_text)
+            self.assertIn(".igv-review-layout{display:flex;flex-direction:column;", html_text)
 
             selected = pd.read_csv(report_dir / "high_confidence_sv.tsv", sep="\t")
             self.assertEqual(selected["igvviz_status"].tolist(), ["rendered"])
             self.assertIn("sv_img.01.a.igv.png", str(selected.iloc[0]["igvviz_snapshots_rel"]))
+
+    def test_report_main_runs_igvreport_and_links_alternate_html(self):
+        with tempfile.TemporaryDirectory() as td:
+            anno_dir = Path(td) / "anno_out"
+            anno_dir.mkdir(parents=True, exist_ok=True)
+            (anno_dir / "anno_run_manifest.json").write_text(json.dumps({"inputs": {}, "outputs": {}}), encoding="utf-8")
+
+            sv_df = pd.DataFrame(
+                [
+                    {
+                        "id": "sv_alt",
+                        "assigned_code": "10",
+                        "linked_celltypes": "A",
+                        "primary_celltype": "A",
+                        "has_hard_conflict": False,
+                        "overlap_pct": 0.8,
+                        "majority_pct": 0.9,
+                        "n_supporting": 8,
+                        "n_overlapped": 6,
+                    }
+                ]
+            )
+            sv_df.to_csv(anno_dir / "sv_assignment.tsv", sep="\t", index=False)
+
+            args = self._base_args(anno_dir)
+            args.with_igvreport = True
+
+            def _fake_igvreport(**kwargs):
+                out_dir = Path(kwargs["output_dir"])
+                out_dir.mkdir(parents=True, exist_ok=True)
+                html_path = out_dir / "index.html"
+                html_path.write_text("<html>fake igvreport</html>", encoding="utf-8")
+                manifest_path = out_dir / "igvreport_manifest.json"
+                manifest_path.write_text(
+                    json.dumps(
+                        {
+                            "status": "rendered",
+                            "igvreport_command": "create_report selected_sv_sites.tsv --output index.html",
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                return {
+                    "status": "rendered",
+                    "error": "",
+                    "command": "create_report selected_sv_sites.tsv --output index.html",
+                    "html_path": str(html_path),
+                    "manifest_path": str(manifest_path),
+                    "sites_path": str(out_dir / "selected_sv_sites.tsv"),
+                    "header_path": str(out_dir / "sniffcell_igvreport_header.html"),
+                }
+
+            with patch("sniffcell.report.report.igvreport_module.render_igvreport_bundle", side_effect=_fake_igvreport) as mock_igvreport:
+                report_main(args)
+                self.assertEqual(mock_igvreport.call_count, 1)
+                self.assertEqual(mock_igvreport.call_args.kwargs["window"], 5000)
+                self.assertEqual(mock_igvreport.call_args.kwargs["selected_df"]["id"].tolist(), ["sv_alt"])
+
+            report_dir = anno_dir / "report"
+            html_text = (report_dir / "index.html").read_text(encoding="utf-8")
+            self.assertIn("Alternate IGV Report", html_text)
+            self.assertIn("igvreport/index.html", html_text)
+            self.assertIn("Copy igvreport command", html_text)
+
+            manifest_payload = json.loads((report_dir / "report_manifest.json").read_text(encoding="utf-8"))
+            self.assertEqual(manifest_payload["igvreport"]["status"], "rendered")
+            self.assertEqual(manifest_payload["counts"]["igvreport_rendered_or_reused"], 1)
+            self.assertTrue((report_dir / "igvreport" / "index.html").exists())
+            self.assertTrue((report_dir / "igvreport" / "igvreport_manifest.json").exists())
 
 
 if __name__ == "__main__":

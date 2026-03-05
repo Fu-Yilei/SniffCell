@@ -72,6 +72,7 @@ def read_vcf_to_df(vcf_file, kanpig_read_names=None):
             sv_len = _safe_info_get(record.info, "SVLEN", "NA")
             stdev_len = _safe_info_get(record.info, "STDEV_LEN", "NA")
             stdev_pos = _safe_info_get(record.info, "STDEV_POS", "NA")
+            end = getattr(record, "stop", pd.NA)
             vaf = _safe_info_get(record.info, "VAF", pd.NA)
             try:
                 vaf_missing = pd.isna(vaf)
@@ -88,16 +89,22 @@ def read_vcf_to_df(vcf_file, kanpig_read_names=None):
                 "supporting_reads": _safe_info_get_read_names(record.info, "RNAMES"),
                 "stdev_len": stdev_len,
                 "stdev_pos": stdev_pos,
+                "end": end,
                 "vaf": vaf,
             }
 
             stdev_pos = df_record["stdev_pos"]
             sv_len = df_record["sv_len"] if svtype == "DEL" else 0
             stdev_len = df_record["stdev_len"] 
-            ref_start = df_record["location"] - stdev_pos if stdev_pos != "NA" else np.nan
+            end = _safe_int(df_record["end"])
             if stdev_pos != "NA":
+                ref_start = df_record["location"] - stdev_pos
                 ref_end = df_record["location"] + stdev_pos + stdev_len - sv_len
+            elif not np.isnan(end):
+                ref_start = _safe_int(df_record["location"])
+                ref_end = max(_safe_int(df_record["location"]), end)
             else:
+                ref_start = _safe_int(df_record["location"])
                 ref_end = np.nan
 
             df_record.update({"ref_start": _safe_int(ref_start), "ref_end": _safe_int(ref_end)})

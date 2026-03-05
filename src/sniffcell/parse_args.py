@@ -314,6 +314,11 @@ def parse_args(argv):
         help="IGV window height in pixels for snapshots, default=1600",
     )
     igvviz_parser.add_argument(
+        "--hide_methylation",
+        action="store_true",
+        help="Do not use IGV base-modification coloring in screenshots.",
+    )
+    igvviz_parser.add_argument(
         "-o",
         "--output",
         required=False,
@@ -448,6 +453,11 @@ def parse_args(argv):
         "--reuse_existing_igvviz",
         action="store_true",
         help="Reuse existing igvviz manifests/snapshots when available instead of regenerating.",
+    )
+    report_parser.add_argument(
+        "--with_igvreport",
+        action="store_true",
+        help="Generate an alternate igv-reports HTML page for the selected SVs.",
     )
     report_parser.add_argument(
         "-o", "--output",
