@@ -7,8 +7,12 @@ from pathlib import Path
 import pandas as pd
 
 from sniffcell.viz.viz import (
+    _assign_ctdmr_label_lanes,
+    _collect_large_indels_from_cigar,
     _build_methylation_heatmap_matrix,
-    _build_reference_celltype_matrix,
+    _expand_interval_for_visibility,
+    _extend_region_to_first_informative_ctdmr,
+    _reference_celltype_mean_columns,
     _resolve_viz_runtime_inputs,
     _summarize_supporting_read_assignments,
 )
@@ -56,6 +60,41 @@ class TestVizSupportingReadAssignment(unittest.TestCase):
         self.assertEqual(detail_df.iloc[0]["read_name"], "r1")
         self.assertEqual(detail_df.iloc[0]["assigned_celltypes"], "A")
 
+    def test_supporting_reads_can_remain_assigned_outside_local_plot_window(self):
+        assignment_df = pd.DataFrame(
+            {
+                "chr": ["1"],
+                "start": [1200],
+                "end": [1245],
+                "code_order": ["Neuron|Oligodendrocyte"],
+                "code": ["10"],
+                "best_group": ["Neuron"],
+                "best_group_leaves": ["Neuron"],
+                "is_best_group": [True],
+            },
+            index=pd.Index(["r1"], name="readname"),
+        )
+        assignment_df["read_name"] = assignment_df.index.astype(str)
+
+        summary_df, detail_df = _summarize_supporting_read_assignments(
+            assignment_df,
+            supporting_reads={"r1"},
+            sv_chrom="1",
+            sv_start=2000,
+            sv_end=2010,
+            window=1000,
+            region_start=1900,
+            region_end=2100,
+            assignment_available=True,
+            clip_to_region=False,
+        )
+
+        self.assertEqual(len(summary_df), 1)
+        self.assertTrue(bool(summary_df.iloc[0]["is_assigned"]))
+        self.assertEqual(summary_df.iloc[0]["assignment_status"], "assigned")
+        self.assertEqual(summary_df.iloc[0]["assigned_celltypes"], "Neuron")
+        self.assertEqual(len(detail_df), 1)
+
 
 class TestVizHeatmapMatrix(unittest.TestCase):
     def test_heatmap_matrix_limits_and_orders(self):
@@ -75,7 +114,7 @@ class TestVizHeatmapMatrix(unittest.TestCase):
         self.assertEqual(heat.shape, (2, 1))
         self.assertEqual(list(heat.index), ["r1", "r3"])
 
-    def test_reference_celltype_matrix_uses_all_mean_columns(self):
+    def test_reference_celltype_mean_columns_uses_all_mean_columns(self):
         dmrs = pd.DataFrame(
             {
                 "label": ["A", "B"],
@@ -86,10 +125,8 @@ class TestVizHeatmapMatrix(unittest.TestCase):
                 "mean_best_value": [0.8, 0.7],  # should be excluded
             }
         )
-        mat = _build_reference_celltype_matrix(dmrs)
-        self.assertEqual(list(mat.columns), ["T-cell", "B-cell"])
-        self.assertEqual(mat.shape, (2, 2))
-        self.assertAlmostEqual(float(mat.iloc[0, 0]), 0.8)
+        cols = _reference_celltype_mean_columns(dmrs)
+        self.assertEqual(cols, ["mean_T-cell", "mean_B-cell"])
 
 
 class TestVizManifestResolution(unittest.TestCase):
@@ -132,6 +169,88 @@ class TestVizManifestResolution(unittest.TestCase):
             self.assertEqual(resolved["bed_path"], "/tmp/dmrs.tsv")
             self.assertEqual(resolved["window"], 12000)
             self.assertTrue(str(resolved["output_path"]).endswith("sv1.viz.png"))
+
+
+class TestVizLargeIndels(unittest.TestCase):
+    def test_collect_large_indels_from_cigar_filters_and_clips(self):
+        events = _collect_large_indels_from_cigar(
+            cigartuples=[
+                (0, 100),  # M
+                (1, 55),   # INS
+                (0, 20),
+                (2, 80),   # DEL
+                (0, 30),
+                (1, 15),   # too small
+            ],
+            reference_start=1000,
+            region_start=900,
+            region_end=1200,
+            min_indel_bp=40,
+        )
+
+        self.assertEqual(len(events), 2)
+        self.assertEqual(events[0]["event_type"], "INS")
+        self.assertEqual(events[0]["pos"], 1100)
+        self.assertEqual(events[0]["length"], 55)
+        self.assertEqual(events[1]["event_type"], "DEL")
+        self.assertEqual(events[1]["start"], 1120)
+        self.assertEqual(events[1]["end"], 1200)
+        self.assertEqual(events[1]["length"], 80)
+
+
+class TestVizLinkedCtdmrMode(unittest.TestCase):
+    def test_expand_interval_for_visibility_enforces_minimum_span(self):
+        new_start, new_end = _expand_interval_for_visibility(
+            1000,
+            1010,
+            region_start=0,
+            region_end=5000,
+            min_span_bp=120,
+        )
+        self.assertEqual(new_end - new_start, 120)
+        self.assertLessEqual(new_start, 1000)
+        self.assertGreaterEqual(new_end, 1010)
+
+    def test_extend_region_uses_nearest_informative_ctdmr(self):
+        callouts = pd.DataFrame(
+            {
+                "chr": ["chr1", "chr1"],
+                "start": [1200, 3100],
+                "end": [1250, 3150],
+                "callout_side": ["left", "right"],
+                "callout_support_count": [1, 2],
+                "callout_distance_bp": [650, 1100],
+            }
+        )
+
+        new_start, new_end, row = _extend_region_to_first_informative_ctdmr(
+            region_start=1900,
+            region_end=2900,
+            linked_ctdmr_callouts=callouts,
+        )
+
+        self.assertEqual(new_start, 700)
+        self.assertEqual(new_end, 2900)
+        self.assertIsNotNone(row)
+        self.assertEqual(int(row["start"]), 1200)
+
+    def test_assign_ctdmr_label_lanes_separates_overlapping_labels(self):
+        entries = [
+            {"x_center": 100.0, "text": "0.95"},
+            {"x_center": 110.0, "text": "0.82"},
+            {"x_center": 300.0, "text": "0.14"},
+        ]
+
+        lanes, lane_count = _assign_ctdmr_label_lanes(
+            entries,
+            region_span_bp=1000,
+            font_size=12.0,
+        )
+
+        self.assertEqual(len(lanes), 3)
+        self.assertGreaterEqual(lane_count, 2)
+        self.assertNotEqual(lanes[0], lanes[1])
+        self.assertEqual(lanes[2], 0)
 
 
 if __name__ == "__main__":

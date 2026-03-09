@@ -206,6 +206,18 @@ sniffcell viz \
   -f png
 ```
 
+Large read-level indels:
+- `viz` now overlays large insertions/deletions on the plotted reads.
+- Configure with `--indel_min_bp`; default is `40`.
+- Set `--indel_min_bp 0` to disable the overlay.
+
+Distal winning ctDMR callouts:
+- `viz` now supports three linked-ctDMR display modes via `--linked_ctdmr_mode`.
+- `distal` keeps the requested window and shows off-window winning linked ctDMRs as side callouts with dashed extensions. This is the default.
+- `extend` expands the plotted region to the nearest informative winning linked ctDMR.
+- `strict` keeps the requested window and ignores off-window linked ctDMRs.
+- `--no_distal_ctdmr_callouts` remains as an alias for `--linked_ctdmr_mode strict`.
+
 Default output naming:
 - With `--anno_output` and no `-o`: `<anno_output>/<sv_id>.viz.<format>`
 - Without `--anno_output` and no `-o`: `./<sv_id>.viz.<format>`

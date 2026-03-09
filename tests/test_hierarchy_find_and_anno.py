@@ -3,7 +3,11 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from sniffcell.anno.anno import _assign_target_by_reference_mean, _resolve_cell_types_and_targets
+from sniffcell.anno.anno import (
+    _assign_target_by_reference_mean,
+    _find_dmr_query_interval,
+    _resolve_cell_types_and_targets,
+)
 from sniffcell.find.ctdmr import call_ct_combination_dmrs
 
 
@@ -99,6 +103,12 @@ class TestAnnoCodeResolution(unittest.TestCase):
             mean_rest_value=0.75,
         )
         self.assertIsNone(mask)
+
+    def test_find_dmr_query_interval_shifts_left_by_one(self):
+        self.assertEqual(_find_dmr_query_interval(10, 20), (9, 20))
+
+    def test_find_dmr_query_interval_preserves_zero_start(self):
+        self.assertEqual(_find_dmr_query_interval(0, 20), (0, 20))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,154 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="860" viewBox="0 0 1280 860">
+  <defs>
+    <style>
+      .title { font: 700 30px 'Trebuchet MS', sans-serif; fill: #10243b; }
+      .subtitle { font: 500 15px 'Trebuchet MS', sans-serif; fill: #5a6d82; }
+      .section { font: 700 18px 'Trebuchet MS', sans-serif; fill: #122740; }
+      .step { font: 700 17px 'Trebuchet MS', sans-serif; fill: #122740; }
+      .text { font: 500 13px 'Trebuchet MS', sans-serif; fill: #33475b; }
+      .small { font: 500 12px 'Trebuchet MS', sans-serif; fill: #5a6d82; }
+      .mono { font: 600 12px monospace; fill: #2d4359; }
+      .num { font: 700 16px 'Trebuchet MS', sans-serif; fill: #ffffff; text-anchor: middle; dominant-baseline: middle; }
+      .frame { fill: #ffffff; stroke: #c8d6e4; stroke-width: 2; }
+      .inputs { fill: #eef7ff; stroke: #8abfe8; stroke-width: 2; }
+      .rules { fill: #fff9ef; stroke: #ecb56b; stroke-width: 2; }
+      .output { fill: #effcf2; stroke: #72c181; stroke-width: 2; }
+      .s1 { fill: #f8fbff; stroke: #b7cbdd; stroke-width: 2; }
+      .s2 { fill: #f8fff3; stroke: #b6d98f; stroke-width: 2; }
+      .s3 { fill: #fffdf3; stroke: #efcf7d; stroke-width: 2; }
+      .s4 { fill: #fff7f7; stroke: #ebb3bd; stroke-width: 2; }
+      .s5 { fill: #faf7ff; stroke: #ccb2ef; stroke-width: 2; }
+      .arrow { stroke: #55697f; stroke-width: 3; fill: none; }
+      .dash { stroke: #9bb0c4; stroke-width: 2; stroke-dasharray: 6 5; fill: none; }
+    </style>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#f4f8fc"/>
+      <stop offset="100%" stop-color="#eef5f2"/>
+    </linearGradient>
+    <marker id="arrowHead" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M 0 0 L 12 6 L 0 12 z" fill="#55697f"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1280" height="860" fill="url(#bg)"/>
+  <rect x="20" y="20" width="1240" height="820" rx="28" class="frame"/>
+
+  <text x="56" y="66" class="title">sniffcell find workflow</text>
+  <text x="56" y="92" class="subtitle">Clean process view: inputs, scoring pipeline, merge rules, and output files.</text>
+
+  <rect x="56" y="126" width="260" height="576" rx="22" class="inputs"/>
+  <text x="78" y="160" class="section">Inputs</text>
+  <text x="78" y="188" class="small">Atlas files plus one selected JSON key.</text>
+
+  <rect x="78" y="218" width="216" height="66" rx="16" class="frame"/>
+  <text x="96" y="244" class="mono">-n atlas.npy</text>
+  <text x="96" y="266" class="text">Atlas methylation matrix</text>
+
+  <rect x="78" y="300" width="216" height="66" rx="16" class="frame"/>
+  <text x="96" y="326" class="mono">-i atlas.index.gz</text>
+  <text x="96" y="346" class="text">chr/start/end and</text>
+  <text x="96" y="362" class="text">CpG span per row</text>
+
+  <rect x="78" y="382" width="216" height="66" rx="16" class="frame"/>
+  <text x="96" y="408" class="mono">-m all_celltypes.txt</text>
+  <text x="96" y="428" class="text">Sample names in</text>
+  <text x="96" y="444" class="text">matrix column order</text>
+
+  <rect x="78" y="464" width="216" height="66" rx="16" class="frame"/>
+  <text x="96" y="490" class="mono">-cf groups.json</text>
+  <text x="96" y="512" class="text">group -&gt; sample IDs mapping</text>
+
+  <rect x="78" y="552" width="216" height="54" rx="16" fill="#ffffff" stroke="#9eb8d2" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="96" y="575" class="small">Selected group map</text>
+  <text x="96" y="595" class="mono">-ck pbmc</text>
+
+  <rect x="78" y="624" width="216" height="54" rx="14" fill="#ffffff" stroke="#9eb8d2" stroke-width="2"/>
+  <text x="96" y="646" class="small">Need at least 2 usable groups</text>
+  <text x="96" y="662" class="small">after matching samples</text>
+
+  <rect x="354" y="126" width="548" height="110" rx="22" class="s1"/>
+  <circle cx="390" cy="181" r="20" fill="#658eb2"/>
+  <text x="390" y="182" class="num">1</text>
+  <text x="426" y="168" class="step">Load atlas into one dataframe</text>
+  <text x="426" y="194" class="text">Build `M_df` from the matrix, sample metadata, and CpG index.</text>
+  <text x="426" y="216" class="small">Rows are atlas loci. Columns are named samples.</text>
+
+  <rect x="354" y="258" width="548" height="110" rx="22" class="s2"/>
+  <circle cx="390" cy="313" r="20" fill="#7aab53"/>
+  <text x="390" y="314" class="num">2</text>
+  <text x="426" y="296" class="step">Resolve the chosen group mapping</text>
+  <text x="426" y="320" class="text">Keep only samples that exist in `M_df`,</text>
+  <text x="426" y="340" class="text">then compute one mean methylation track per group.</text>
+  <text x="426" y="360" class="small">If a declared sample is missing, it is ignored rather than causing failure.</text>
+
+  <rect x="354" y="390" width="548" height="110" rx="22" class="s3"/>
+  <circle cx="390" cy="445" r="20" fill="#dd9f22"/>
+  <text x="390" y="446" class="num">3</text>
+  <text x="426" y="428" class="step">Enumerate unique bipartitions</text>
+  <text x="426" y="452" class="text">Evaluate every non-empty split such as</text>
+  <text x="426" y="472" class="text">`A vs B|C|D` or `A|B vs C|D`.</text>
+  <text x="426" y="492" class="small">Mirror duplicates are skipped by fixing group 0 on one side.</text>
+
+  <rect x="354" y="522" width="548" height="110" rx="22" class="s4"/>
+  <circle cx="390" cy="577" r="20" fill="#d66480"/>
+  <text x="390" y="578" class="num">4</text>
+  <text x="426" y="560" class="step">Score each atlas row and keep one winner</text>
+  <text x="426" y="584" class="text">For every row, compute left mean, right mean,</text>
+  <text x="426" y="604" class="text">delta, and `abs(delta)`.</text>
+  <text x="426" y="624" class="small">Keep the highest passing partition and also record the second-best margin.</text>
+
+  <rect x="354" y="654" width="548" height="110" rx="22" class="s5"/>
+  <circle cx="390" cy="709" r="20" fill="#8a70d1"/>
+  <text x="390" y="710" class="num">5</text>
+  <text x="426" y="692" class="step">Merge compatible winning rows into ctDMR regions</text>
+  <text x="426" y="716" class="text">Adjacent rows merge only when chromosome, winning code,</text>
+  <text x="426" y="736" class="text">target side, direction, and gap remain compatible.</text>
+  <text x="426" y="756" class="small">Then region filters such as `min_rows` and `min_cpgs` are applied.</text>
+
+  <line x1="628" y1="236" x2="628" y2="258" class="arrow" marker-end="url(#arrowHead)"/>
+  <line x1="628" y1="368" x2="628" y2="390" class="arrow" marker-end="url(#arrowHead)"/>
+  <line x1="628" y1="500" x2="628" y2="522" class="arrow" marker-end="url(#arrowHead)"/>
+  <line x1="628" y1="632" x2="628" y2="654" class="arrow" marker-end="url(#arrowHead)"/>
+  <line x1="316" y1="404" x2="354" y2="181" class="dash"/>
+
+  <rect x="936" y="126" width="286" height="170" rx="22" class="rules"/>
+  <text x="958" y="160" class="section">Row scoring rule</text>
+  <text x="958" y="192" class="mono">left_mean  = mean(left groups)</text>
+  <text x="958" y="214" class="mono">right_mean = mean(right groups)</text>
+  <text x="958" y="236" class="mono">delta      = left_mean - right_mean</text>
+  <text x="958" y="258" class="mono">margin     = abs(delta)</text>
+  <text x="958" y="282" class="small">The largest passing margin wins the row.</text>
+
+  <rect x="936" y="318" width="286" height="156" rx="22" class="rules"/>
+  <text x="958" y="352" class="section">Target-side rule</text>
+  <text x="958" y="384" class="text">Prefer the smaller side of the bipartition.</text>
+  <text x="958" y="408" class="text">If both sides are the same size, choose the hyper side.</text>
+  <text x="958" y="434" class="small">This becomes `best_group`, `other_group`,</text>
+  <text x="958" y="452" class="small">and `best_dir` downstream.</text>
+
+  <rect x="936" y="496" width="286" height="206" rx="22" class="rules"/>
+  <text x="958" y="530" class="section">Region filters</text>
+  <text x="958" y="554" class="text">Rows can merge only when:</text>
+  <text x="976" y="578" class="text">same chromosome</text>
+  <text x="976" y="600" class="text">same winning partition</text>
+  <text x="976" y="622" class="text">same target side</text>
+  <text x="976" y="644" class="text">same hyper/hypo direction</text>
+  <text x="976" y="666" class="text">gap &lt;= `max_gap_bp`</text>
+  <text x="958" y="690" class="small">Final regions must also satisfy</text>
+  <text x="958" y="708" class="small">`min_rows`, `min_cpgs`, and `min_bp`.</text>
+
+  <rect x="56" y="706" width="260" height="100" rx="22" class="output"/>
+  <text x="78" y="740" class="section">Outputs</text>
+  <text x="78" y="768" class="mono">&lt;output&gt;</text>
+  <text x="78" y="788" class="text">annotation-ready ctDMR table</text>
+
+  <rect x="936" y="724" width="286" height="82" rx="22" class="output"/>
+  <text x="958" y="758" class="mono">&lt;output&gt;.igv.bed</text>
+  <text x="958" y="780" class="text">BED9 companion for IGV</text>
+
+  <line x1="628" y1="764" x2="628" y2="786" class="arrow" marker-end="url(#arrowHead)"/>
+  <line x1="902" y1="181" x2="936" y2="181" class="dash"/>
+  <line x1="902" y1="577" x2="936" y2="599" class="dash"/>
+
+  <text x="56" y="830" class="small">Implementation source: src/sniffcell/find/find.py and src/sniffcell/find/ctdmr.py</text>
+</svg>

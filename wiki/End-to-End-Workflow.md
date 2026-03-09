@@ -81,6 +81,8 @@ Expected files:
 - `$OUT/pbmc_ctdmr.tsv`
 - `$OUT/pbmc_ctdmr.tsv.igv.bed`
 
+Detailed internals: [Find Workflow](Find-Workflow)
+
 ## 4. Annotate SVs (`anno`)
 
 ```bash

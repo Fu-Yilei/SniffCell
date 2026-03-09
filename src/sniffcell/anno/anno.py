@@ -152,6 +152,16 @@ def _to_finite_float(value) -> float | None:
     return out
 
 
+def _find_dmr_query_interval(start: int, end: int) -> tuple[int, int]:
+    """
+    find ctDMR BED rows are G-anchored on the left edge in the atlas index.
+    Shift the query interval left by 1 bp so anno re-extracts the left-edge CpG.
+    """
+    if start <= 0:
+        return start, end
+    return start - 1, end
+
+
 def _assign_target_by_reference_mean(
     read_means: np.ndarray,
     *,
@@ -297,7 +307,6 @@ def _one_dmr(args):
 
     best_group = str(row["best_group"])
     best_dir   = row.get("best_dir", None)
-
     cell_types, target_cell_types = _resolve_cell_types_and_targets(row, best_group)
     target_set = set(target_cell_types)
 
@@ -306,8 +315,14 @@ def _one_dmr(args):
 
     try:
         # load methylation matrix + CpG positions
+        query_start, query_end = _find_dmr_query_interval(start, end)
         mm, cpgs = methyl_matrix_from_bam(
-            input_file, reference, chrom=chrom, start=start, end=end, return_positions=True
+            input_file,
+            reference,
+            chrom=chrom,
+            start=query_start,
+            end=query_end,
+            return_positions=True,
         )
         n_reads_raw = 0 if mm is None else mm.shape[0]
         n_cpgs = len(cpgs)

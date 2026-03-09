@@ -203,9 +203,34 @@ def parse_args(argv):
         help="Output figure DPI, default=300",
     )
     viz_parser.add_argument(
+        "--indel_min_bp",
+        type=int,
+        default=40,
+        help="Show insertion/deletion events on reads when CIGAR length >= this threshold; set 0 to disable, default=40",
+    )
+    viz_parser.add_argument(
         "--skip_methylation_overlay",
         action="store_true",
         help="Skip per-read ctDMR methylation extraction/overlay for faster rendering.",
+    )
+    viz_parser.add_argument(
+        "--linked_ctdmr_mode",
+        choices=["distal", "extend", "strict"],
+        default="distal",
+        help=(
+            "How to handle winning linked ctDMRs outside the local display window: "
+            "distal=show side callouts with dashed extensions; "
+            "extend=expand to the nearest informative linked ctDMR; "
+            "strict=keep the requested window and ignore off-window linked ctDMRs. "
+            "default=distal"
+        ),
+    )
+    viz_parser.add_argument(
+        "--no_distal_ctdmr_callouts",
+        dest="linked_ctdmr_mode",
+        action="store_const",
+        const="strict",
+        help="Alias for `--linked_ctdmr_mode strict`.",
     )
     viz_parser.add_argument(
         "--export_tables",
