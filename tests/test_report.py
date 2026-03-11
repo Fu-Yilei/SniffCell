@@ -335,8 +335,16 @@ class TestReportMain(unittest.TestCase):
             self.assertIn("SV Review Controls", text)
             self.assertIn("id=\"review-filter\"", text)
             self.assertIn("id=\"celltype-filter\"", text)
+            self.assertIn("id=\"svtype-filter\"", text)
+            self.assertIn("id=\"hard-conflict-filter\"", text)
+            self.assertIn("id=\"numeric-filter-grid\"", text)
             self.assertIn("setSvReview(this)", text)
             self.assertIn("function selectedCelltypeFilter()", text)
+            self.assertIn("function selectedSvtypeFilter()", text)
+            self.assertIn("function selectedHardConflictFilter()", text)
+            self.assertIn("function buildNumericFilterControls()", text)
+            self.assertIn("function resetDashboardFilters()", text)
+            self.assertNotIn("Reset dashboard filters", text)
             self.assertIn("REVIEW_STORAGE_KEY", text)
             self.assertIn("function persistReviewState()", text)
             self.assertIn("localStorage", text)
@@ -564,6 +572,62 @@ class TestReportMain(unittest.TestCase):
             self.assertEqual(manifest_payload["counts"]["igvreport_rendered_or_reused"], 1)
             self.assertTrue((report_dir / "igvreport" / "index.html").exists())
             self.assertTrue((report_dir / "igvreport" / "igvreport_manifest.json").exists())
+
+    def test_report_main_backfills_svtype_and_vaf_from_manifest_vcf(self):
+        with tempfile.TemporaryDirectory() as td:
+            anno_dir = Path(td) / "anno_out"
+            anno_dir.mkdir(parents=True, exist_ok=True)
+
+            vcf_path = anno_dir / "input.vcf"
+            vcf_path.write_text(
+                "\n".join(
+                    [
+                        "##fileformat=VCFv4.2",
+                        "##contig=<ID=1>",
+                        "##INFO=<ID=SVTYPE,Number=1,Type=String,Description=\"SV type\">",
+                        "##INFO=<ID=SVLEN,Number=1,Type=Integer,Description=\"SV length\">",
+                        "##INFO=<ID=VAF,Number=1,Type=Float,Description=\"Variant allele fraction\">",
+                        "##INFO=<ID=END,Number=1,Type=Integer,Description=\"End position\">",
+                        "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO",
+                        "1\t100\tsv_vcf\tN\t<DEL>\t.\tPASS\tSVTYPE=DEL;SVLEN=-25;END=125;VAF=0.125",
+                    ]
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            (anno_dir / "anno_run_manifest.json").write_text(
+                json.dumps({"inputs": {"vcf": str(vcf_path)}, "outputs": {}}),
+                encoding="utf-8",
+            )
+
+            sv_df = pd.DataFrame(
+                [
+                    {
+                        "id": "sv_vcf",
+                        "assigned_code": "10",
+                        "linked_celltypes": "A",
+                        "primary_celltype": "A",
+                        "has_hard_conflict": False,
+                        "overlap_pct": 0.8,
+                        "majority_pct": 0.9,
+                        "n_supporting": 5,
+                        "n_overlapped": 4,
+                    }
+                ]
+            )
+            sv_df.to_csv(anno_dir / "sv_assignment.tsv", sep="\t", index=False)
+
+            args = self._base_args(anno_dir)
+            report_main(args)
+
+            selected = pd.read_csv(anno_dir / "report" / "high_confidence_sv.tsv", sep="\t")
+            self.assertEqual(selected["sv_type"].tolist(), ["DEL"])
+            self.assertAlmostEqual(float(selected.iloc[0]["vaf"]), 0.125, places=6)
+            self.assertEqual(int(selected.iloc[0]["sv_len"]), -25)
+
+            html_text = (anno_dir / "report" / "index.html").read_text(encoding="utf-8")
+            self.assertIn('data-sv-type="DEL"', html_text)
+            self.assertIn('data-vaf="0.125"', html_text)
 
 
 if __name__ == "__main__":

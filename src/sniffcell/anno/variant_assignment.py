@@ -1,5 +1,9 @@
 import numpy as np
 import pandas as pd
+from sniffcell.anno.breakpoint_exclusion import (
+    compute_breakpoint_exclusion_bp,
+    validate_breakpoint_exclusion_frac,
+)
 
 def _split_pipe_values(value) -> list[str]:
     if pd.isna(value):
@@ -323,6 +327,84 @@ def _build_sv_region_map(
     return pd.concat(links, ignore_index=True).drop_duplicates(ignore_index=True)
 
 
+def _build_sv_regions(
+    sv_df: pd.DataFrame,
+    *,
+    sv_id_col: str,
+    breakpoint_exclusion_frac: float,
+) -> pd.DataFrame:
+    sv_region_cols = [sv_id_col, "chr", "location"]
+    for optional_col in ("ref_start", "ref_end", "sv_len"):
+        if optional_col in sv_df.columns:
+            sv_region_cols.append(optional_col)
+
+    sv_regions = sv_df[sv_region_cols].drop_duplicates(subset=[sv_id_col]).copy()
+    sv_regions["chr_norm"] = sv_regions["chr"].map(_norm_chr)
+    sv_loc = pd.to_numeric(sv_regions["location"], errors="coerce")
+    ref_start = (
+        pd.to_numeric(sv_regions["ref_start"], errors="coerce")
+        if "ref_start" in sv_regions.columns else pd.Series(np.nan, index=sv_regions.index, dtype="float64")
+    )
+    ref_end = (
+        pd.to_numeric(sv_regions["ref_end"], errors="coerce")
+        if "ref_end" in sv_regions.columns else pd.Series(np.nan, index=sv_regions.index, dtype="float64")
+    )
+    sv_regions["_start"] = np.where(ref_start.notna(), ref_start - 1, sv_loc - 1)
+    sv_regions["_end"] = np.where(ref_end.notna(), ref_end, sv_loc)
+    valid_sv = (
+        sv_regions["chr_norm"].ne("")
+        & pd.notna(sv_regions["_start"])
+        & pd.notna(sv_regions["_end"])
+    )
+    sv_regions = sv_regions.loc[valid_sv].copy()
+    if sv_regions.empty:
+        return pd.DataFrame(columns=[sv_id_col, "chr_norm", "_start", "_end", "_exclude_bp"])
+
+    sv_regions[["_start", "_end"]] = sv_regions[["_start", "_end"]].astype("int64")
+    bad = sv_regions["_end"] < (sv_regions["_start"] + 1)
+    if bad.any():
+        sv_regions.loc[bad, "_end"] = sv_regions.loc[bad, "_start"] + 1
+
+    sv_regions["_exclude_bp"] = compute_breakpoint_exclusion_bp(
+        sv_regions,
+        breakpoint_exclusion_frac=breakpoint_exclusion_frac,
+    )
+    return sv_regions[[sv_id_col, "chr_norm", "_start", "_end", "_exclude_bp"]].copy()
+
+
+def _filter_mapped_breakpoint_exclusion(
+    mapped: pd.DataFrame,
+    sv_regions: pd.DataFrame,
+    *,
+    sv_id_col: str,
+) -> pd.DataFrame:
+    if mapped.empty or sv_regions.empty:
+        return mapped
+
+    sv_lookup = (
+        sv_regions[[sv_id_col, "_start", "_end", "_exclude_bp"]]
+        .drop_duplicates(subset=[sv_id_col])
+        .rename(columns={"_start": "_sv_start", "_end": "_sv_end"})
+    )
+    filtered = mapped.merge(sv_lookup, on=sv_id_col, how="left")
+
+    dmr_start = pd.to_numeric(filtered["start"], errors="coerce")
+    dmr_end = pd.to_numeric(filtered["end"], errors="coerce")
+    sv_start = pd.to_numeric(filtered["_sv_start"], errors="coerce")
+    sv_end = pd.to_numeric(filtered["_sv_end"], errors="coerce")
+    exclude_bp = pd.to_numeric(filtered["_exclude_bp"], errors="coerce").fillna(0.0)
+
+    overlap_excluded = (
+        dmr_start.notna()
+        & dmr_end.notna()
+        & sv_start.notna()
+        & sv_end.notna()
+        & ((sv_start - exclude_bp) <= dmr_end)
+        & ((sv_end + exclude_bp) >= dmr_start)
+    )
+    return filtered.loc[~overlap_excluded, mapped.columns].copy()
+
+
 def _summarize_celltype_links(
     evidence: pd.DataFrame,
     sv_id_col: str,
@@ -437,6 +519,7 @@ def assign_sv_celltypes(
     min_overlap_pct: float = 0,
     min_agreement_pct: float = 0,
     window: int = 5000,
+    breakpoint_exclusion_frac: float = 0.0,
     reads_col: str = "supporting_reads",
     sv_id_col: str = "id",
     unique_reads_for_overlap: bool = True,
@@ -453,9 +536,12 @@ def assign_sv_celltypes(
     SV linking is coordinate-based:
       - SV and DMR chromosomes must match (chr-normalized).
       - A DMR is linked to an SV if it is within `window` bp padding around the SV interval.
+      - ctDMRs overlapping the SV core expanded by
+        `breakpoint_exclusion_frac * abs(SVLEN)` on each side are excluded.
     """
     if window < 0:
         raise ValueError("window must be >= 0")
+    breakpoint_exclusion_frac = validate_breakpoint_exclusion_frac(breakpoint_exclusion_frac)
 
     # ---- required SV columns ----
     needed = {"chr", "location", sv_id_col, reads_col}
@@ -562,6 +648,11 @@ def assign_sv_celltypes(
     )
 
     assignment["read"] = assignment.index.astype(str)
+    sv_regions = _build_sv_regions(
+        sv_df,
+        sv_id_col=sv_id_col,
+        breakpoint_exclusion_frac=breakpoint_exclusion_frac,
+    )
     explicit_sv_col = sv_id_col if sv_id_col in assignment.columns else ("sv_id" if "sv_id" in assignment.columns else None)
 
     if explicit_sv_col is not None:
@@ -583,36 +674,6 @@ def assign_sv_celltypes(
             .drop_duplicates(ignore_index=True)
         )
 
-        sv_region_cols = [sv_id_col, "chr", "location"]
-        if "ref_start" in sv_df.columns:
-            sv_region_cols.append("ref_start")
-        if "ref_end" in sv_df.columns:
-            sv_region_cols.append("ref_end")
-        sv_regions = sv_df[sv_region_cols].drop_duplicates(subset=[sv_id_col]).copy()
-        sv_regions["chr_norm"] = sv_regions["chr"].map(_norm_chr)
-        sv_loc = pd.to_numeric(sv_regions["location"], errors="coerce")
-        ref_start = (
-            pd.to_numeric(sv_regions["ref_start"], errors="coerce")
-            if "ref_start" in sv_regions.columns else pd.Series(np.nan, index=sv_regions.index, dtype="float64")
-        )
-        ref_end = (
-            pd.to_numeric(sv_regions["ref_end"], errors="coerce")
-            if "ref_end" in sv_regions.columns else pd.Series(np.nan, index=sv_regions.index, dtype="float64")
-        )
-        sv_regions["_start"] = np.where(ref_start.notna(), ref_start - 1, sv_loc - 1)
-        sv_regions["_end"] = np.where(ref_end.notna(), ref_end, sv_loc)
-        valid_sv = (
-            sv_regions["chr_norm"].ne("")
-            & pd.notna(sv_regions["_start"])
-            & pd.notna(sv_regions["_end"])
-        )
-        sv_regions = sv_regions.loc[valid_sv, [sv_id_col, "chr_norm", "_start", "_end"]].copy()
-        if not sv_regions.empty:
-            sv_regions[["_start", "_end"]] = sv_regions[["_start", "_end"]].astype("int64")
-            bad = sv_regions["_end"] < (sv_regions["_start"] + 1)
-            if bad.any():
-                sv_regions.loc[bad, "_end"] = sv_regions.loc[bad, "_start"] + 1
-
         region_map = _build_sv_region_map(
             region_df,
             sv_regions,
@@ -633,6 +694,12 @@ def assign_sv_celltypes(
             )
 
     if not mapped.empty:
+        if breakpoint_exclusion_frac > 0.0:
+            mapped = _filter_mapped_breakpoint_exclusion(
+                mapped,
+                sv_regions,
+                sv_id_col=sv_id_col,
+            )
         mapped["read"] = mapped["read"].astype(str)
         mapped = mapped.merge(support_pairs, on=[sv_id_col, "read"], how="inner")
 

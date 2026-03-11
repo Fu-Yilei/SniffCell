@@ -64,6 +64,15 @@ def parse_args(argv):
     anno_parser.add_argument("-t", "--threads", type=int, default=1, help="Number of threads to use, default=1")
     anno_parser.add_argument("-w", "--window", type=int, default=5000, help="Window size for filtering BED based on variants, default=5000")
     anno_parser.add_argument(
+        "--breakpoint_exclusion_frac",
+        type=float,
+        default=0.0,
+        help=(
+            "Expand the no-ctDMR zone around the SV core by this fraction of absolute SV length on each side. "
+            "Example: 0.1 excludes ctDMRs within +/-10% of SV length around breakpoints. Default=0.0"
+        ),
+    )
+    anno_parser.add_argument(
         "--read_assignment_mode",
         type=str,
         choices=["closest_reference_mean", "kmeans"],
@@ -103,6 +112,15 @@ def parse_args(argv):
     svanno_parser.add_argument("-i", "--input", required=True, help="Input reads_classification.tsv file from anno step")
     svanno_parser.add_argument( "-krn", "--kanpig_read_names", type=str, default=None, help="Read names TSV from kanpig output, will use Sniffles read names if not sepecified." )
     svanno_parser.add_argument("-w", "--window", type=int, default=5000, help="Window size for SV-aware region matching, default=5000")
+    svanno_parser.add_argument(
+        "--breakpoint_exclusion_frac",
+        type=float,
+        default=0.0,
+        help=(
+            "Expand the no-ctDMR zone around the SV core by this fraction of absolute SV length on each side. "
+            "Example: 0.1 excludes ctDMRs within +/-10% of SV length around breakpoints. Default=0.0"
+        ),
+    )
     svanno_parser.add_argument("-o", "--output", required=True, help="Output TSV file path for sv_assignment")
     svanno_parser.add_argument(
         "--evidence_mode",
@@ -212,6 +230,22 @@ def parse_args(argv):
         "--skip_methylation_overlay",
         action="store_true",
         help="Skip per-read ctDMR methylation extraction/overlay for faster rendering.",
+    )
+    viz_parser.add_argument(
+        "--support_haplotype_only",
+        dest="support_haplotype_only",
+        action="store_true",
+        default=True,
+        help=(
+            "When phased SV-supporting reads agree on one haplotype, keep only reads from that "
+            "haplotype in the panel while retaining supporting reads. default=on"
+        ),
+    )
+    viz_parser.add_argument(
+        "--show_all_haplotypes",
+        dest="support_haplotype_only",
+        action="store_false",
+        help="Disable support-haplotype filtering and show reads from all haplotypes.",
     )
     viz_parser.add_argument(
         "--linked_ctdmr_mode",

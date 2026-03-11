@@ -93,6 +93,7 @@ sniffcell anno \
   -b "$OUT/pbmc_ctdmr.tsv" \
   -o "$OUT/anno" \
   -w 10000 \
+  --breakpoint_exclusion_frac 0.1 \
   -t 8 \
   --evidence_mode all_rows \
   --min_overlap_pct 0.0 \
@@ -117,6 +118,7 @@ sniffcell svanno \
   -i "$OUT/anno/reads_classification.tsv" \
   -o "$OUT/anno_relaxed" \
   -w 10000 \
+  --breakpoint_exclusion_frac 0.1 \
   --evidence_mode all_rows \
   --min_overlap_pct 0.0 \
   --min_agreement_pct 0.6

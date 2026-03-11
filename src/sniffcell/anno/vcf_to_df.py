@@ -85,6 +85,7 @@ def read_vcf_to_df(vcf_file, kanpig_read_names=None):
                 "chr": record.chrom,
                 "location": record.pos,
                 "id": record.id,
+                "sv_type": svtype,
                 "sv_len": sv_len,
                 "supporting_reads": _safe_info_get_read_names(record.info, "RNAMES"),
                 "stdev_len": stdev_len,
@@ -122,5 +123,20 @@ def read_vcf_to_df(vcf_file, kanpig_read_names=None):
                 record["supporting_reads"] = sv_to_reads[sv_id]
             else:
                 record["supporting_reads"] = []
-    sv_df = pd.DataFrame(records, columns=["chr", "location", "id", "sv_len", "supporting_reads", "stdev_len", "stdev_pos", "ref_start", "ref_end", 'vaf'])
+    sv_df = pd.DataFrame(
+        records,
+        columns=[
+            "chr",
+            "location",
+            "id",
+            "sv_type",
+            "sv_len",
+            "supporting_reads",
+            "stdev_len",
+            "stdev_pos",
+            "ref_start",
+            "ref_end",
+            "vaf",
+        ],
+    )
     return sv_df

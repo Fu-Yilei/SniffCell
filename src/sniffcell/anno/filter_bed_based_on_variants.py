@@ -1,7 +1,16 @@
 import numpy as np
 import pandas as pd
+from sniffcell.anno.breakpoint_exclusion import compute_breakpoint_exclusion_bp
 
-def filter_bed_based_on_variants(bed_df: pd.DataFrame, sv_df: pd.DataFrame, window: int = 5000) -> pd.DataFrame:
+
+def filter_bed_based_on_variants(
+    bed_df: pd.DataFrame,
+    sv_df: pd.DataFrame,
+    window: int = 5000,
+    breakpoint_exclusion_frac: float = 0.0,
+) -> pd.DataFrame:
+    if window < 0:
+        raise ValueError("window must be >= 0")
     # 1) Normalize column names
     bed = bed_df.copy() 
     sv  = sv_df.rename(columns={'chr': 'chr'}).copy()
@@ -30,6 +39,10 @@ def filter_bed_based_on_variants(bed_df: pd.DataFrame, sv_df: pd.DataFrame, wind
         sv_end0[bad] = sv_start0[bad] + 1
 
     sv = sv.assign(_start=sv_start0, _end=sv_end0)
+    sv["_exclude_bp"] = compute_breakpoint_exclusion_bp(
+        sv,
+        breakpoint_exclusion_frac=breakpoint_exclusion_frac,
+    )
 
     # 5) Optional: make chr categorical for faster groupbys
     bed['chr'] = bed['chr'].astype('category')
@@ -48,13 +61,16 @@ def filter_bed_based_on_variants(bed_df: pd.DataFrame, sv_df: pd.DataFrame, wind
         ends   = ends[order]  # maintain pairing order
         # We also want an array of ends sorted to use searchsorted independently.
         ends_sorted = np.sort(ends, kind='mergesort')
-        sv_idx[chrom] = (starts, ends, ends_sorted)
+        exclude_bp = sdf["_exclude_bp"].to_numpy(np.int64)[order]
+        exclude_starts_sorted = np.sort(starts - exclude_bp, kind='mergesort')
+        exclude_ends_sorted = np.sort(ends + exclude_bp, kind='mergesort')
+        sv_idx[chrom] = (starts, ends_sorted, exclude_starts_sorted, exclude_ends_sorted)
 
 
     for chrom, bdf in bed.groupby('chr', sort=False, observed=False):
         if chrom not in sv_idx:
             continue
-        starts, _, ends_sorted = sv_idx[chrom]
+        starts, ends_sorted, exclude_starts_sorted, exclude_ends_sorted = sv_idx[chrom]
         if starts.size == 0:
             continue
 
@@ -71,14 +87,15 @@ def filter_bed_based_on_variants(bed_df: pd.DataFrame, sv_df: pd.DataFrame, wind
         n_end_le_start_pad = np.searchsorted(ends_sorted, bed_starts, side='right')
         overlap_padded = (n_start_lt_end_pad - n_end_le_start_pad) > 0
 
-        # ---------- 2) Overlap with *core* interval (treat breakpoint as overlap) ------
-        # Closed-interval style: sv_start <= core_end AND sv_end >= core_start
-        n_start_le_end_core = np.searchsorted(starts,      core_end,   side='right')
-        n_end_lt_start_core = np.searchsorted(ends_sorted, core_start, side='left')
-        overlap_core = (n_start_le_end_core - n_end_lt_start_core) > 0
+        # ---------- 2) Overlap with exclusion interval (treat breakpoint as overlap) ---
+        # Exclude the SV core expanded by breakpoint_exclusion_frac * abs(SVLEN) on
+        # each side. With frac=0, this reduces to the original core-overlap filter.
+        n_start_le_end_excl = np.searchsorted(exclude_starts_sorted, core_end, side='right')
+        n_end_lt_start_excl = np.searchsorted(exclude_ends_sorted, core_start, side='left')
+        overlap_excluded = (n_start_le_end_excl - n_end_lt_start_excl) > 0
 
-        # ---------- 3) We want SV in padding, but NOT in core --------------------------
-        keep = overlap_padded & (~overlap_core)
+        # ---------- 3) We want SV in padding, but NOT in the exclusion zone ------------
+        keep = overlap_padded & (~overlap_excluded)
         out_mask[bdf.index] = keep
 
 

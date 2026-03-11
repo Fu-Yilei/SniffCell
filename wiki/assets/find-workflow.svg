@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="860" viewBox="0 0 1280 860">
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="1020" viewBox="0 0 1280 1020">
   <defs>
     <style>
       .title { font: 700 30px 'Trebuchet MS', sans-serif; fill: #10243b; }
@@ -28,127 +28,196 @@
     <marker id="arrowHead" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
       <path d="M 0 0 L 12 6 L 0 12 z" fill="#55697f"/>
     </marker>
+    <marker id="dashArrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#9bb0c4"/>
+    </marker>
   </defs>
 
-  <rect x="0" y="0" width="1280" height="860" fill="url(#bg)"/>
-  <rect x="20" y="20" width="1240" height="820" rx="28" class="frame"/>
+  <!-- Canvas background -->
+  <rect x="0" y="0" width="1280" height="1020" fill="url(#bg)"/>
+  <rect x="20" y="20" width="1240" height="980" rx="28" class="frame"/>
 
+  <!-- Title -->
   <text x="56" y="66" class="title">sniffcell find workflow</text>
   <text x="56" y="92" class="subtitle">Clean process view: inputs, scoring pipeline, merge rules, and output files.</text>
 
-  <rect x="56" y="126" width="260" height="576" rx="22" class="inputs"/>
-  <text x="78" y="160" class="section">Inputs</text>
-  <text x="78" y="188" class="small">Atlas files plus one selected JSON key.</text>
+  <!-- ================================================================
+       LEFT COLUMN: Inputs panel (y=116 .. 714) + Outputs panel below
+       ================================================================ -->
 
-  <rect x="78" y="218" width="216" height="66" rx="16" class="frame"/>
-  <text x="96" y="244" class="mono">-n atlas.npy</text>
-  <text x="96" y="266" class="text">Atlas methylation matrix</text>
+  <rect x="56" y="116" width="268" height="606" rx="22" class="inputs"/>
+  <text x="78" y="152" class="section">Inputs</text>
+  <text x="78" y="174" class="small">Atlas files plus one selected JSON key.</text>
 
-  <rect x="78" y="300" width="216" height="66" rx="16" class="frame"/>
-  <text x="96" y="326" class="mono">-i atlas.index.gz</text>
-  <text x="96" y="346" class="text">chr/start/end and</text>
-  <text x="96" y="362" class="text">CpG span per row</text>
+  <!-- Input cards -->
+  <rect x="78" y="194" width="224" height="66" rx="14" class="frame"/>
+  <text x="96" y="219" class="mono">-n atlas.npy</text>
+  <text x="96" y="241" class="text">Atlas methylation matrix</text>
 
-  <rect x="78" y="382" width="216" height="66" rx="16" class="frame"/>
-  <text x="96" y="408" class="mono">-m all_celltypes.txt</text>
-  <text x="96" y="428" class="text">Sample names in</text>
-  <text x="96" y="444" class="text">matrix column order</text>
+  <rect x="78" y="274" width="224" height="76" rx="14" class="frame"/>
+  <text x="96" y="298" class="mono">-i atlas.index.gz</text>
+  <text x="96" y="318" class="text">chr/start/end and</text>
+  <text x="96" y="338" class="text">CpG span per row</text>
 
-  <rect x="78" y="464" width="216" height="66" rx="16" class="frame"/>
-  <text x="96" y="490" class="mono">-cf groups.json</text>
-  <text x="96" y="512" class="text">group -&gt; sample IDs mapping</text>
+  <rect x="78" y="364" width="224" height="76" rx="14" class="frame"/>
+  <text x="96" y="388" class="mono">-m all_celltypes.txt</text>
+  <text x="96" y="408" class="text">Sample names in</text>
+  <text x="96" y="428" class="text">matrix column order</text>
 
-  <rect x="78" y="552" width="216" height="54" rx="16" fill="#ffffff" stroke="#9eb8d2" stroke-width="2" stroke-dasharray="6 4"/>
-  <text x="96" y="575" class="small">Selected group map</text>
-  <text x="96" y="595" class="mono">-ck pbmc</text>
+  <rect x="78" y="454" width="224" height="66" rx="14" class="frame"/>
+  <text x="96" y="478" class="mono">-cf groups.json</text>
+  <text x="96" y="498" class="text">group -&gt; sample IDs mapping</text>
 
-  <rect x="78" y="624" width="216" height="54" rx="14" fill="#ffffff" stroke="#9eb8d2" stroke-width="2"/>
-  <text x="96" y="646" class="small">Need at least 2 usable groups</text>
-  <text x="96" y="662" class="small">after matching samples</text>
+  <rect x="78" y="534" width="224" height="54" rx="14" fill="#ffffff" stroke="#9eb8d2" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="96" y="557" class="small">Selected group map</text>
+  <text x="96" y="577" class="mono">-ck pbmc</text>
 
-  <rect x="354" y="126" width="548" height="110" rx="22" class="s1"/>
-  <circle cx="390" cy="181" r="20" fill="#658eb2"/>
-  <text x="390" y="182" class="num">1</text>
-  <text x="426" y="168" class="step">Load atlas into one dataframe</text>
-  <text x="426" y="194" class="text">Build `M_df` from the matrix, sample metadata, and CpG index.</text>
-  <text x="426" y="216" class="small">Rows are atlas loci. Columns are named samples.</text>
+  <rect x="78" y="602" width="224" height="54" rx="14" fill="#ffffff" stroke="#9eb8d2" stroke-width="2"/>
+  <text x="96" y="624" class="small">Need at least 2 usable groups</text>
+  <text x="96" y="642" class="small">after matching samples</text>
 
-  <rect x="354" y="258" width="548" height="110" rx="22" class="s2"/>
-  <circle cx="390" cy="313" r="20" fill="#7aab53"/>
-  <text x="390" y="314" class="num">2</text>
-  <text x="426" y="296" class="step">Resolve the chosen group mapping</text>
-  <text x="426" y="320" class="text">Keep only samples that exist in `M_df`,</text>
-  <text x="426" y="340" class="text">then compute one mean methylation track per group.</text>
-  <text x="426" y="360" class="small">If a declared sample is missing, it is ignored rather than causing failure.</text>
+  <!-- Horizontal arrow: right edge of Inputs panel -> left edge of Step 1 -->
+  <!-- Inputs right edge x=324, Step 1 left edge x=362, midpoint at step 1 center y=176 -->
+  <line x1="324" y1="176" x2="362" y2="176" class="arrow" marker-end="url(#arrowHead)"/>
 
-  <rect x="354" y="390" width="548" height="110" rx="22" class="s3"/>
-  <circle cx="390" cy="445" r="20" fill="#dd9f22"/>
-  <text x="390" y="446" class="num">3</text>
-  <text x="426" y="428" class="step">Enumerate unique bipartitions</text>
-  <text x="426" y="452" class="text">Evaluate every non-empty split such as</text>
-  <text x="426" y="472" class="text">`A vs B|C|D` or `A|B vs C|D`.</text>
-  <text x="426" y="492" class="small">Mirror duplicates are skipped by fixing group 0 on one side.</text>
+  <!-- ================================================================
+       LEFT COLUMN: Outputs panel (y=736 .. 980)
+       ================================================================ -->
 
-  <rect x="354" y="522" width="548" height="110" rx="22" class="s4"/>
-  <circle cx="390" cy="577" r="20" fill="#d66480"/>
-  <text x="390" y="578" class="num">4</text>
-  <text x="426" y="560" class="step">Score each atlas row and keep one winner</text>
-  <text x="426" y="584" class="text">For every row, compute left mean, right mean,</text>
-  <text x="426" y="604" class="text">delta, and `abs(delta)`.</text>
-  <text x="426" y="624" class="small">Keep the highest passing partition and also record the second-best margin.</text>
+  <rect x="56" y="736" width="268" height="248" rx="22" class="output"/>
+  <text x="78" y="770" class="section">Outputs</text>
 
-  <rect x="354" y="654" width="548" height="110" rx="22" class="s5"/>
-  <circle cx="390" cy="709" r="20" fill="#8a70d1"/>
-  <text x="390" y="710" class="num">5</text>
-  <text x="426" y="692" class="step">Merge compatible winning rows into ctDMR regions</text>
-  <text x="426" y="716" class="text">Adjacent rows merge only when chromosome, winning code,</text>
-  <text x="426" y="736" class="text">target side, direction, and gap remain compatible.</text>
-  <text x="426" y="756" class="small">Then region filters such as `min_rows` and `min_cpgs` are applied.</text>
+  <!-- Main TSV output -->
+  <rect x="78" y="786" width="224" height="148" rx="14" fill="#ffffff" stroke="#72c181" stroke-width="1.5"/>
+  <text x="96" y="808" class="mono">&lt;output&gt;  (TSV)</text>
+  <text x="96" y="826" class="text">annotation-ready ctDMR table</text>
+  <text x="96" y="846" class="small">Key fields consumed by anno:</text>
+  <text x="96" y="863" class="mono">  code_order</text>
+  <text x="96" y="880" class="mono">  best_group_leaves</text>
+  <text x="96" y="894" class="mono">  mean_best_value</text>
+  <text x="96" y="910" class="mono">  mean_rest_value</text>
+  <text x="96" y="926" class="small">G-anchored (anno: query -1 bp)</text>
 
-  <line x1="628" y1="236" x2="628" y2="258" class="arrow" marker-end="url(#arrowHead)"/>
-  <line x1="628" y1="368" x2="628" y2="390" class="arrow" marker-end="url(#arrowHead)"/>
-  <line x1="628" y1="500" x2="628" y2="522" class="arrow" marker-end="url(#arrowHead)"/>
-  <line x1="628" y1="632" x2="628" y2="654" class="arrow" marker-end="url(#arrowHead)"/>
-  <line x1="316" y1="404" x2="354" y2="181" class="dash"/>
+  <!-- IGV BED output -->
+  <rect x="78" y="936" width="224" height="36" rx="14" fill="#ffffff" stroke="#72c181" stroke-width="1.5"/>
+  <text x="96" y="952" class="mono">&lt;output&gt;.igv.bed</text>
+  <text x="96" y="967" class="text">BED9 companion for IGV</text>
 
-  <rect x="936" y="126" width="286" height="170" rx="22" class="rules"/>
-  <text x="958" y="160" class="section">Row scoring rule</text>
-  <text x="958" y="192" class="mono">left_mean  = mean(left groups)</text>
-  <text x="958" y="214" class="mono">right_mean = mean(right groups)</text>
-  <text x="958" y="236" class="mono">delta      = left_mean - right_mean</text>
-  <text x="958" y="258" class="mono">margin     = abs(delta)</text>
-  <text x="958" y="282" class="small">The largest passing margin wins the row.</text>
+  <!-- ================================================================
+       CENTER COLUMN: 5 numbered steps
+       y positions:
+         Step 1:  116 .. 236  (h=120)
+         Step 2:  252 .. 372  (h=120)
+         Step 3:  388 .. 508  (h=120)
+         Step 4:  524 .. 664  (h=140, extra line for --diff_threshold)
+         Step 5:  680 .. 800  (h=120)
+       ================================================================ -->
 
-  <rect x="936" y="318" width="286" height="156" rx="22" class="rules"/>
-  <text x="958" y="352" class="section">Target-side rule</text>
-  <text x="958" y="384" class="text">Prefer the smaller side of the bipartition.</text>
-  <text x="958" y="408" class="text">If both sides are the same size, choose the hyper side.</text>
-  <text x="958" y="434" class="small">This becomes `best_group`, `other_group`,</text>
-  <text x="958" y="452" class="small">and `best_dir` downstream.</text>
+  <!-- Step 1 -->
+  <rect x="362" y="116" width="548" height="120" rx="22" class="s1"/>
+  <circle cx="398" cy="176" r="20" fill="#658eb2"/>
+  <text x="398" y="177" class="num">1</text>
+  <text x="434" y="160" class="step">Load atlas into one dataframe</text>
+  <text x="434" y="184" class="text">Build M_df from the matrix, sample metadata, and CpG index.</text>
+  <text x="434" y="204" class="small">Rows are atlas loci. Columns are named samples.</text>
 
-  <rect x="936" y="496" width="286" height="206" rx="22" class="rules"/>
-  <text x="958" y="530" class="section">Region filters</text>
-  <text x="958" y="554" class="text">Rows can merge only when:</text>
-  <text x="976" y="578" class="text">same chromosome</text>
-  <text x="976" y="600" class="text">same winning partition</text>
-  <text x="976" y="622" class="text">same target side</text>
-  <text x="976" y="644" class="text">same hyper/hypo direction</text>
-  <text x="976" y="666" class="text">gap &lt;= `max_gap_bp`</text>
-  <text x="958" y="690" class="small">Final regions must also satisfy</text>
-  <text x="958" y="708" class="small">`min_rows`, `min_cpgs`, and `min_bp`.</text>
+  <!-- Step 2 -->
+  <rect x="362" y="252" width="548" height="120" rx="22" class="s2"/>
+  <circle cx="398" cy="312" r="20" fill="#7aab53"/>
+  <text x="398" y="313" class="num">2</text>
+  <text x="434" y="294" class="step">Resolve the chosen group mapping</text>
+  <text x="434" y="318" class="text">Keep only samples that exist in M_df columns.</text>
+  <text x="434" y="338" class="text">Requires at least 2 usable groups after matching.</text>
+  <text x="434" y="358" class="small">If a declared sample is missing, it is ignored rather than causing failure.</text>
 
-  <rect x="56" y="706" width="260" height="100" rx="22" class="output"/>
-  <text x="78" y="740" class="section">Outputs</text>
-  <text x="78" y="768" class="mono">&lt;output&gt;</text>
-  <text x="78" y="788" class="text">annotation-ready ctDMR table</text>
+  <!-- Step 3 -->
+  <rect x="362" y="388" width="548" height="120" rx="22" class="s3"/>
+  <circle cx="398" cy="448" r="20" fill="#dd9f22"/>
+  <text x="398" y="449" class="num">3</text>
+  <text x="434" y="428" class="step">Enumerate unique bipartitions</text>
+  <text x="434" y="452" class="text">Evaluate every non-empty split such as</text>
+  <text x="434" y="472" class="text">A vs B|C|D or A|B vs C|D.</text>
+  <text x="434" y="492" class="small">Mirror duplicates are skipped by fixing group 0 on one side.</text>
 
-  <rect x="936" y="724" width="286" height="82" rx="22" class="output"/>
-  <text x="958" y="758" class="mono">&lt;output&gt;.igv.bed</text>
-  <text x="958" y="780" class="text">BED9 companion for IGV</text>
+  <!-- Step 4 (taller to fit --diff_threshold mention) -->
+  <rect x="362" y="524" width="548" height="140" rx="22" class="s4"/>
+  <circle cx="398" cy="594" r="20" fill="#d66480"/>
+  <text x="398" y="595" class="num">4</text>
+  <text x="434" y="560" class="step">Score each atlas row and keep one winner</text>
+  <text x="434" y="584" class="text">For every row, compute left mean, right mean,</text>
+  <text x="434" y="604" class="text">delta, and margin = abs(delta).</text>
+  <text x="434" y="624" class="text">Apply --diff_threshold; keep highest-margin partition.</text>
+  <text x="434" y="648" class="small">Also record second-best margin for quality assessment.</text>
 
-  <line x1="628" y1="764" x2="628" y2="786" class="arrow" marker-end="url(#arrowHead)"/>
-  <line x1="902" y1="181" x2="936" y2="181" class="dash"/>
-  <line x1="902" y1="577" x2="936" y2="599" class="dash"/>
+  <!-- Step 5 -->
+  <rect x="362" y="680" width="548" height="120" rx="22" class="s5"/>
+  <circle cx="398" cy="740" r="20" fill="#8a70d1"/>
+  <text x="398" y="741" class="num">5</text>
+  <text x="434" y="716" class="step">Merge compatible winning rows into ctDMR regions</text>
+  <text x="434" y="740" class="text">Adjacent rows merge only when chromosome, winning code,</text>
+  <text x="434" y="760" class="text">target side, direction, and gap remain compatible.</text>
+  <text x="434" y="780" class="small">Then region filters (--min_rows, --min_cpgs, --min_bp) are applied.</text>
 
-  <text x="56" y="830" class="small">Implementation source: src/sniffcell/find/find.py and src/sniffcell/find/ctdmr.py</text>
+  <!-- Arrows between steps -->
+  <line x1="636" y1="236" x2="636" y2="252" class="arrow" marker-end="url(#arrowHead)"/>
+  <line x1="636" y1="372" x2="636" y2="388" class="arrow" marker-end="url(#arrowHead)"/>
+  <line x1="636" y1="508" x2="636" y2="524" class="arrow" marker-end="url(#arrowHead)"/>
+  <line x1="636" y1="664" x2="636" y2="680" class="arrow" marker-end="url(#arrowHead)"/>
+
+  <!-- Arrow from Step 5 bottom -> bend left -> into Outputs panel -->
+  <!-- Step 5 bottom center: (636, 800). Outputs panel top center approx (190, 736). -->
+  <!-- Route: go down from 800, across left, into output box at y=854 (midpoint of TSV box) -->
+  <path d="M 636 800 L 636 858 L 324 858" class="arrow" marker-end="url(#arrowHead)"/>
+
+  <!-- ================================================================
+       RIGHT COLUMN: Three rule annotation boxes
+       ================================================================ -->
+
+  <!-- Rule 1: Row scoring (annotation for step 4) -->
+  <rect x="944" y="116" width="288" height="186" rx="22" class="rules"/>
+  <text x="966" y="152" class="section">Row scoring rule</text>
+  <text x="966" y="182" class="mono">left_mean  = mean(left groups)</text>
+  <text x="966" y="202" class="mono">right_mean = mean(right groups)</text>
+  <text x="966" y="222" class="mono">delta      = left_mean - right_mean</text>
+  <text x="966" y="242" class="mono">margin     = abs(delta)</text>
+  <text x="966" y="264" class="small">Highest margin passing --diff_threshold</text>
+  <text x="966" y="282" class="small">wins the row.</text>
+
+  <!-- Rule 2: Target-side rule (annotation for step 4) -->
+  <rect x="944" y="320" width="288" height="166" rx="22" class="rules"/>
+  <text x="966" y="354" class="section">Target-side rule</text>
+  <text x="966" y="384" class="text">Prefer the smaller side of the bipartition.</text>
+  <text x="966" y="406" class="text">If both sides are the same size,</text>
+  <text x="966" y="426" class="text">choose the hyper side.</text>
+  <text x="966" y="450" class="small">This becomes best_group, other_group,</text>
+  <text x="966" y="468" class="small">and best_dir downstream.</text>
+
+  <!-- Rule 3: Region filters (annotation for step 5) -->
+  <rect x="944" y="504" width="288" height="216" rx="22" class="rules"/>
+  <text x="966" y="538" class="section">Region filters</text>
+  <text x="966" y="562" class="text">Rows can merge only when:</text>
+  <text x="984" y="584" class="text">same chromosome</text>
+  <text x="984" y="604" class="text">same winning partition</text>
+  <text x="984" y="624" class="text">same target side</text>
+  <text x="984" y="644" class="text">same hyper/hypo direction</text>
+  <text x="984" y="664" class="text">gap &lt;= --max_gap_bp</text>
+  <text x="966" y="690" class="small">Final regions must also satisfy</text>
+  <text x="966" y="708" class="small">--min_rows, --min_cpgs, and --min_bp.</text>
+
+  <!-- Dashed annotation arrows from rule boxes to the relevant step -->
+
+  <!-- Row scoring rule -> Step 4 (right edge of step 4 is x=910, center y=594) -->
+  <!-- Rule 1 center: x=944, y=116+93=209. Route: left from rule, meet step 4 right edge -->
+  <path d="M 944 209 L 920 209 L 920 594 L 910 594" class="dash" marker-end="url(#dashArrow)"/>
+
+  <!-- Target-side rule -> Step 4 -->
+  <!-- Rule 2 left edge x=944, center y=320+83=403. Route via same vertical channel -->
+  <path d="M 944 403 L 928 403 L 928 594 L 910 594" class="dash" marker-end="url(#dashArrow)"/>
+
+  <!-- Region filters -> Step 5 (right edge of step 5 is x=910, center y=740) -->
+  <!-- Rule 3 left edge x=944, center y=504+108=612. -->
+  <path d="M 944 612 L 910 612 L 910 740" class="dash" marker-end="url(#dashArrow)"/>
+
+  <!-- Footer -->
+  <text x="56" y="1002" class="small">Implementation source: src/sniffcell/find/find.py and src/sniffcell/find/ctdmr.py</text>
 </svg>

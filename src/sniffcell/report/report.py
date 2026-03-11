@@ -13,6 +13,7 @@ from types import SimpleNamespace
 
 import pandas as pd
 
+from sniffcell.anno.vcf_to_df import read_vcf_to_df
 from sniffcell.viz import viz as viz_module
 from sniffcell.viz import igvviz as igvviz_module
 from . import igvreport as igvreport_module
@@ -91,7 +92,9 @@ def _build_dashboard_records(selected_report_df: pd.DataFrame) -> list[dict[str,
         "id",
         "sv_chr",
         "sv_pos",
+        "sv_type",
         "sv_len",
+        "vaf",
         "overlap_pct",
         "majority_pct",
         "n_supporting",
@@ -176,6 +179,19 @@ def _load_sv_assignment(path: Path) -> pd.DataFrame:
             out[col] = pd.NA
         out[col] = pd.to_numeric(out[col], errors="coerce").astype("Int64")
 
+    if "sv_len" not in out.columns:
+        out["sv_len"] = pd.NA
+    out["sv_len"] = pd.to_numeric(out["sv_len"], errors="coerce").astype("Int64")
+
+    if "vaf" not in out.columns:
+        out["vaf"] = pd.NA
+    out["vaf"] = pd.to_numeric(out["vaf"], errors="coerce")
+
+    if "sv_type" not in out.columns:
+        out["sv_type"] = pd.Series("", index=out.index, dtype="string")
+    else:
+        out["sv_type"] = out["sv_type"].astype("string")
+
     if "has_hard_conflict" not in out.columns:
         out["has_hard_conflict"] = pd.Series(pd.array([pd.NA] * len(out), dtype="boolean"))
     else:
@@ -183,6 +199,76 @@ def _load_sv_assignment(path: Path) -> pd.DataFrame:
 
     out["id"] = out["id"].astype("string")
     return out
+
+
+def _backfill_sv_fields_from_manifest_vcf(
+    sv_df: pd.DataFrame,
+    manifest_payload: dict[str, object],
+    logger: logging.Logger,
+) -> pd.DataFrame:
+    if sv_df.empty or not isinstance(manifest_payload, dict):
+        return sv_df
+
+    inputs = manifest_payload.get("inputs", {})
+    if not isinstance(inputs, dict):
+        return sv_df
+
+    vcf_text = str(inputs.get("vcf", "")).strip()
+    if not vcf_text:
+        return sv_df
+
+    needs_sv_type = sv_df["sv_type"].fillna("").astype(str).str.strip().eq("").any()
+    needs_vaf = sv_df["vaf"].isna().any()
+    needs_sv_len = sv_df["sv_len"].isna().any()
+    if not (needs_sv_type or needs_vaf or needs_sv_len):
+        return sv_df
+
+    vcf_path = Path(vcf_text)
+    if not vcf_path.exists():
+        logger.warning("Could not backfill report SV fields because manifest VCF does not exist: %s", vcf_path)
+        return sv_df
+
+    try:
+        vcf_df = read_vcf_to_df(str(vcf_path))
+    except Exception as exc:
+        logger.warning("Could not backfill report SV fields from manifest VCF %s: %s", vcf_path, exc)
+        return sv_df
+
+    if vcf_df.empty or "id" not in vcf_df.columns:
+        return sv_df
+
+    vcf_cols = [col for col in ("id", "sv_type", "vaf", "sv_len") if col in vcf_df.columns]
+    if len(vcf_cols) <= 1:
+        return sv_df
+
+    merged = sv_df.merge(
+        vcf_df[vcf_cols].drop_duplicates(subset=["id"]),
+        on="id",
+        how="left",
+        suffixes=("", "__vcf"),
+    )
+
+    if "sv_type__vcf" in merged.columns:
+        missing_sv_type = merged["sv_type"].fillna("").astype(str).str.strip().eq("")
+        merged.loc[missing_sv_type, "sv_type"] = merged.loc[missing_sv_type, "sv_type__vcf"]
+        merged["sv_type"] = merged["sv_type"].astype("string")
+
+    for col in ("vaf", "sv_len"):
+        extra_col = f"{col}__vcf"
+        if extra_col not in merged.columns:
+            continue
+        current = pd.to_numeric(merged[col], errors="coerce")
+        recovered = pd.to_numeric(merged[extra_col], errors="coerce")
+        merged[col] = current.where(current.notna(), recovered)
+
+    drop_cols = [col for col in merged.columns if col.endswith("__vcf")]
+    if drop_cols:
+        merged = merged.drop(columns=drop_cols)
+
+    merged["sv_len"] = pd.to_numeric(merged["sv_len"], errors="coerce").astype("Int64")
+    merged["vaf"] = pd.to_numeric(merged["vaf"], errors="coerce")
+    merged["sv_type"] = merged["sv_type"].fillna("").astype("string")
+    return merged
 
 
 def _select_high_confidence_svs(
@@ -586,6 +672,20 @@ def _build_report_html(
         ".alt-report h2{margin:0 0 10px 0;font-size:20px;}"
         ".review-controls h2{margin:0 0 10px 0;font-size:20px;}"
         ".review-row{display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:8px;}"
+        ".filter-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin:12px 0;}"
+        ".range-filter{border:1px solid #d8dee4;border-radius:8px;padding:10px;background:#f8fafc;}"
+        ".range-filter.is-disabled{opacity:0.65;}"
+        ".range-header{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:6px;font-size:13px;}"
+        ".range-label{font-weight:700;color:#14212c;}"
+        ".range-readout{font-variant-numeric:tabular-nums;color:#405160;}"
+        ".range-sliders{display:grid;gap:6px;margin:8px 0;}"
+        ".range-sliders label{display:grid;gap:4px;font-size:12px;color:#405160;}"
+        ".range-sliders input[type=range]{width:100%;}"
+        ".range-values{display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;}"
+        ".range-values label{display:grid;gap:4px;font-size:12px;color:#405160;}"
+        ".range-values input{border:1px solid #c8d1da;border-radius:6px;padding:6px 8px;background:#fff;color:#14212c;font-size:13px;}"
+        ".range-reset{border:1px solid #c2ccd6;border-radius:6px;padding:6px 10px;background:#fff;color:#243746;cursor:pointer;font-size:12px;}"
+        ".range-reset:hover{border-color:#8fa4b6;}"
         ".review-select{border:1px solid #c8d1da;border-radius:6px;padding:6px 10px;background:#fff;color:#14212c;font-size:14px;}"
         ".review-summary{font-size:13px;color:#405160;margin:4px 0 10px 0;}"
         ".review-buttons{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0 10px 0;}"
@@ -689,7 +789,23 @@ def _build_report_html(
         "<option value=\"all\">All assigned cell types</option>"
         "</select>"
     )
+    page.append("<label for=\"svtype-filter\"><b>SV type:</b></label>")
+    page.append(
+        "<select id=\"svtype-filter\" class=\"review-select\" onchange=\"applyReviewFilter()\">"
+        "<option value=\"all\">All SV types</option>"
+        "</select>"
+    )
+    page.append("<label for=\"hard-conflict-filter\"><b>Hard conflict:</b></label>")
+    page.append(
+        "<select id=\"hard-conflict-filter\" class=\"review-select\" onchange=\"applyReviewFilter()\">"
+        "<option value=\"all\">All hard-conflict states</option>"
+        "<option value=\"false\">No hard conflict</option>"
+        "<option value=\"true\">Hard conflict</option>"
+        "<option value=\"unknown\">Unknown</option>"
+        "</select>"
+    )
     page.append("</div>")
+    page.append("<div id=\"numeric-filter-grid\" class=\"filter-grid\"></div>")
     page.append("<div id=\"review-summary\" class=\"review-summary\"></div>")
     page.append("<div id=\"review-persist-status\" class=\"review-summary\"></div>")
     page.append("</section>")
@@ -720,12 +836,28 @@ def _build_report_html(
             assigned_code = html.escape(assigned_code_text)
             majority = _fmt_float(item.get("majority_pct"))
             overlap = _fmt_float(item.get("overlap_pct"))
+            vaf = _fmt_float(item.get("vaf"))
             n_supporting = "NA" if pd.isna(item.get("n_supporting")) else int(item["n_supporting"])
             n_overlapped = "NA" if pd.isna(item.get("n_overlapped")) else int(item["n_overlapped"])
             status = html.escape(str(item.get("viz_status", "")))
             n_supporting_text = str(n_supporting)
             n_overlapped_text = str(n_overlapped)
             status_text = _fmt_text(item.get("viz_status", ""))
+            sv_type_text = _fmt_text(item.get("sv_type", ""))
+            sv_type = html.escape(sv_type_text)
+            hard_conflict_token = "unknown"
+            hard_conflict_display = "NA"
+            hard_conflict_raw = item.get("has_hard_conflict", pd.NA)
+            try:
+                if pd.isna(hard_conflict_raw):
+                    hard_conflict_token = "unknown"
+                    hard_conflict_display = "NA"
+                else:
+                    hard_conflict_token = "true" if bool(hard_conflict_raw) else "false"
+                    hard_conflict_display = "True" if bool(hard_conflict_raw) else "False"
+            except TypeError:
+                hard_conflict_token = "unknown"
+                hard_conflict_display = "NA"
             sv_len_text = "NA"
             sv_len_abs_text = "NA"
             try:
@@ -773,8 +905,11 @@ def _build_report_html(
                 f"data-assigned-code=\"{html.escape(assigned_code_text, quote=True)}\" "
                 f"data-majority-pct=\"{html.escape(majority, quote=True)}\" "
                 f"data-overlap-pct=\"{html.escape(overlap, quote=True)}\" "
+                f"data-vaf=\"{html.escape(vaf, quote=True)}\" "
                 f"data-n-supporting=\"{html.escape(n_supporting_text, quote=True)}\" "
                 f"data-n-overlapped=\"{html.escape(n_overlapped_text, quote=True)}\" "
+                f"data-sv-type=\"{html.escape(sv_type_text, quote=True)}\" "
+                f"data-has-hard-conflict=\"{html.escape(hard_conflict_token, quote=True)}\" "
                 f"data-sv-len=\"{html.escape(sv_len_text, quote=True)}\" "
                 f"data-viz-status=\"{html.escape(status_text, quote=True)}\">"
             )
@@ -796,14 +931,19 @@ def _build_report_html(
             page.append(f"<div class=\"kv\"><b>Review:</b> <span class=\"review-badge\">{html.escape(review_label)}</span></div>")
             page.append(f"<div class=\"kv\"><b>Primary cell type:</b> {primary}</div>")
             page.append(f"<div class=\"kv\"><b>Linked cell types:</b> {linked}</div>")
+            page.append(f"<div class=\"kv\"><b>SV type:</b> {sv_type}</div>")
             page.append(f"<div class=\"kv\"><b>Assigned code:</b> {assigned_code}</div>")
             page.append(f"<div class=\"kv\"><b>SV length:</b> {html.escape(sv_len_display)}</div>")
             page.append(f"<div class=\"kv\"><b>IGV SV locus:</b> <code>{html.escape(sv_igv_text)}</code></div>")
-            page.append(f"<div class=\"kv\"><b>majority_pct:</b> {majority} | <b>overlap_pct:</b> {overlap}</div>")
+            page.append(
+                f"<div class=\"kv\"><b>majority_pct:</b> {majority} | <b>overlap_pct:</b> {overlap} | "
+                f"<b>vaf:</b> {vaf}</div>"
+            )
             page.append(
                 f"<div class=\"kv\"><b>n_supporting:</b> {html.escape(n_supporting_text)} | "
                 f"<b>n_overlapped:</b> {html.escape(n_overlapped_text)}</div>"
             )
+            page.append(f"<div class=\"kv\"><b>has_hard_conflict:</b> {html.escape(hard_conflict_display)}</div>")
             page.append(f"<div class=\"kv\"><b>viz status:</b> {status}</div>")
             igvviz_status = html.escape(str(item.get("igvviz_status", "")))
             page.append(f"<div class=\"kv\"><b>igvviz status:</b> {igvviz_status}</div>")
@@ -885,7 +1025,16 @@ const dashboardData=__DASHBOARD_DATA__;
 const dashboardFilters=__DASHBOARD_FILTERS__;
 const REVIEW_STORAGE_KEY=__REVIEW_STORAGE_KEY__;
 const REVIEW_STATUS_LABELS={real:'real',not_real:'not real',undecided:'undecided'};
+const NUMERIC_FILTER_CONFIGS=[
+  {key:'n_supporting',label:'n_supporting',digits:0,step:1,source:'n_supporting'},
+  {key:'overlap_pct',label:'overlap_pct',digits:3,step:0.001,source:'overlap_pct',fixed:[0,1]},
+  {key:'majority_pct',label:'majority_pct',digits:3,step:0.001,source:'majority_pct',fixed:[0,1]},
+  {key:'sv_len_abs',label:'|sv_len|',digits:0,step:1,source:'sv_len'},
+  {key:'vaf',label:'vaf',digits:3,step:0.001,source:'vaf',fixed:[0,1]}
+];
 let reviewState={};
+let numericFilterMeta={};
+let numericFilterState={};
 
 function chrSortKey(chr){
   const t=String(chr||'').replace(/^chr/i,'');
@@ -938,6 +1087,87 @@ function splitCelltypeList(text){
     .filter(part=>part!==''&&part.toLowerCase()!=='na');
 }
 
+function asFiniteNumber(value){
+  const num=Number(value);
+  return Number.isFinite(num)?num:null;
+}
+
+function roundNumericValue(value, digits){
+  const num=asFiniteNumber(value);
+  if(num==null) return null;
+  const factor=Math.pow(10, Number(digits||0));
+  return Math.round(num*factor)/factor;
+}
+
+function formatNumericValue(value, digits){
+  const num=asFiniteNumber(value);
+  if(num==null) return 'NA';
+  const rounded=roundNumericValue(num, digits);
+  return Number(digits||0)===0 ? String(Math.round(rounded)) : rounded.toFixed(Number(digits||0));
+}
+
+function normalizeBooleanToken(value){
+  const text=String(value==null?'':value).trim().toLowerCase();
+  if(text==='true'||text==='1'||text==='yes') return 'true';
+  if(text==='false'||text==='0'||text==='no') return 'false';
+  return 'unknown';
+}
+
+function numericValueByKey(source, key){
+  if(key==='sv_len_abs'){
+    const value=asFiniteNumber(source&&source.sv_len);
+    return value==null?null:Math.abs(value);
+  }
+  return asFiniteNumber(source&&source[key]);
+}
+
+function datasetNumericValue(card, attrName, absolute){
+  const raw=card.getAttribute(attrName);
+  const value=asFiniteNumber(raw);
+  if(value==null) return null;
+  return absolute?Math.abs(value):value;
+}
+
+function numericValueForCard(card, key){
+  if(key==='n_supporting') return datasetNumericValue(card, 'data-n-supporting', false);
+  if(key==='overlap_pct') return datasetNumericValue(card, 'data-overlap-pct', false);
+  if(key==='majority_pct') return datasetNumericValue(card, 'data-majority-pct', false);
+  if(key==='sv_len_abs') return datasetNumericValue(card, 'data-sv-len', true);
+  if(key==='vaf') return datasetNumericValue(card, 'data-vaf', false);
+  return null;
+}
+
+function buildNumericFilterMeta(){
+  const out={};
+  NUMERIC_FILTER_CONFIGS.forEach(cfg=>{
+    const values=(Array.isArray(dashboardData)?dashboardData:[])
+      .map(row=>numericValueByKey(row, cfg.key))
+      .filter(value=>value!=null);
+    if(values.length===0){
+      out[cfg.key]={...cfg,enabled:false,min:null,max:null,scaleMin:null,scaleMax:null};
+      return;
+    }
+    let scaleMin=Math.min(...values);
+    let scaleMax=Math.max(...values);
+    if(Array.isArray(cfg.fixed)&&cfg.fixed.length===2){
+      scaleMin=Number(cfg.fixed[0]);
+      scaleMax=Number(cfg.fixed[1]);
+    }
+    scaleMin=roundNumericValue(scaleMin, cfg.digits);
+    scaleMax=roundNumericValue(scaleMax, cfg.digits);
+    if(scaleMax<scaleMin) scaleMax=scaleMin;
+    out[cfg.key]={
+      ...cfg,
+      enabled:true,
+      min:scaleMin,
+      max:scaleMax,
+      scaleMin:scaleMin,
+      scaleMax:scaleMax
+    };
+  });
+  return out;
+}
+
 function selectedReviewFilter(){
   const sel=document.getElementById('review-filter');
   return sel?String(sel.value||'all'):'all';
@@ -945,6 +1175,16 @@ function selectedReviewFilter(){
 
 function selectedCelltypeFilter(){
   const sel=document.getElementById('celltype-filter');
+  return sel?String(sel.value||'all'):'all';
+}
+
+function selectedSvtypeFilter(){
+  const sel=document.getElementById('svtype-filter');
+  return sel?String(sel.value||'all'):'all';
+}
+
+function selectedHardConflictFilter(){
+  const sel=document.getElementById('hard-conflict-filter');
   return sel?String(sel.value||'all'):'all';
 }
 
@@ -978,23 +1218,100 @@ function rowMatchesCelltype(row, wantedToken){
   return rowCelltypeTokens(row).has(wanted);
 }
 
-function filteredDashboardData(reviewFilter, celltypeFilter){
-  const wantedReview=String(reviewFilter||'all');
-  const wantedCelltype=String(celltypeFilter||'all');
+function cardMatchesSvType(card, wantedValue){
+  const wanted=String(wantedValue||'all').trim().toUpperCase();
+  if(wanted===''||wanted==='ALL') return true;
+  const actual=String(card.getAttribute('data-sv-type')||'').trim().toUpperCase();
+  return actual===wanted;
+}
+
+function rowMatchesSvType(row, wantedValue){
+  const wanted=String(wantedValue||'all').trim().toUpperCase();
+  if(wanted===''||wanted==='ALL') return true;
+  const actual=String((row&&row.sv_type)||'').trim().toUpperCase();
+  return actual===wanted;
+}
+
+function cardMatchesHardConflict(card, wantedValue){
+  const wanted=normalizeBooleanToken(wantedValue);
+  if(wanted==='unknown' && String(wantedValue||'all')==='all') return true;
+  if(String(wantedValue||'all')==='all') return true;
+  const actual=normalizeBooleanToken(card.getAttribute('data-has-hard-conflict'));
+  return actual===wanted;
+}
+
+function rowMatchesHardConflict(row, wantedValue){
+  if(String(wantedValue||'all')==='all') return true;
+  const actual=normalizeBooleanToken(row&&row.has_hard_conflict);
+  const wanted=normalizeBooleanToken(wantedValue);
+  return actual===wanted;
+}
+
+function numericFiltersMatchValue(value, bounds, meta){
+  if(!bounds||!meta) return true;
+  if(value==null){
+    return bounds.min===meta.scaleMin && bounds.max===meta.scaleMax;
+  }
+  if(bounds.min!=null && value<bounds.min) return false;
+  if(bounds.max!=null && value>bounds.max) return false;
+  return true;
+}
+
+function cardMatchesNumericFilters(card){
+  return NUMERIC_FILTER_CONFIGS.every(cfg=>{
+    const meta=numericFilterMeta[cfg.key];
+    if(!meta||!meta.enabled) return true;
+    const bounds=numericFilterState[cfg.key];
+    return numericFiltersMatchValue(numericValueForCard(card, cfg.key), bounds, meta);
+  });
+}
+
+function rowMatchesNumericFilters(row){
+  return NUMERIC_FILTER_CONFIGS.every(cfg=>{
+    const meta=numericFilterMeta[cfg.key];
+    if(!meta||!meta.enabled) return true;
+    const bounds=numericFilterState[cfg.key];
+    return numericFiltersMatchValue(numericValueByKey(row, cfg.key), bounds, meta);
+  });
+}
+
+function filteredDashboardData(filterState){
+  const wantedReview=String((filterState&&filterState.review)||'all');
+  const wantedCelltype=String((filterState&&filterState.celltype)||'all');
+  const wantedSvType=String((filterState&&filterState.svtype)||'all');
+  const wantedHardConflict=String((filterState&&filterState.hardConflict)||'all');
   const base=Array.isArray(dashboardData)?dashboardData:[];
   return base.filter(r=>{
     const id=String((r&&r.id!=null)?r.id:'');
     const status=normalizeReviewStatus(reviewState[id]);
     if(wantedReview!=='all'&&status!==wantedReview) return false;
     if(!rowMatchesCelltype(r, wantedCelltype)) return false;
+    if(!rowMatchesSvType(r, wantedSvType)) return false;
+    if(!rowMatchesHardConflict(r, wantedHardConflict)) return false;
+    if(!rowMatchesNumericFilters(r)) return false;
     return true;
   });
 }
 
-function summaryScopeLabel(reviewFilter, celltypeFilter){
+function numericFilterSummaryParts(){
+  return NUMERIC_FILTER_CONFIGS
+    .map(cfg=>{
+      const meta=numericFilterMeta[cfg.key];
+      const bounds=numericFilterState[cfg.key];
+      if(!meta||!meta.enabled||!bounds) return '';
+      const atDefault=bounds.min===meta.scaleMin && bounds.max===meta.scaleMax;
+      if(atDefault) return '';
+      return `${cfg.label}: ${formatNumericValue(bounds.min, cfg.digits)}-${formatNumericValue(bounds.max, cfg.digits)}`;
+    })
+    .filter(Boolean);
+}
+
+function summaryScopeLabel(filterState){
   const parts=[];
-  const wantedReview=String(reviewFilter||'all');
-  const wantedCelltype=String(celltypeFilter||'all');
+  const wantedReview=String((filterState&&filterState.review)||'all');
+  const wantedCelltype=String((filterState&&filterState.celltype)||'all');
+  const wantedSvType=String((filterState&&filterState.svtype)||'all');
+  const wantedHardConflict=String((filterState&&filterState.hardConflict)||'all');
   if(wantedReview==='real') parts.push('real');
   else if(wantedReview==='not_real') parts.push('not real');
   else if(wantedReview==='undecided') parts.push('undecided');
@@ -1006,18 +1323,36 @@ function summaryScopeLabel(reviewFilter, celltypeFilter){
     }
     parts.push(`cell type: ${cellLabel}`);
   }
+  if(wantedSvType!=='all') parts.push(`SV type: ${wantedSvType}`);
+  if(wantedHardConflict!=='all'){
+    parts.push(
+      wantedHardConflict==='true'
+        ?'hard conflict'
+        :(wantedHardConflict==='false'?'no hard conflict':'hard conflict: unknown')
+    );
+  }
+  parts.push(...numericFilterSummaryParts());
   return parts.length===0?'all':parts.join(' | ');
 }
 
-function renderSummaries(reviewFilter, celltypeFilter){
+function currentDashboardFilterState(){
+  return {
+    review:selectedReviewFilter(),
+    celltype:selectedCelltypeFilter(),
+    svtype:selectedSvtypeFilter(),
+    hardConflict:selectedHardConflictFilter()
+  };
+}
+
+function renderSummaries(filterState){
   if(typeof Plotly==='undefined'){
     const msg='Plotly failed to load; interactive plots unavailable.';
     ['chart-genome-location','chart-chrom-counts','chart-svlen','chart-support','chart-overlap-majority','chart-celltype']
       .forEach(id=>{const el=document.getElementById(id); if(el){el.textContent=msg;}});
     return;
   }
-  const data=filteredDashboardData(reviewFilter, celltypeFilter);
-  const scope=summaryScopeLabel(reviewFilter, celltypeFilter);
+  const data=filteredDashboardData(filterState);
+  const scope=summaryScopeLabel(filterState);
   const titleSuffix=(scope==='all')?'':` [${scope}]`;
   if(data.length===0){
     const msg=(scope==='all')
@@ -1104,6 +1439,119 @@ function renderSummaries(reviewFilter, celltypeFilter){
     {title:'Top Primary Cell Types'+titleSuffix,xaxis:{title:'SV count'},yaxis:{title:'Cell type'}},
     {responsive:true,displaylogo:false}
   );
+}
+
+function syncNumericFilterControl(key){
+  const meta=numericFilterMeta[key];
+  const bounds=numericFilterState[key];
+  if(!meta||!meta.enabled||!bounds) return;
+  const root=document.querySelector(`.range-filter[data-filter-key="${key}"]`);
+  if(!root) return;
+  const readout=root.querySelector('.range-readout');
+  const minRange=root.querySelector('input[data-role="min-range"]');
+  const maxRange=root.querySelector('input[data-role="max-range"]');
+  const minInput=root.querySelector('input[data-role="min-input"]');
+  const maxInput=root.querySelector('input[data-role="max-input"]');
+  if(readout){
+    readout.textContent=`${formatNumericValue(bounds.min, meta.digits)} to ${formatNumericValue(bounds.max, meta.digits)}`;
+  }
+  if(minRange) minRange.value=String(bounds.min);
+  if(maxRange) maxRange.value=String(bounds.max);
+  if(minInput) minInput.value=formatNumericValue(bounds.min, meta.digits);
+  if(maxInput) maxInput.value=formatNumericValue(bounds.max, meta.digits);
+}
+
+function setNumericFilterState(key, bound, rawValue){
+  const meta=numericFilterMeta[key];
+  if(!meta||!meta.enabled) return;
+  const fallback=(bound==='min')?meta.scaleMin:meta.scaleMax;
+  let value=asFiniteNumber(rawValue);
+  if(value==null) value=fallback;
+  value=Math.max(meta.scaleMin, Math.min(meta.scaleMax, roundNumericValue(value, meta.digits)));
+  const current=numericFilterState[key]||{min:meta.scaleMin,max:meta.scaleMax};
+  let minValue=current.min;
+  let maxValue=current.max;
+  if(bound==='min'){
+    minValue=value;
+    if(minValue>maxValue) maxValue=minValue;
+  }else{
+    maxValue=value;
+    if(maxValue<minValue) minValue=maxValue;
+  }
+  numericFilterState[key]={min:minValue,max:maxValue};
+  syncNumericFilterControl(key);
+  applyReviewFilter();
+}
+
+function resetNumericFilter(key){
+  const meta=numericFilterMeta[key];
+  if(!meta||!meta.enabled) return;
+  numericFilterState[key]={min:meta.scaleMin,max:meta.scaleMax};
+  syncNumericFilterControl(key);
+  applyReviewFilter();
+}
+
+function buildNumericFilterControls(){
+  const grid=document.getElementById('numeric-filter-grid');
+  if(!grid) return;
+  grid.innerHTML='';
+  NUMERIC_FILTER_CONFIGS.forEach(cfg=>{
+    const meta=numericFilterMeta[cfg.key];
+    const box=document.createElement('div');
+    box.className='range-filter'+((!meta||!meta.enabled)?' is-disabled':'');
+    box.setAttribute('data-filter-key', cfg.key);
+    if(!meta||!meta.enabled){
+      box.innerHTML=`<div class="range-header"><span class="range-label">${escapeHtml(cfg.label)}</span><span class="range-readout">No data</span></div>`;
+      grid.appendChild(box);
+      return;
+    }
+    box.innerHTML=`
+      <div class="range-header">
+        <span class="range-label">${escapeHtml(cfg.label)}</span>
+        <span class="range-readout"></span>
+      </div>
+      <div class="range-sliders">
+        <label>Min
+          <input type="range" data-role="min-range" min="${meta.scaleMin}" max="${meta.scaleMax}" step="${meta.step}" value="${meta.scaleMin}">
+        </label>
+        <label>Max
+          <input type="range" data-role="max-range" min="${meta.scaleMin}" max="${meta.scaleMax}" step="${meta.step}" value="${meta.scaleMax}">
+        </label>
+      </div>
+      <div class="range-values">
+        <label>Min value
+          <input type="number" data-role="min-input" min="${meta.scaleMin}" max="${meta.scaleMax}" step="${meta.step}" value="${formatNumericValue(meta.scaleMin, meta.digits)}">
+        </label>
+        <label>Max value
+          <input type="number" data-role="max-input" min="${meta.scaleMin}" max="${meta.scaleMax}" step="${meta.step}" value="${formatNumericValue(meta.scaleMax, meta.digits)}">
+        </label>
+        <button type="button" class="range-reset" onclick="resetNumericFilter('${cfg.key}')">Reset</button>
+      </div>`;
+    const minRange=box.querySelector('input[data-role="min-range"]');
+    const maxRange=box.querySelector('input[data-role="max-range"]');
+    const minInput=box.querySelector('input[data-role="min-input"]');
+    const maxInput=box.querySelector('input[data-role="max-input"]');
+    minRange.addEventListener('input', event=>setNumericFilterState(cfg.key, 'min', event.target.value));
+    maxRange.addEventListener('input', event=>setNumericFilterState(cfg.key, 'max', event.target.value));
+    minInput.addEventListener('change', event=>setNumericFilterState(cfg.key, 'min', event.target.value));
+    maxInput.addEventListener('change', event=>setNumericFilterState(cfg.key, 'max', event.target.value));
+    grid.appendChild(box);
+    syncNumericFilterControl(cfg.key);
+  });
+}
+
+function resetDashboardFilters(){
+  ['review-filter','celltype-filter','svtype-filter','hard-conflict-filter'].forEach(id=>{
+    const el=document.getElementById(id);
+    if(el) el.value='all';
+  });
+  NUMERIC_FILTER_CONFIGS.forEach(cfg=>{
+    const meta=numericFilterMeta[cfg.key];
+    if(!meta||!meta.enabled) return;
+    numericFilterState[cfg.key]={min:meta.scaleMin,max:meta.scaleMax};
+    syncNumericFilterControl(cfg.key);
+  });
+  applyReviewFilter();
 }
 
 function loadDefaultReviewState(){
@@ -1215,7 +1663,31 @@ function populateCelltypeFilterOptions(){
   else sel.value='all';
 }
 
-function syncReviewSummary(){
+function populateSvtypeFilterOptions(){
+  const sel=document.getElementById('svtype-filter');
+  if(!sel) return;
+  const oldValue=String(sel.value||'all');
+  const values=new Set();
+  getSvCards().forEach(card=>{
+    const svType=String(card.getAttribute('data-sv-type')||'').trim().toUpperCase();
+    if(svType&&svType!=='NA') values.add(svType);
+  });
+  sel.innerHTML='';
+  const allOpt=document.createElement('option');
+  allOpt.value='all';
+  allOpt.textContent='All SV types';
+  sel.appendChild(allOpt);
+  Array.from(values).sort((a,b)=>a.localeCompare(b)).forEach(value=>{
+    const opt=document.createElement('option');
+    opt.value=value;
+    opt.textContent=value;
+    sel.appendChild(opt);
+  });
+  if(Array.from(sel.options).some(opt=>opt.value===oldValue)) sel.value=oldValue;
+  else sel.value='all';
+}
+
+function syncReviewSummary(filterState){
   const cards=getSvCards();
   const counts={real:0,not_real:0,undecided:0};
   let visible=0;
@@ -1226,21 +1698,25 @@ function syncReviewSummary(){
   });
   const el=document.getElementById('review-summary');
   if(el){
-    el.textContent=`real: ${counts.real} | not real: ${counts.not_real} | undecided: ${counts.undecided} | visible: ${visible}/${cards.length}`;
+    const scope=summaryScopeLabel(filterState);
+    const scopeText=scope==='all' ? 'filters: none' : `filters: ${scope}`;
+    el.textContent=`real: ${counts.real} | not real: ${counts.not_real} | undecided: ${counts.undecided} | visible: ${visible}/${cards.length} | ${scopeText}`;
   }
 }
 
 function applyReviewFilter(){
-  const wantedReview=selectedReviewFilter();
-  const wantedCelltype=selectedCelltypeFilter();
+  const filterState=currentDashboardFilterState();
   getSvCards().forEach(card=>{
     const status=normalizeReviewStatus(card.getAttribute('data-review-status'));
-    const showReview=(wantedReview==='all'||wantedReview===status);
-    const showCelltype=cardMatchesCelltype(card, wantedCelltype);
-    card.style.display=(showReview&&showCelltype)?'':'none';
+    const showReview=(filterState.review==='all'||filterState.review===status);
+    const showCelltype=cardMatchesCelltype(card, filterState.celltype);
+    const showSvType=cardMatchesSvType(card, filterState.svtype);
+    const showHardConflict=cardMatchesHardConflict(card, filterState.hardConflict);
+    const showNumeric=cardMatchesNumericFilters(card);
+    card.style.display=(showReview&&showCelltype&&showSvType&&showHardConflict&&showNumeric)?'':'none';
   });
-  syncReviewSummary();
-  renderSummaries(wantedReview, wantedCelltype);
+  syncReviewSummary(filterState);
+  renderSummaries(filterState);
 }
 
 function setSvReview(btn){
@@ -1285,7 +1761,16 @@ function initReviewControls(){
     reviewState[svId]=status;
     applyReviewToCard(card, status);
   });
+  numericFilterMeta=buildNumericFilterMeta();
+  NUMERIC_FILTER_CONFIGS.forEach(cfg=>{
+    const meta=numericFilterMeta[cfg.key];
+    if(meta&&meta.enabled){
+      numericFilterState[cfg.key]={min:meta.scaleMin,max:meta.scaleMax};
+    }
+  });
   populateCelltypeFilterOptions();
+  populateSvtypeFilterOptions();
+  buildNumericFilterControls();
   applyReviewFilter();
   if(stored.available){
     persistReviewState();
@@ -1390,8 +1875,10 @@ def report_main(args) -> None:
     igvviz_root.mkdir(parents=True, exist_ok=True)
     igvreport_root = report_dir / "igvreport"
     review_storage_key = f"sniffcell_report_review::{str(anno_output.resolve())}"
+    manifest_payload = _load_json_dict(manifest_path)
 
     sv_df = _load_sv_assignment(sv_assignment_path)
+    sv_df = _backfill_sv_fields_from_manifest_vcf(sv_df, manifest_payload, logger)
     selected = _select_high_confidence_svs(
         sv_df,
         min_overlap_pct=float(args.min_overlap_pct),

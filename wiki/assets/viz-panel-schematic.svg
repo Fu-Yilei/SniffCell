@@ -1,52 +1,170 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="980" height="600" viewBox="0 0 980 600">
+<svg xmlns="http://www.w3.org/2000/svg" width="980" height="720" viewBox="0 0 980 720">
   <defs>
     <style>
-      .title { font: 700 24px sans-serif; fill: #1f2937; }
-      .label { font: 600 15px sans-serif; fill: #111827; }
-      .text  { font: 500 13px sans-serif; fill: #334155; }
-      .readAssigned { stroke: #b91c1c; stroke-width: 3; }
-      .readUnassigned { stroke: #ea580c; stroke-width: 3; stroke-dasharray: 7 5; }
-      .readOther { stroke: #6b7280; stroke-width: 2; }
-      .svSpan { fill: #93c5fd; opacity: 0.35; }
-      .dmrHyper { fill: #16a34a; opacity: 0.75; }
-      .dmrHypo { fill: #7c3aed; opacity: 0.75; }
-      .box { fill: #f8fafc; stroke: #64748b; stroke-width: 2; rx: 10; }
-      .axis { stroke: #475569; stroke-width: 2; }
+      .title   { font: 700 22px sans-serif; fill: #1f2937; }
+      .label   { font: 600 14px sans-serif; fill: #111827; }
+      .text    { font: 500 12px sans-serif; fill: #334155; }
+      .mono    { font: 500 11px 'Courier New', monospace; fill: #334155; }
+      .axlabel { font: 500 11px sans-serif; fill: #475569; }
+      .barlabel{ font: 600 11px sans-serif; fill: #ffffff; }
+      .svlabel { font: 600 11px sans-serif; fill: #1d4ed8; }
+      .legend  { font: 500 11.5px sans-serif; fill: #334155; }
+      .readAssigned   { stroke: #b91c1c; stroke-width: 3; fill: none; }
+      .readUnassigned { stroke: #ea580c; stroke-width: 2.5; stroke-dasharray: 7 4; fill: none; }
+      .readOther      { stroke: #9ca3af; stroke-width: 2; fill: none; }
+      .svSpan  { fill: #bfdbfe; opacity: 0.55; }
+      .dmrHyper{ fill: #16a34a; }
+      .dmrHypo { fill: #7c3aed; }
+      .box     { fill: #f8fafc; stroke: #94a3b8; stroke-width: 1.5; }
+      .axis    { stroke: #475569; stroke-width: 1.5; }
+      .svline  { stroke: #1d4ed8; stroke-width: 1.5; stroke-dasharray: 4 3; }
+      .brace   { stroke: #64748b; stroke-width: 1.5; fill: none; }
     </style>
+    <marker id="arrowR" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+      <polygon points="0 0, 7 3.5, 0 7" fill="#64748b"/>
+    </marker>
+    <marker id="arrowL" markerWidth="7" markerHeight="7" refX="1" refY="3.5" orient="auto-start-reverse">
+      <polygon points="7 0, 0 3.5, 7 7" fill="#64748b"/>
+    </marker>
   </defs>
 
-  <rect x="0" y="0" width="980" height="600" fill="#ffffff"/>
-  <text x="30" y="42" class="title">`sniffcell viz` Panel Anatomy (Schematic)</text>
+  <!-- Background -->
+  <rect x="0" y="0" width="980" height="720" fill="#ffffff"/>
 
-  <rect x="24" y="64" width="932" height="318" class="box"/>
-  <text x="42" y="92" class="label">Top track: reads around the SV</text>
+  <!-- Title -->
+  <text x="30" y="40" class="title">sniffcell viz — Panel Anatomy (Schematic)</text>
 
-  <rect x="470" y="104" width="86" height="240" class="svSpan"/>
-  <line x1="470" y1="102" x2="470" y2="344" class="axis"/>
-  <line x1="556" y1="102" x2="556" y2="344" class="axis"/>
+  <!-- ═══════════════════════════════════════════════
+       TOP TRACK: Reads  (y 58–360)
+  ═══════════════════════════════════════════════ -->
+  <rect x="24" y="58" width="932" height="300" rx="8" class="box"/>
+  <text x="42" y="80" class="label">Top track: long reads spanning the SV region</text>
 
-  <line x1="62" y1="130" x2="882" y2="130" class="readAssigned"/>
-  <line x1="62" y1="156" x2="900" y2="156" class="readAssigned"/>
-  <line x1="75" y1="182" x2="855" y2="182" class="readUnassigned"/>
-  <line x1="40" y1="208" x2="920" y2="208" class="readOther"/>
-  <line x1="68" y1="234" x2="910" y2="234" class="readOther"/>
-  <line x1="92" y1="260" x2="885" y2="260" class="readAssigned"/>
-  <line x1="58" y1="286" x2="872" y2="286" class="readUnassigned"/>
+  <!-- SV interval shading -->
+  <rect x="490" y="88" width="80" height="235" class="svSpan"/>
+  <!-- SV vertical dashed lines -->
+  <line x1="490" y1="86" x2="490" y2="323" class="svline"/>
+  <line x1="570" y1="86" x2="570" y2="323" class="svline"/>
 
-  <circle cx="468" cy="130" r="5" fill="#dc2626"/>
-  <circle cx="468" cy="156" r="5" fill="#dc2626"/>
-  <circle cx="468" cy="182" r="5" fill="#f97316"/>
-  <text x="42" y="330" class="text">Supporting assigned (red), supporting unassigned (orange dashed), other reads (gray)</text>
+  <!-- SV interval label -->
+  <text x="530" y="105" class="svlabel" text-anchor="middle">SV interval</text>
+  <text x="530" y="119" class="svlabel" text-anchor="middle">(INS/DEL)</text>
 
-  <rect x="24" y="398" width="932" height="126" class="box"/>
-  <text x="42" y="425" class="label">Bottom track: ctDMRs in the plotting window</text>
+  <!-- Window brace labels -->
+  <line x1="42"  y1="134" x2="483" y2="134" class="brace" marker-start="url(#arrowL)" marker-end="url(#arrowR)"/>
+  <text x="262"  y="128" class="axlabel" text-anchor="middle">&#8592; --window &#8594;</text>
+  <line x1="577" y1="134" x2="932" y2="134" class="brace" marker-start="url(#arrowL)" marker-end="url(#arrowR)"/>
+  <text x="755"  y="128" class="axlabel" text-anchor="middle">&#8592; --window &#8594;</text>
 
-  <rect x="120" y="448" width="130" height="24" class="dmrHyper"/>
-  <rect x="290" y="448" width="170" height="24" class="dmrHypo"/>
-  <rect x="505" y="448" width="120" height="24" class="dmrHyper"/>
-  <rect x="680" y="448" width="185" height="24" class="dmrHypo"/>
-  <text x="42" y="505" class="text">Hyper ctDMR (green) and hypo/other ctDMR (purple) with SV interval highlighted in blue.</text>
+  <!-- Reads -->
+  <!-- Red solid: SV-supporting + cell-type assigned -->
+  <line x1="62"  y1="155" x2="882" y2="155" class="readAssigned"/>
+  <line x1="80"  y1="175" x2="900" y2="175" class="readAssigned"/>
+  <line x1="92"  y1="255" x2="885" y2="255" class="readAssigned"/>
 
-  <rect x="24" y="536" width="932" height="46" class="box"/>
-  <text x="42" y="564" class="text">Use `--export_tables` to save per-SV summaries and per-supporting-read methylation tables next to the figure.</text>
+  <!-- Orange dashed: SV-supporting, NOT cell-type assigned -->
+  <line x1="75"  y1="195" x2="855" y2="195" class="readUnassigned"/>
+  <line x1="58"  y1="275" x2="872" y2="275" class="readUnassigned"/>
+
+  <!-- Gray: non-supporting -->
+  <line x1="40"  y1="215" x2="920" y2="215" class="readOther"/>
+  <line x1="68"  y1="235" x2="910" y2="235" class="readOther"/>
+  <line x1="55"  y1="295" x2="896" y2="295" class="readOther"/>
+
+  <!-- Red/orange dots at SV breakpoint (x=490) for supporting reads -->
+  <circle cx="490" cy="155" r="5" fill="#dc2626"/>
+  <circle cx="490" cy="175" r="5" fill="#dc2626"/>
+  <circle cx="490" cy="195" r="5" fill="#f97316"/>
+  <circle cx="490" cy="255" r="5" fill="#dc2626"/>
+  <circle cx="490" cy="275" r="5" fill="#f97316"/>
+
+  <!-- Breakpoint dot annotation -->
+  <line x1="510" y1="149" x2="495" y2="158" stroke="#b91c1c" stroke-width="1"/>
+  <text x="512" y="148" class="axlabel" fill="#b91c1c">breakpoint dot</text>
+
+  <!-- In-track legend -->
+  <line x1="42"  y1="320" x2="82"  y2="320" class="readAssigned"/>
+  <text x="88"   y="324" class="legend">SV-supporting, cell-type assigned (via ctDMR methylation)</text>
+  <line x1="42"  y1="335" x2="82"  y2="335" class="readUnassigned"/>
+  <text x="88"   y="339" class="legend">SV-supporting, NOT cell-type assigned</text>
+  <line x1="42"  y1="350" x2="82"  y2="350" class="readOther"/>
+  <text x="88"   y="354" class="legend">Other reads (non-supporting, background)</text>
+
+  <!-- ═══════════════════════════════════════════════
+       X-AXIS between tracks (y 365–400)
+  ═══════════════════════════════════════════════ -->
+  <line x1="40" y1="378" x2="940" y2="378" class="axis"/>
+  <!-- Ticks -->
+  <line x1="40"  y1="373" x2="40"  y2="383" class="axis"/>
+  <line x1="490" y1="373" x2="490" y2="383" class="axis"/>
+  <line x1="570" y1="373" x2="570" y2="383" class="axis"/>
+  <line x1="940" y1="373" x2="940" y2="383" class="axis"/>
+  <!-- Tick labels -->
+  <text x="40"  y="396" class="axlabel" text-anchor="middle">SV &#8722; window</text>
+  <text x="490" y="396" class="axlabel" text-anchor="middle">SV start</text>
+  <text x="570" y="396" class="axlabel" text-anchor="middle">SV end</text>
+  <text x="940" y="396" class="axlabel" text-anchor="middle">SV + window</text>
+  <!-- Axis direction label -->
+  <text x="490" y="412" class="axlabel" text-anchor="middle" fill="#94a3b8">genomic coordinate &#8594;</text>
+
+  <!-- ═══════════════════════════════════════════════
+       BOTTOM TRACK: ctDMRs (y 420–555)
+  ═══════════════════════════════════════════════ -->
+  <rect x="24" y="420" width="932" height="140" rx="8" class="box"/>
+  <text x="42" y="441" class="label">Bottom track: ctDMR regions in the plotting window</text>
+
+  <!-- SV interval shading (aligned) -->
+  <rect x="490" y="449" width="80" height="78" class="svSpan"/>
+  <line x1="490" y1="447" x2="490" y2="527" class="svline"/>
+  <line x1="570" y1="447" x2="570" y2="527" class="svline"/>
+
+  <!-- ctDMR bars — Hyper (green) -->
+  <rect x="78"  y="458" width="130" height="26" rx="3" class="dmrHyper"/>
+  <text x="143" y="475" class="barlabel" text-anchor="middle">Neuron</text>
+
+  <rect x="390" y="458" width="88"  height="26" rx="3" class="dmrHyper"/>
+  <text x="434" y="475" class="barlabel" text-anchor="middle">Astro</text>
+
+  <rect x="598" y="458" width="130" height="26" rx="3" class="dmrHyper"/>
+  <text x="663" y="475" class="barlabel" text-anchor="middle">Neuron</text>
+
+  <rect x="798" y="458" width="100" height="26" rx="3" class="dmrHyper"/>
+  <text x="848" y="475" class="barlabel" text-anchor="middle">Oligo</text>
+
+  <!-- ctDMR bars — Hypo (purple) -->
+  <rect x="228" y="491" width="140" height="26" rx="3" class="dmrHypo"/>
+  <text x="298" y="508" class="barlabel" text-anchor="middle">B-cell</text>
+
+  <rect x="508" y="491" width="72"  height="26" rx="3" class="dmrHypo"/>
+  <text x="544" y="508" class="barlabel" text-anchor="middle">T-cell</text>
+
+  <rect x="700" y="491" width="86"  height="26" rx="3" class="dmrHypo"/>
+  <text x="743" y="508" class="barlabel" text-anchor="middle">Mono</text>
+
+  <!-- ctDMR legend -->
+  <rect x="42"  y="531" width="13" height="11" rx="2" class="dmrHyper"/>
+  <text x="60"  y="541" class="legend">Hyper ctDMR (best_dir = "hyper")</text>
+  <rect x="260" y="531" width="13" height="11" rx="2" class="dmrHypo"/>
+  <text x="278" y="541" class="legend">Hypo ctDMR (best_dir = "hypo")</text>
+  <text x="490" y="541" class="legend" fill="#64748b">Bar label = best_group (cell type)</text>
+
+  <!-- ═══════════════════════════════════════════════
+       EXPORT TABLES BOX (y 568–710)
+  ═══════════════════════════════════════════════ -->
+  <rect x="24" y="568" width="932" height="140" rx="8" class="box"/>
+  <text x="42" y="589" class="label">Output files (--export_tables)</text>
+
+  <text x="42"  y="610" class="mono">&lt;sv&gt;.png</text>
+  <text x="195" y="610" class="text">&#8212; the figure itself</text>
+
+  <text x="42"  y="630" class="mono">&lt;sv&gt;.summary.tsv</text>
+  <text x="195" y="630" class="text">&#8212; SV-level summary (coordinates, type, assigned / total supporting reads, best cell type)</text>
+
+  <text x="42"  y="650" class="mono">&lt;sv&gt;.supporting_reads_assignment.tsv</text>
+  <text x="430" y="650" class="text">&#8212; per-read cell-type assignment</text>
+
+  <text x="42"  y="670" class="mono">&lt;sv&gt;.supporting_reads_ctdmr_methylation.tsv</text>
+  <text x="430" y="670" class="text">&#8212; per-read methylation at ctDMRs</text>
+
+  <text x="42"  y="698" class="text" fill="#64748b">Plotting window controlled by --window (default: inherited from sniffcell anno run).</text>
 </svg>

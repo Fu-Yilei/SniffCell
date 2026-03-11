@@ -28,3 +28,4 @@ notebooks/
 atlas/
 tmp/
 scripts/
+anno_run_manifest.json

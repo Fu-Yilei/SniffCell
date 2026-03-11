@@ -143,6 +143,7 @@ sniffcell anno \
   -b pbmc_ctdmr.tsv \
   -o anno_out \
   -w 10000 \
+  --breakpoint_exclusion_frac 0.1 \
   -t 8 \
   --evidence_mode all_rows \
   --min_overlap_pct 0.0 \
@@ -161,6 +162,7 @@ SV assignment controls (also available in `svanno`):
 - `--evidence_mode {all_rows,per_read}` (default `all_rows`)
 - `--min_overlap_pct` (default `0.0`)
 - `--min_agreement_pct` (default `1.0`)
+- `--breakpoint_exclusion_frac` (default `0.0`): expands the no-ctDMR zone by `fraction * abs(SVLEN)` on each side of the SV core. For example, `0.1` excludes ctDMRs within +/-10% of SV length around breakpoints.
 
 Behavior note: `assigned_code` is suppressed when hard conflicts are detected (`has_hard_conflict=True`).
 
@@ -173,6 +175,7 @@ sniffcell svanno \
   -v sample.vcf.gz \
   -i anno_out/reads_classification.tsv \
   -w 10000 \
+  --breakpoint_exclusion_frac 0.1 \
   --evidence_mode all_rows \
   --min_overlap_pct 0.0 \
   --min_agreement_pct 1.0 \

@@ -5,12 +5,14 @@ import logging
 from pathlib import Path
 
 import pandas as pd
+import pysam
 
 from sniffcell.viz.viz import (
     _assign_ctdmr_label_lanes,
     _collect_large_indels_from_cigar,
     _build_methylation_heatmap_matrix,
     _expand_interval_for_visibility,
+    _fetch_reads,
     _extend_region_to_first_informative_ctdmr,
     _reference_celltype_mean_columns,
     _resolve_viz_runtime_inputs,
@@ -169,6 +171,121 @@ class TestVizManifestResolution(unittest.TestCase):
             self.assertEqual(resolved["bed_path"], "/tmp/dmrs.tsv")
             self.assertEqual(resolved["window"], 12000)
             self.assertTrue(str(resolved["output_path"]).endswith("sv1.viz.png"))
+
+
+class TestVizSupportHaplotypeFiltering(unittest.TestCase):
+    def _write_test_bam(self, bam_path: Path, rows: list[dict[str, object]]) -> None:
+        header = {"HD": {"VN": "1.6"}, "SQ": [{"SN": "chr1", "LN": 100000}]}
+        with pysam.AlignmentFile(str(bam_path), "wb", header=header) as bam_out:
+            for row in rows:
+                seg = pysam.AlignedSegment()
+                seg.query_name = str(row["read_name"])
+                seg.query_sequence = "A" * 100
+                seg.flag = 0
+                seg.reference_id = 0
+                seg.reference_start = int(row.get("start", 1000))
+                seg.mapping_quality = 60
+                seg.cigar = ((0, 100),)
+                seg.query_qualities = pysam.qualitystring_to_array("I" * 100)
+                haplotype = row.get("haplotype")
+                if haplotype is not None:
+                    seg.set_tag("HP", int(haplotype))
+                bam_out.write(seg)
+        pysam.index(str(bam_path))
+
+    def test_fetch_reads_filters_background_to_shared_support_haplotype(self):
+        with tempfile.TemporaryDirectory() as td:
+            bam_path = Path(td) / "reads.bam"
+            self._write_test_bam(
+                bam_path,
+                [
+                    {"read_name": "support1", "haplotype": 1},
+                    {"read_name": "support2", "haplotype": 1, "start": 1010},
+                    {"read_name": "background_hp1", "haplotype": 1, "start": 1020},
+                    {"read_name": "background_hp2", "haplotype": 2, "start": 1030},
+                ],
+            )
+
+            shown, all_reads = _fetch_reads(
+                str(bam_path),
+                "chr1",
+                900,
+                1300,
+                supporting_reads={"support1", "support2"},
+                max_reads=20,
+                support_haplotype_only=True,
+            )
+
+            applied_haplotype = shown.attrs.get("applied_support_haplotype")
+            self.assertEqual(applied_haplotype, 1)
+            self.assertEqual(
+                set(shown["read_name"].astype(str)),
+                {"support1", "support2", "background_hp1"},
+            )
+            self.assertEqual(
+                set(all_reads["read_name"].astype(str)),
+                {"support1", "support2", "background_hp1", "background_hp2"},
+            )
+
+    def test_fetch_reads_keeps_unphased_supporting_reads_when_filtering(self):
+        with tempfile.TemporaryDirectory() as td:
+            bam_path = Path(td) / "reads.bam"
+            self._write_test_bam(
+                bam_path,
+                [
+                    {"read_name": "support1", "haplotype": 1},
+                    {"read_name": "support_unphased", "haplotype": None, "start": 1010},
+                    {"read_name": "background_hp1", "haplotype": 1, "start": 1020},
+                    {"read_name": "background_hp2", "haplotype": 2, "start": 1030},
+                ],
+            )
+
+            shown, _ = _fetch_reads(
+                str(bam_path),
+                "chr1",
+                900,
+                1300,
+                supporting_reads={"support1", "support_unphased"},
+                max_reads=20,
+                support_haplotype_only=True,
+            )
+
+            applied_haplotype = shown.attrs.get("applied_support_haplotype")
+            self.assertEqual(applied_haplotype, 1)
+            self.assertEqual(
+                set(shown["read_name"].astype(str)),
+                {"support1", "support_unphased", "background_hp1"},
+            )
+
+    def test_fetch_reads_keeps_all_haplotypes_when_support_is_mixed(self):
+        with tempfile.TemporaryDirectory() as td:
+            bam_path = Path(td) / "reads.bam"
+            self._write_test_bam(
+                bam_path,
+                [
+                    {"read_name": "support1", "haplotype": 1},
+                    {"read_name": "support2", "haplotype": 2, "start": 1010},
+                    {"read_name": "background_hp1", "haplotype": 1, "start": 1020},
+                    {"read_name": "background_hp2", "haplotype": 2, "start": 1030},
+                ],
+            )
+
+            shown, _ = _fetch_reads(
+                str(bam_path),
+                "chr1",
+                900,
+                1300,
+                supporting_reads={"support1", "support2"},
+                max_reads=20,
+                support_haplotype_only=True,
+            )
+
+            applied_haplotype = shown.attrs.get("applied_support_haplotype")
+            self.assertIsNone(applied_haplotype)
+            self.assertEqual(
+                set(shown["read_name"].astype(str)),
+                {"support1", "support2", "background_hp1", "background_hp2"},
+            )
 
 
 class TestVizLargeIndels(unittest.TestCase):

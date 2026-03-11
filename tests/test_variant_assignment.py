@@ -3,6 +3,7 @@ import unittest
 import pandas as pd
 
 from sniffcell.anno.anno import _build_sv_readable_reports
+from sniffcell.anno.filter_bed_based_on_variants import filter_bed_based_on_variants
 from sniffcell.anno.variant_assignment import assign_sv_celltypes
 from sniffcell.parse_args import parse_args
 
@@ -398,6 +399,73 @@ class TestVariantAssignment(unittest.TestCase):
         self.assertFalse(bool(row["has_hard_conflict"]))
         self.assertEqual(str(row["intersection_code"]), "1100")
 
+    def test_breakpoint_exclusion_frac_removes_nearby_insertion_evidence(self):
+        sv_df = pd.DataFrame(
+            {
+                "chr": ["1"],
+                "location": [1000],
+                "id": ["sv1"],
+                "sv_len": [100],
+                "supporting_reads": [["r1", "r2"]],
+            }
+        )
+
+        read_assignment_df = pd.DataFrame(
+            {
+                "code_order": ["A|B", "A|B"],
+                "code": ["10", "01"],
+                "best_group": ["A", "B"],
+                "is_best_group": [True, True],
+                "chr": ["1", "1"],
+                "start": [1001, 1020],
+                "end": [1005, 1025],
+            },
+            index=pd.Index(["r1", "r2"], name="readname"),
+        )
+
+        out = assign_sv_celltypes(
+            sv_df,
+            read_assignment_df,
+            window=50,
+            breakpoint_exclusion_frac=0.1,
+        )
+        row = out.iloc[0]
+
+        self.assertEqual(row["n_supporting"], 2)
+        self.assertEqual(row["n_overlapped"], 1)
+        self.assertEqual(row["majority_code"], "01")
+        self.assertEqual(row["assigned_code"], "01")
+        self.assertEqual(row["linked_celltypes"], "B")
+
+    def test_bed_filter_excludes_ctdmrs_near_breakpoint_when_fraction_is_set(self):
+        bed_df = pd.DataFrame(
+            {
+                "chr": ["1", "1", "1"],
+                "start": [1001, 1015, 1070],
+                "end": [1005, 1020, 1075],
+            }
+        )
+        sv_df = pd.DataFrame(
+            {
+                "chr": ["1"],
+                "ref_start": [1000],
+                "ref_end": [1000],
+                "sv_len": [100],
+                "supporting_reads": [["r1"]],
+            }
+        )
+
+        kept = filter_bed_based_on_variants(
+            bed_df,
+            sv_df,
+            window=50,
+            breakpoint_exclusion_frac=0.1,
+        )
+
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(int(kept.iloc[0]["start"]), 1015)
+        self.assertEqual(int(kept.iloc[0]["end"]), 1020)
+
 
 class TestParseArgs(unittest.TestCase):
     def test_anno_accepts_single_bed_path(self):
@@ -438,6 +506,23 @@ class TestParseArgs(unittest.TestCase):
         self.assertIsNone(args.read_assignment)
         self.assertIsNone(args.reference)
         self.assertFalse(args.export_tables)
+        self.assertTrue(args.support_haplotype_only)
+
+    def test_viz_subcommand_can_disable_support_haplotype_filter(self):
+        args = parse_args(
+            [
+                "viz",
+                "-i",
+                "input.bam",
+                "-v",
+                "input.vcf.gz",
+                "-s",
+                "sv123",
+                "--show_all_haplotypes",
+            ]
+        )
+        self.assertEqual(args.command, "viz")
+        self.assertFalse(args.support_haplotype_only)
 
     def test_viz_subcommand_parses_with_anno_output_only(self):
         args = parse_args(
@@ -520,6 +605,7 @@ class TestParseArgs(unittest.TestCase):
         self.assertEqual(args.evidence_mode, "all_rows")
         self.assertAlmostEqual(args.min_overlap_pct, 0.0)
         self.assertAlmostEqual(args.min_agreement_pct, 1.0)
+        self.assertAlmostEqual(args.breakpoint_exclusion_frac, 0.0)
 
     def test_anno_assignment_mode_accepts_kmeans(self):
         args = parse_args(
@@ -541,6 +627,26 @@ class TestParseArgs(unittest.TestCase):
         )
         self.assertEqual(args.read_assignment_mode, "kmeans")
 
+    def test_anno_assignment_accepts_breakpoint_exclusion_frac(self):
+        args = parse_args(
+            [
+                "anno",
+                "-i",
+                "input.bam",
+                "-v",
+                "input.vcf.gz",
+                "-r",
+                "ref.fa",
+                "-b",
+                "a.bed.tsv",
+                "-o",
+                "out_dir",
+                "--breakpoint_exclusion_frac",
+                "0.1",
+            ]
+        )
+        self.assertAlmostEqual(args.breakpoint_exclusion_frac, 0.1)
+
     def test_svanno_assignment_defaults_are_strict_all_rows(self):
         args = parse_args(
             [
@@ -556,6 +662,23 @@ class TestParseArgs(unittest.TestCase):
         self.assertEqual(args.evidence_mode, "all_rows")
         self.assertAlmostEqual(args.min_overlap_pct, 0.0)
         self.assertAlmostEqual(args.min_agreement_pct, 1.0)
+        self.assertAlmostEqual(args.breakpoint_exclusion_frac, 0.0)
+
+    def test_svanno_assignment_accepts_breakpoint_exclusion_frac(self):
+        args = parse_args(
+            [
+                "svanno",
+                "-v",
+                "input.vcf.gz",
+                "-i",
+                "anno_out/reads_classification.tsv",
+                "-o",
+                "anno_out",
+                "--breakpoint_exclusion_frac",
+                "0.1",
+            ]
+        )
+        self.assertAlmostEqual(args.breakpoint_exclusion_frac, 0.1)
 
     def test_report_subcommand_parses_with_defaults(self):
         args = parse_args(

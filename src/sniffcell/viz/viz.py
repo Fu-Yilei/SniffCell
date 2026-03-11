@@ -285,6 +285,7 @@ def _fetch_reads(
     supporting_reads: set[str],
     max_reads: int,
     bam_handle: pysam.AlignmentFile | None = None,
+    support_haplotype_only: bool = True,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     def _normalize_haplotype_tag(value: object) -> int | None:
         if value is None:
@@ -351,20 +352,37 @@ def _fetch_reads(
 
     all_reads = pd.DataFrame(rows)
     if all_reads.empty:
+        all_reads.attrs["applied_support_haplotype"] = None
         return all_reads, all_reads
 
     all_reads = _order_reads_for_plot(all_reads)
-    if max_reads <= 0 or len(all_reads) <= max_reads:
-        shown = all_reads.copy()
+    applied_support_haplotype: int | None = None
+    display_reads = all_reads
+    if support_haplotype_only:
+        support_df = all_reads.loc[all_reads["is_supporting"]].copy()
+        phased_support_haplotypes = (
+            pd.to_numeric(support_df.get("haplotype"), errors="coerce").dropna().astype(int).unique().tolist()
+            if not support_df.empty
+            else []
+        )
+        if len(phased_support_haplotypes) == 1:
+            applied_support_haplotype = int(phased_support_haplotypes[0])
+            same_haplotype_mask = all_reads["haplotype"].fillna(-1).astype("int64").eq(applied_support_haplotype)
+            display_reads = all_reads.loc[same_haplotype_mask | all_reads["is_supporting"]].copy()
+
+    if max_reads <= 0 or len(display_reads) <= max_reads:
+        shown = display_reads.copy()
     else:
-        supporting_df = all_reads[all_reads["is_supporting"]].copy()
-        non_support_df = all_reads[~all_reads["is_supporting"]].copy()
+        supporting_df = display_reads[display_reads["is_supporting"]].copy()
+        non_support_df = display_reads[~display_reads["is_supporting"]].copy()
         if len(supporting_df) >= max_reads:
             shown = supporting_df.iloc[:max_reads].copy()
         else:
             n_keep_non = max_reads - len(supporting_df)
             shown = pd.concat([supporting_df, non_support_df.iloc[:n_keep_non]], ignore_index=True)
         shown = _order_reads_for_plot(shown)
+    shown.attrs["applied_support_haplotype"] = applied_support_haplotype
+    all_reads.attrs["applied_support_haplotype"] = applied_support_haplotype
     return shown, all_reads
 
 
@@ -1448,6 +1466,7 @@ def _plot_sv_panel(
     indel_min_bp: int,
     output_path: Path,
     dpi: int,
+    applied_support_haplotype: int | None = None,
 ) -> None:
     try:
         import matplotlib.pyplot as plt
@@ -2067,7 +2086,8 @@ def _plot_sv_panel(
     fig.suptitle(title, fontsize=title_size, y=0.985)
     subtitle = (
         f"supporting reads in VCF: {n_support_listed} | in BAM window: {n_support_in_window} | shown: {n_support_shown} | "
-        f"assigned: {n_assigned} | unassigned: {n_unassigned}"
+        f"assigned: {n_assigned} | unassigned: {n_unassigned} | "
+        f"display haplotypes: {'HP' + str(applied_support_haplotype) if applied_support_haplotype is not None else 'all'}"
     )
     fig.text(0.01, 0.955, subtitle, fontsize=subtitle_size, ha="left", va="center")
     fig.text(0.01, 0.935, f"SV (IGV): {sv_locus_igv} | Window (IGV): {window_locus_igv}", fontsize=11, ha="left", va="center")
@@ -2119,6 +2139,7 @@ def viz_main(args) -> None:
     if indel_min_bp < 0:
         raise ValueError("indel_min_bp must be >= 0")
     skip_methylation_overlay = bool(getattr(args, "skip_methylation_overlay", False))
+    support_haplotype_only = bool(getattr(args, "support_haplotype_only", True))
     linked_ctdmr_mode = str(getattr(args, "linked_ctdmr_mode", "distal")).strip().lower()
     if linked_ctdmr_mode not in {"distal", "extend", "strict"}:
         raise ValueError("linked_ctdmr_mode must be one of: distal, extend, strict")
@@ -2194,7 +2215,9 @@ def viz_main(args) -> None:
         supporting_reads=set(sv["supporting_reads"]),
         max_reads=max_reads,
         bam_handle=bam_handle,
+        support_haplotype_only=support_haplotype_only,
     )
+    applied_support_haplotype = shown_reads.attrs.get("applied_support_haplotype")
     large_indels = _fetch_large_indels(
         resolved["bam_path"],
         sv["chrom"],
@@ -2260,6 +2283,7 @@ def viz_main(args) -> None:
         indel_min_bp=indel_min_bp,
         output_path=output_path,
         dpi=dpi,
+        applied_support_haplotype=applied_support_haplotype,
     )
 
     logger.debug("Wrote SV visualization: %s", output_path)
