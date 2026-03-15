@@ -140,39 +140,29 @@ def _decode_linked_celltypes_from_row(row: pd.Series) -> tuple[str, list[str]]:
 def _build_group_leaf_sets(evidence: pd.DataFrame) -> dict[str, set[str]]:
     mapping: dict[str, set[str]] = {}
 
-    if "best_group" in evidence.columns and "best_group_leaves" in evidence.columns:
-        for _, row in evidence.iterrows():
-            group = str(row.get("best_group", "")).strip()
+    for group_col, leaves_col in [("best_group", "best_group_leaves"), ("other_group", "other_group_leaves")]:
+        if group_col not in evidence.columns or leaves_col not in evidence.columns:
+            continue
+        # Drop duplicates first — for 11M-row DataFrames this reduces iterations from millions to dozens.
+        unique_pairs = (
+            evidence[[group_col, leaves_col]]
+            .drop_duplicates()
+            .dropna(subset=[group_col])
+        )
+        for _, row in unique_pairs.iterrows():
+            group = str(row[group_col]).strip()
             if not group:
                 continue
-            leaves = _split_pipe_values(row.get("best_group_leaves", pd.NA))
+            leaves = _split_pipe_values(row[leaves_col])
             if not leaves:
                 continue
             leaves_set = set(leaves)
-            if group not in mapping:
+            # Keep the smallest declared set as the most specific mapping for this label.
+            if group not in mapping or len(leaves_set) < len(mapping[group]):
                 mapping[group] = leaves_set
-            else:
-                # Keep the smallest declared set as the most specific mapping for this label.
-                if len(leaves_set) < len(mapping[group]):
-                    mapping[group] = leaves_set
-
-    if "other_group" in evidence.columns and "other_group_leaves" in evidence.columns:
-        for _, row in evidence.iterrows():
-            group = str(row.get("other_group", "")).strip()
-            if not group:
-                continue
-            leaves = _split_pipe_values(row.get("other_group_leaves", pd.NA))
-            if not leaves:
-                continue
-            leaves_set = set(leaves)
-            if group not in mapping:
-                mapping[group] = leaves_set
-            else:
-                if len(leaves_set) < len(mapping[group]):
-                    mapping[group] = leaves_set
 
     if "best_group" in evidence.columns:
-        for group in evidence["best_group"].dropna().astype(str):
+        for group in evidence["best_group"].dropna().astype(str).unique():
             group = group.strip()
             if group and group not in mapping:
                 mapping[group] = {group}

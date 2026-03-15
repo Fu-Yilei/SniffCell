@@ -42,11 +42,51 @@ def parse_args(argv):
 
     # Subcommand: deconv
     deconv_parser = subparsers.add_parser("deconv", help="Deconvolve cell-type composition from methylation data.")
-    # add deconv-specific args here
     deconv_parser.add_argument("-i", "--input", required=True, help="Input BAM file")
     deconv_parser.add_argument("-r", "--reference", required=True, help="Reference FASTA file")
-    deconv_parser.add_argument("-b", "--bed", required=True, help="Input BED file with DMR indications")
-    deconv_parser.add_argument("-o", "--output", required=True, help="Output file")
+    deconv_parser.add_argument("-b", "--bed", required=True, help="Input ctDMR BED/TSV file from sniffcell find.")
+    deconv_parser.add_argument(
+        "-o",
+        "--output",
+        required=True,
+        help=(
+            "Output folder, or an explicit TSV path for the overall summary. "
+            "deconv also writes row-level/read-level companion tables beside it."
+        ),
+    )
+    deconv_parser.add_argument("-t", "--threads", type=int, default=1, help="Number of threads to use, default=1")
+    deconv_parser.add_argument(
+        "--read_assignment_mode",
+        type=str,
+        choices=["closest_reference_mean", "kmeans"],
+        default="closest_reference_mean",
+        help=(
+            "How to assign each read to best_group vs other_group within each ctDMR. "
+            "'closest_reference_mean' compares per-read methylation mean to mean_best_value/mean_rest_value, "
+            "'kmeans' uses unsupervised clustering. Default=closest_reference_mean."
+        ),
+    )
+    deconv_parser.add_argument(
+        "--split_bam_groups",
+        type=str,
+        default=None,
+        help=(
+            "Optional user-defined BAM/TSV split groups after deconvolution. "
+            "Use ';' to separate output groups and ',' to separate cell types/labels within a group. "
+            "Example: 't_cell,b_cell,nk_cell;monocyte' or 'lymph=t_cell,b_cell,nk_cell;myeloid=monocyte'. "
+            "Labels are matched case-insensitively after punctuation normalization, and parent labels expand to their leaf subtypes."
+        ),
+    )
+    deconv_parser.add_argument(
+        "--resume",
+        action="store_true",
+        default=False,
+        help=(
+            "Resume post-processing from existing output TSVs. "
+            "Reads deconv_reads_classification.tsv and deconv_read_summary.tsv from the output directory "
+            "and skips the ctDMR phase, jumping directly to group splitting and BAM output."
+        ),
+    )
     
     # Subcommand: anno
     anno_parser = subparsers.add_parser("anno", help="Annotate variants with cell-type-specific methylation.")

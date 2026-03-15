@@ -55,14 +55,95 @@ def _safe_int(value):
     return int(out)
 
 
-def read_vcf_to_df(vcf_file, kanpig_read_names=None):
-    """_summary_
+def _normalize_format_value(value):
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, (tuple, list, np.ndarray, pd.Series)):
+        return [_normalize_format_value(x) for x in value]
+    return value
+
+
+def _gt_tuple_to_str(gt_value):
+    if gt_value is None:
+        return "./."
+    alleles = []
+    for allele in gt_value:
+        if allele is None:
+            alleles.append(".")
+        else:
+            alleles.append(str(allele))
+    if not alleles:
+        return "./."
+    return "/".join(alleles)
+
+
+def _extract_sample_assignments(record):
+    sample_assignments = {}
+    called_samples = []
+    nonref_samples = []
+    alt_support_samples = []
+
+    for sample_name in record.samples:
+        sample_data = dict(record.samples[sample_name].items())
+        gt_value = sample_data.get("GT")
+        gt_str = _gt_tuple_to_str(gt_value)
+        ad_value = sample_data.get("AD")
+        ad_list = _normalize_format_value(ad_value)
+        alt_depth = 0
+        if isinstance(ad_list, list) and len(ad_list) > 1:
+            alt_depth = int(
+                sum(
+                    int(x)
+                    for x in ad_list[1:]
+                    if x is not None and not pd.isna(x)
+                )
+            )
+
+        is_called = gt_str != "./."
+        is_nonref = is_called and any((allele is not None and allele != 0) for allele in (gt_value or ()))
+        has_alt_support = alt_depth > 0
+
+        assignment = {
+            "GT": gt_str,
+            "is_called": is_called,
+            "is_nonref": is_nonref,
+            "has_alt_support": has_alt_support,
+            "alt_depth": alt_depth,
+        }
+        for key, value in sample_data.items():
+            if key == "GT":
+                continue
+            assignment[key] = _normalize_format_value(value)
+
+        sample_assignments[str(sample_name)] = assignment
+        if is_called:
+            called_samples.append(str(sample_name))
+        if is_nonref:
+            nonref_samples.append(str(sample_name))
+        if has_alt_support:
+            alt_support_samples.append(str(sample_name))
+
+    return {
+        "sample_assignments": sample_assignments,
+        "called_samples": called_samples,
+        "nonref_samples": nonref_samples,
+        "alt_support_samples": alt_support_samples,
+    }
+
+
+def read_vcf_to_df(vcf_file, kanpig_read_names=None, include_sample_assignments=False):
+    """Parse a structural-variant VCF into a dataframe.
 
     Args:
-        vcf_file (_type_): _description_
+        vcf_file: Path to an input VCF/BCF readable by pysam.
+        kanpig_read_names: Optional two-column kanpig RNAMES TSV (`sv_id`, `read_name`).
+        include_sample_assignments: If True, also parse per-sample FORMAT fields
+            into `sample_assignments`, `called_samples`, `nonref_samples`, and
+            `alt_support_samples`. This is useful for multi-sample kanpig output
+            VCFs and is disabled by default so existing callers are unaffected.
 
     Returns:
-        _type_: _description_
+        pandas.DataFrame
     """
     records = []
     vcf_file = pysam.VariantFile(vcf_file)
@@ -94,6 +175,9 @@ def read_vcf_to_df(vcf_file, kanpig_read_names=None):
                 "vaf": vaf,
             }
 
+            if include_sample_assignments:
+                df_record.update(_extract_sample_assignments(record))
+
             stdev_pos = df_record["stdev_pos"]
             sv_len = df_record["sv_len"] if svtype == "DEL" else 0
             stdev_len = df_record["stdev_len"] 
@@ -123,20 +207,44 @@ def read_vcf_to_df(vcf_file, kanpig_read_names=None):
                 record["supporting_reads"] = sv_to_reads[sv_id]
             else:
                 record["supporting_reads"] = []
-    sv_df = pd.DataFrame(
-        records,
-        columns=[
-            "chr",
-            "location",
-            "id",
-            "sv_type",
-            "sv_len",
-            "supporting_reads",
-            "stdev_len",
-            "stdev_pos",
-            "ref_start",
-            "ref_end",
-            "vaf",
-        ],
-    )
+    columns = [
+        "chr",
+        "location",
+        "id",
+        "sv_type",
+        "sv_len",
+        "supporting_reads",
+        "stdev_len",
+        "stdev_pos",
+        "ref_start",
+        "ref_end",
+        "vaf",
+    ]
+    if include_sample_assignments:
+        columns.extend(
+            [
+                "sample_assignments",
+                "called_samples",
+                "nonref_samples",
+                "alt_support_samples",
+            ]
+        )
+    sv_df = pd.DataFrame(records, columns=columns)
     return sv_df
+
+
+def read_kanpig_vcf_to_df(vcf_file, kanpig_read_names=None):
+    """Parse a kanpig multi-sample VCF into a dataframe with sample assignments.
+
+    This is a convenience wrapper around `read_vcf_to_df(..., include_sample_assignments=True)`.
+    The returned dataframe includes:
+      - `sample_assignments`: per-sample FORMAT payloads keyed by sample name
+      - `called_samples`: samples with a non-missing GT
+      - `nonref_samples`: samples with a non-reference GT
+      - `alt_support_samples`: samples with non-zero alternate depth
+    """
+    return read_vcf_to_df(
+        vcf_file,
+        kanpig_read_names=kanpig_read_names,
+        include_sample_assignments=True,
+    )

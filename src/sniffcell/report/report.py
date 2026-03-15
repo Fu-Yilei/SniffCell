@@ -542,12 +542,24 @@ def _load_igvviz_snapshot_rows(manifest_path: Path, html_parent: Path) -> list[d
         bam_label = Path(bam_text).name if bam_text else f"bam_{idx:02d}"
         snap_path = Path(snap_text)
         exists = snap_path.exists()
+        # Also check if the snapshot was reused into the manifest's own directory
+        local_snap = manifest_path.parent / snap_path.name
+        if not exists and local_snap.exists():
+            snap_path = local_snap
+            exists = True
         snap_rel = ""
         if exists:
             try:
                 snap_rel = snap_path.relative_to(html_parent).as_posix()
             except ValueError:
-                snap_rel = str(snap_path.resolve())
+                # snap_path is outside html_parent; try local copy beside the manifest
+                if local_snap.exists():
+                    try:
+                        snap_rel = local_snap.relative_to(html_parent).as_posix()
+                    except ValueError:
+                        snap_rel = str(snap_path.resolve())
+                else:
+                    snap_rel = str(snap_path.resolve())
         out.append(
             {
                 "bam": bam_text,

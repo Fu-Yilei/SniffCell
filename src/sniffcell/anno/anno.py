@@ -1,6 +1,7 @@
 import os
 import json
 import pandas as pd
+import pysam
 from sniffcell.anno.breakpoint_exclusion import validate_breakpoint_exclusion_frac
 from sniffcell.anno.kmeans import kmeans_cluster_cells
 from sniffcell.anno.methyl_matrix import methyl_matrix_from_bam
@@ -12,6 +13,42 @@ import multiprocessing as mp
 import numpy as np
 import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(processName)s] %(levelname)s: %(message)s")
+
+# ---------------------------------------------------------------------------
+# Process-local BAM/FASTA handle cache
+# Each worker process opens its own handle once and reuses it across ctDMR
+# tasks, avoiding ~90K redundant pysam.AlignmentFile() calls per worker.
+# ---------------------------------------------------------------------------
+_process_bam_handle: "pysam.AlignmentFile | None" = None
+_process_fasta_handle: "pysam.FastaFile | None" = None
+_process_bam_path: str = ""
+_process_fasta_path: str = ""
+
+
+def _get_process_bam(path: str) -> "pysam.AlignmentFile":
+    global _process_bam_handle, _process_bam_path
+    if _process_bam_handle is None or _process_bam_path != path:
+        if _process_bam_handle is not None:
+            try:
+                _process_bam_handle.close()
+            except Exception:
+                pass
+        _process_bam_handle = pysam.AlignmentFile(path, "rb")
+        _process_bam_path = path
+    return _process_bam_handle
+
+
+def _get_process_fasta(path: str) -> "pysam.FastaFile":
+    global _process_fasta_handle, _process_fasta_path
+    if _process_fasta_handle is None or _process_fasta_path != path:
+        if _process_fasta_handle is not None:
+            try:
+                _process_fasta_handle.close()
+            except Exception:
+                pass
+        _process_fasta_handle = pysam.FastaFile(path)
+        _process_fasta_path = path
+    return _process_fasta_handle
 
 
 def _write_anno_run_manifest(
@@ -317,7 +354,10 @@ def _one_dmr(args):
     #             f"cell_types={cell_types} (n={len(cell_types)})")
 
     try:
-        # load methylation matrix + CpG positions
+        # load methylation matrix + CpG positions (reuse per-process handles to avoid
+        # ~90K redundant BAM/FASTA opens per worker)
+        bam_h = _get_process_bam(input_file)
+        fasta_h = _get_process_fasta(reference)
         query_start, query_end = _find_dmr_query_interval(start, end)
         mm, cpgs = methyl_matrix_from_bam(
             input_file,
@@ -326,6 +366,8 @@ def _one_dmr(args):
             start=query_start,
             end=query_end,
             return_positions=True,
+            bam_handle=bam_h,
+            fasta_handle=fasta_h,
         )
         n_reads_raw = 0 if mm is None else mm.shape[0]
         n_cpgs = len(cpgs)
@@ -351,8 +393,16 @@ def _one_dmr(args):
             readnames = (mm.index.astype(str).values if mm.index.dtype == object
                          else np.array([f"read_{i}" for i in range(len(mm))], dtype=str))
 
-        X_imp = mm.astype(float).copy().fillna(mm.astype(float).mean())
-        read_mean = X_imp.mean(axis=1).values
+        # Impute NaN with column means — single array allocation instead of the
+        # original three-copy pandas chain (astype→copy→fillna→mean).
+        mm_float = mm.to_numpy(dtype=float)
+        col_means = np.nanmean(mm_float, axis=0)
+        nan_locs = np.isnan(mm_float)
+        if nan_locs.any():
+            mm_float = mm_float.copy()
+            col_idx = np.where(nan_locs)[1]
+            mm_float[nan_locs] = col_means[col_idx]
+        read_mean = mm_float.mean(axis=1)
 
         # Assign each read to best_group vs other_group per ctDMR.
         if read_assignment_mode == "closest_reference_mean":
@@ -582,6 +632,8 @@ def anno_main(args):
     n_tasks = len(filtered_bed)
     logger.info(f"Filtered BED to {n_tasks} DMRs after variant overlap filtering, window size = {window}")
 
+    # Sort by (chr, start) so each worker's fetches are roughly sequential on NFS.
+    filtered_bed = filtered_bed.sort_values(["chr", "start"], ignore_index=True)
     tasks = [(dict(row), input_file, reference, read_assignment_mode) for _, row in filtered_bed.iterrows()]
 
     # --- Prepare outputs: truncate files and reset header flags ---
@@ -594,7 +646,7 @@ def anno_main(args):
 
     # Stream results and append immediately
     with mp.Pool(threads) as pool:
-        for res in tqdm(pool.imap(_one_dmr, tasks, chunksize=1),
+        for res in tqdm(pool.imap(_one_dmr, tasks, chunksize=50),
                         total=n_tasks, desc="Processing DMRs"):
             if res is None:
                 continue
