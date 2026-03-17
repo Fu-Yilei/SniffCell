@@ -502,6 +502,134 @@ def _summarize_celltype_links(
 
     return pd.DataFrame(rows).set_index(sv_id_col)
 
+def _compute_per_read_consensus_df(
+    assignment_df: pd.DataFrame,
+    per_read_min_agreement: float = 0.66,
+) -> pd.DataFrame:
+    """
+    Compute a single consensus cell-type code for each read from all its ctDMR votes.
+
+    Uses bitwise intersection: codes "1101" and "0001" are NOT a conflict — their
+    intersection "0001" is the consensus. A genuine conflict (intersection collapses
+    to all zeros with >1 unique code) falls back to plurality majority; if plurality
+    fraction >= per_read_min_agreement the plurality code wins, otherwise the read is
+    marked mixed and excluded from SV-level voting.
+
+    The threshold (per_read_min_agreement) is only active in the conflict fallback path.
+    When intersection succeeds, all codes are mathematically compatible (agreement = 100%).
+
+    Returns a DataFrame with one row per read and columns:
+        readname, read_consensus_code, read_agreement_pct,
+        read_is_mixed, read_n_ctdmrs, read_used_intersection
+    """
+    if "code_token" not in assignment_df.columns:
+        raise ValueError("assignment_df must have a 'code_token' column")
+
+    flat = assignment_df.reset_index()
+    idx_name = assignment_df.index.name or "index"
+    if "readname" not in flat.columns:
+        flat = flat.rename(columns={idx_name: "readname"})
+    flat["readname"] = flat["readname"].astype(str)
+
+    n_ctdmrs = flat.groupby("readname", sort=False).size().rename("read_n_ctdmrs")
+
+    split_result = flat["code_token"].map(_split_code_token_schema_bits)
+    flat["_schema"] = [r[0] for r in split_result]
+    flat["_bits"]   = [r[1] for r in split_result]
+
+    valid = flat["_bits"].str.match(r"^[01]+$", na=False)
+    parsed = flat.loc[valid, ["readname", "_schema", "_bits"]].copy()
+
+    if parsed.empty:
+        result = pd.DataFrame({
+            "readname":            n_ctdmrs.index.astype(str),
+            "read_consensus_code": None,
+            "read_agreement_pct":  0.0,
+            "read_is_mixed":       True,
+            "read_used_intersection": False,
+        })
+        result["read_n_ctdmrs"] = result["readname"].map(n_ctdmrs).fillna(0).astype(int)
+        return result
+
+    # Group by (readname, schema) → list of bits, then pick dominant schema per read.
+    schema_agg = (
+        parsed.groupby(["readname", "_schema"], sort=False)["_bits"]
+              .agg(list)
+              .reset_index()
+              .rename(columns={"_bits": "_bits_list"})
+    )
+    schema_agg["_vote_count"] = schema_agg["_bits_list"].map(len)
+    schema_agg = schema_agg.sort_values(
+        ["_vote_count", "_schema"], ascending=[False, True], kind="stable"
+    )
+    dominant = schema_agg.drop_duplicates(subset=["readname"], keep="first").copy()
+
+    dominant["_intersection"]   = dominant["_bits_list"].map(_bitwise_intersection)
+    dominant["_unique_codes"]   = dominant["_bits_list"].map(lambda bl: len(set(bl)))
+    dominant["_has_clean"]      = dominant["_intersection"].str.contains("1", regex=False, na=False)
+    dominant["_genuine_conflict"] = ~dominant["_has_clean"] & (dominant["_unique_codes"] > 1)
+
+    # --- Vectorized non-conflict path (typically >99% of reads) -----------------
+    nc = dominant[~dominant["_genuine_conflict"]]
+    has_schema_nc = nc["_schema"].str.len() > 0
+    consensus_nc = nc["_schema"].where(~has_schema_nc, nc["_schema"] + "::" + nc["_intersection"])
+    consensus_nc = consensus_nc.where(has_schema_nc, nc["_intersection"])
+    nc_result = pd.DataFrame({
+        "readname":               nc["readname"].values,
+        "read_consensus_code":    consensus_nc.values,
+        "read_agreement_pct":     1.0,
+        "read_is_mixed":          False,
+        "read_used_intersection": True,
+    })
+
+    # --- Python loop only for the rare genuine-conflict reads -------------------
+    conflict_records = []
+    for _, row in dominant[dominant["_genuine_conflict"]].iterrows():
+        schema    = row["_schema"]
+        bits_list = row["_bits_list"]
+        code_counts: dict[str, int] = {}
+        for b in bits_list:
+            code_counts[b] = code_counts.get(b, 0) + 1
+        plurality_bits = min(code_counts, key=lambda k: (-code_counts[k], k))
+        plurality_pct  = code_counts[plurality_bits] / len(bits_list)
+        is_mixed = plurality_pct < per_read_min_agreement
+        if not is_mixed:
+            consensus_token = f"{schema}::{plurality_bits}" if schema else plurality_bits
+        else:
+            consensus_token = None
+        conflict_records.append({
+            "readname":               row["readname"],
+            "read_consensus_code":    consensus_token,
+            "read_agreement_pct":     plurality_pct,
+            "read_is_mixed":          is_mixed,
+            "read_used_intersection": False,
+        })
+
+    parts = [nc_result]
+    if conflict_records:
+        parts.append(pd.DataFrame(conflict_records))
+    result = pd.concat(parts, ignore_index=True) if len(parts) > 1 else nc_result
+
+    # Reads with only NaN/non-binary codes are not in dominant → mark mixed.
+    covered = set(result["readname"])
+    missing = [r for r in n_ctdmrs.index if r not in covered]
+    if missing:
+        result = pd.concat([result, pd.DataFrame({
+            "readname":            missing,
+            "read_consensus_code": None,
+            "read_agreement_pct":  0.0,
+            "read_is_mixed":       True,
+            "read_used_intersection": False,
+        })], ignore_index=True)
+
+    result = result.merge(n_ctdmrs.reset_index(), on="readname", how="left")
+    result["read_n_ctdmrs"]        = result["read_n_ctdmrs"].fillna(0).astype(int)
+    result["read_is_mixed"]        = result["read_is_mixed"].astype(bool)
+    result["read_used_intersection"] = result["read_used_intersection"].astype(bool)
+    result["read_agreement_pct"]   = result["read_agreement_pct"].astype(float)
+    return result
+
+
 def assign_sv_celltypes(
     sv_df: pd.DataFrame,
     read_assignment_df: pd.DataFrame,
@@ -513,6 +641,7 @@ def assign_sv_celltypes(
     reads_col: str = "supporting_reads",
     sv_id_col: str = "id",
     unique_reads_for_overlap: bool = True,
+    per_read_min_agreement: float = 0.66,
 ) -> pd.DataFrame:
     """
     Link SVs to cell-type codes derived from per-read assignments and attach coordinates.
@@ -522,12 +651,20 @@ def assign_sv_celltypes(
       - CpG coordinates (`cpg_chr`, `cpg_start`, `cpg_end`)
       - vote-based code summaries (`majority_code`, `assigned_code`, `code_counts`)
       - human-readable decoded summaries (`linked_celltypes`, counts/fractions, multi-link flag)
+      - `n_mixed_reads`: reads excluded from voting due to conflicting ctDMR codes
 
     SV linking is coordinate-based:
       - SV and DMR chromosomes must match (chr-normalized).
       - A DMR is linked to an SV if it is within `window` bp padding around the SV interval.
       - ctDMRs overlapping the SV core expanded by
         `breakpoint_exclusion_frac * abs(SVLEN)` on each side are excluded.
+
+    Per-read consensus (controlled by `per_read_min_agreement`):
+      Before SV-level voting, each read's ctDMR codes are reduced to one consensus via
+      bitwise intersection. If intersection collapses to all-zeros (genuine conflict),
+      the plurality code is accepted only when its fraction >= per_read_min_agreement;
+      otherwise the read is marked mixed and excluded from voting but counted in
+      `n_mixed_reads`.
     """
     if window < 0:
         raise ValueError("window must be >= 0")
@@ -609,6 +746,12 @@ def assign_sv_celltypes(
         )
     else:
         assignment["code_token"] = assignment["code"]
+
+    # ---- per-read consensus (globally across all ctDMRs, before SV-level voting) ----
+    per_read_consensus = _compute_per_read_consensus_df(
+        assignment,
+        per_read_min_agreement=per_read_min_agreement,
+    )
 
     # ---- SV supporting-read set ----
     sv = sv_df[[sv_id_col, reads_col]].copy()
@@ -716,28 +859,39 @@ def assign_sv_celltypes(
     # n_overlapped always counts unique supporting reads with at least one linked evidence row.
     n_overlapped = evidence.groupby(sv_id_col, sort=False)["read"].nunique().rename("n_overlapped")
 
-    # By default, each linked read contributes at most one vote to SV-level code assignment.
-    if unique_reads_for_overlap:
-        n_vote_units = n_overlapped.rename("_n_vote_units")
-        if evidence.empty:
-            read_votes = evidence[[sv_id_col, "read", "code_token"]]
-        else:
-            per_read_counts = (
-                evidence
-                .groupby([sv_id_col, "read", "code_token"], sort=False)
-                .size().rename("count").reset_index()
-            )
-            per_read_counts = per_read_counts.sort_values(
-                ["count", "code_token"], ascending=[False, True], kind="stable"
-            )
-            read_votes = (
-                per_read_counts
-                .drop_duplicates(subset=[sv_id_col, "read"], keep="first")
-                [[sv_id_col, "read", "code_token"]]
-            )
-    else:
-        n_vote_units = evidence.groupby(sv_id_col, sort=False).size().rename("_n_vote_units")
-        read_votes = evidence[[sv_id_col, "read", "code_token"]]
+    # Apply per-read consensus: replace per-ctDMR codes with each read's consensus code,
+    # exclude mixed reads from voting, and count them separately per SV.
+    evidence_with_consensus = evidence.merge(
+        per_read_consensus[["readname", "read_consensus_code", "read_is_mixed"]],
+        left_on="read",
+        right_on="readname",
+        how="left",
+    )
+    _mixed_mask = evidence_with_consensus["read_is_mixed"].fillna(False)
+    n_mixed_reads = (
+        evidence_with_consensus[_mixed_mask]
+        .groupby(sv_id_col, sort=False)["read"]
+        .nunique()
+        .reindex(all_sv_ids, fill_value=0)
+        .astype(int)
+        .rename("n_mixed_reads")
+    )
+    non_mixed = evidence_with_consensus[~_mixed_mask].copy()
+    # Use consensus code; fall back to original code_token only when consensus is NA.
+    non_mixed["code_token"] = non_mixed["read_consensus_code"].where(
+        non_mixed["read_consensus_code"].notna(),
+        non_mixed["code_token"],
+    )
+    # One vote per (SV, read): consensus already resolved multi-ctDMR duplicates.
+    read_votes = (
+        non_mixed[[sv_id_col, "read", "code_token"]]
+        .drop_duplicates(subset=[sv_id_col, "read"])
+    )
+    n_vote_units = (
+        read_votes.groupby(sv_id_col, sort=False).size()
+        .reindex(all_sv_ids, fill_value=0)
+        .rename("_n_vote_units")
+    )
 
     # ---- code counts & majority ----
     if read_votes.empty:
@@ -813,6 +967,7 @@ def assign_sv_celltypes(
         pd.DataFrame(index=n_supporting.index)
           .join(n_supporting)
           .join(n_overlapped)
+          .join(n_mixed_reads)
           .join(n_vote_units)
           .join(majority[["majority_code","majority_count"]])
           .join(code_counts_str)
@@ -823,6 +978,7 @@ def assign_sv_celltypes(
     )
 
     out["n_overlapped"] = out["n_overlapped"].fillna(0).astype(int)
+    out["n_mixed_reads"] = out["n_mixed_reads"].fillna(0).astype(int)
     out["_n_vote_units"] = out["_n_vote_units"].fillna(0).astype(int)
     out["majority_count"] = out["majority_count"].fillna(0).astype(int)
     out["majority_code"] = out.get("majority_code", pd.Series([pd.NA]*len(out))).astype("object")
@@ -877,7 +1033,7 @@ def assign_sv_celltypes(
 
     return out[
         [
-            "id","n_supporting","n_overlapped","overlap_pct",
+            "id","n_supporting","n_overlapped","n_mixed_reads","overlap_pct",
             "majority_code","majority_pct","assigned_code","code_counts",
             "majority_schema","primary_celltype","majority_linked_celltypes","majority_excluded_celltypes",
             "linked_celltypes","linked_celltype_counts","linked_celltype_fractions",

@@ -4,7 +4,7 @@ import pandas as pd
 
 from sniffcell.anno.anno import _build_sv_readable_reports
 from sniffcell.anno.filter_bed_based_on_variants import filter_bed_based_on_variants
-from sniffcell.anno.variant_assignment import assign_sv_celltypes
+from sniffcell.anno.variant_assignment import assign_sv_celltypes, _compute_per_read_consensus_df
 from sniffcell.parse_args import parse_args
 
 
@@ -297,7 +297,7 @@ class TestVariantAssignment(unittest.TestCase):
         )
         self.assertTrue(bool(row["is_multi_celltype_link"]))
 
-    def test_all_rows_with_strict_agreement_marks_conflict_unassigned(self):
+    def test_per_read_conflict_below_threshold_marks_reads_mixed(self):
         sv_df = pd.DataFrame(
             {
                 "chr": ["1"],
@@ -307,7 +307,9 @@ class TestVariantAssignment(unittest.TestCase):
             }
         )
 
-        # Two reads, each carrying conflicting region-level codes (2x "10", 1x "01").
+        # Two reads, each with 3 ctDMRs: codes "10","10","01" → per-read intersection="00"
+        # (genuine conflict), plurality="10" at 2/3 ≈ 0.667.
+        # With per_read_min_agreement=1.0 the plurality is below threshold → both reads mixed.
         read_assignment_df = pd.DataFrame(
             {
                 "code_order": ["A|B"] * 6,
@@ -324,16 +326,55 @@ class TestVariantAssignment(unittest.TestCase):
         out = assign_sv_celltypes(
             sv_df,
             read_assignment_df,
-            unique_reads_for_overlap=False,
+            per_read_min_agreement=1.0,
+        )
+        row = out.iloc[0]
+
+        self.assertEqual(row["n_supporting"], 2)
+        self.assertEqual(row["n_overlapped"], 2)
+        self.assertEqual(int(row["n_mixed_reads"]), 2)
+        self.assertTrue(pd.isna(row["majority_code"]))
+        self.assertTrue(pd.isna(row["assigned_code"]))
+
+    def test_per_read_conflict_above_threshold_uses_plurality(self):
+        sv_df = pd.DataFrame(
+            {
+                "chr": ["1"],
+                "location": [1000],
+                "id": ["sv1"],
+                "supporting_reads": [["r1", "r2"]],
+            }
+        )
+
+        # Same setup but with default per_read_min_agreement=0.66.
+        # Plurality "10" at 2/3 ≈ 0.667 ≥ 0.66 → both reads get consensus "10".
+        read_assignment_df = pd.DataFrame(
+            {
+                "code_order": ["A|B"] * 6,
+                "code": ["10", "10", "01", "10", "10", "01"],
+                "best_group": ["A", "A", "B", "A", "A", "B"],
+                "is_best_group": [True, True, True, True, True, True],
+                "chr": ["1"] * 6,
+                "start": [100, 200, 300, 100, 200, 300],
+                "end": [150, 250, 350, 150, 250, 350],
+            },
+            index=pd.Index(["r1", "r1", "r1", "r2", "r2", "r2"], name="readname"),
+        )
+
+        out = assign_sv_celltypes(
+            sv_df,
+            read_assignment_df,
+            per_read_min_agreement=0.66,
             min_agreement_pct=1.0,
         )
         row = out.iloc[0]
 
         self.assertEqual(row["n_supporting"], 2)
         self.assertEqual(row["n_overlapped"], 2)
+        self.assertEqual(int(row["n_mixed_reads"]), 0)
         self.assertEqual(row["majority_code"], "10")
-        self.assertAlmostEqual(float(row["majority_pct"]), 4.0 / 6.0, places=6)
-        self.assertTrue(pd.isna(row["assigned_code"]))
+        self.assertAlmostEqual(float(row["majority_pct"]), 1.0, places=6)
+        self.assertEqual(row["assigned_code"], "10")
 
     def test_hard_conflict_is_detected_and_blocks_assigned_code(self):
         sv_df = pd.DataFrame(
@@ -465,6 +506,149 @@ class TestVariantAssignment(unittest.TestCase):
         self.assertEqual(len(kept), 1)
         self.assertEqual(int(kept.iloc[0]["start"]), 1015)
         self.assertEqual(int(kept.iloc[0]["end"]), 1020)
+
+
+class TestPerReadConsensus(unittest.TestCase):
+    """Unit tests for _compute_per_read_consensus_df."""
+
+    def _make_df(self, rows):
+        """rows: list of (readname, code_order, code) tuples."""
+        df = pd.DataFrame(
+            {
+                "code_order": [r[1] for r in rows],
+                "code":       [r[2] for r in rows],
+                "best_group": ["A"] * len(rows),
+                "is_best_group": [True] * len(rows),
+            },
+            index=pd.Index([r[0] for r in rows], name="readname"),
+        )
+        # Replicate code_token logic from assign_sv_celltypes.
+        non_empty = df["code_order"].dropna()
+        non_empty = non_empty[non_empty.str.len() > 0]
+        if non_empty.nunique() > 1:
+            df["code_token"] = df["code_order"] + "::" + df["code"].astype(str)
+        else:
+            df["code_token"] = df["code"].astype(str)
+        return df
+
+    def _row(self, out, readname):
+        return out[out["readname"] == readname].iloc[0]
+
+    def test_intersection_non_zero_not_mixed(self):
+        # "0001" AND "1101" = "0001" — not a conflict
+        df = self._make_df([("r1", "A|B|C|D", "0001"), ("r1", "A|B|C|D", "1101")])
+        out = _compute_per_read_consensus_df(df)
+        row = self._row(out, "r1")
+        self.assertEqual(row["read_consensus_code"], "0001")
+        self.assertFalse(bool(row["read_is_mixed"]))
+        self.assertTrue(bool(row["read_used_intersection"]))
+        self.assertAlmostEqual(float(row["read_agreement_pct"]), 1.0)
+        self.assertEqual(int(row["read_n_ctdmrs"]), 2)
+
+    def test_zero_intersection_below_threshold_is_mixed(self):
+        # "0100" AND "0010" = "0000", 1/2 = 0.5 < 0.66 → mixed
+        df = self._make_df([("r1", "A|B|C|D", "0100"), ("r1", "A|B|C|D", "0010")])
+        out = _compute_per_read_consensus_df(df, per_read_min_agreement=0.66)
+        row = self._row(out, "r1")
+        self.assertIsNone(row["read_consensus_code"])
+        self.assertTrue(bool(row["read_is_mixed"]))
+        self.assertFalse(bool(row["read_used_intersection"]))
+        self.assertAlmostEqual(float(row["read_agreement_pct"]), 0.5)
+
+    def test_zero_intersection_above_threshold_uses_majority_fallback(self):
+        # "0100","0100","0010" → intersection "0000", 2/3 ≈ 0.667 ≥ 0.66 → consensus "0100"
+        df = self._make_df([
+            ("r1", "A|B|C|D", "0100"),
+            ("r1", "A|B|C|D", "0100"),
+            ("r1", "A|B|C|D", "0010"),
+        ])
+        out = _compute_per_read_consensus_df(df, per_read_min_agreement=0.66)
+        row = self._row(out, "r1")
+        self.assertEqual(row["read_consensus_code"], "0100")
+        self.assertFalse(bool(row["read_is_mixed"]))
+        self.assertFalse(bool(row["read_used_intersection"]))
+        self.assertAlmostEqual(float(row["read_agreement_pct"]), 2.0 / 3.0, places=5)
+
+    def test_single_ctdmr_is_always_consensus(self):
+        df = self._make_df([("r1", "A|B", "10")])
+        out = _compute_per_read_consensus_df(df)
+        row = self._row(out, "r1")
+        self.assertEqual(row["read_consensus_code"], "10")
+        self.assertFalse(bool(row["read_is_mixed"]))
+        self.assertEqual(int(row["read_n_ctdmrs"]), 1)
+
+    def test_all_zeros_code_is_valid_not_mixed(self):
+        # A read consistently assigned "other" across all ctDMRs gets "0000" — valid.
+        df = self._make_df([
+            ("r1", "A|B|C|D", "0000"),
+            ("r1", "A|B|C|D", "0000"),
+        ])
+        out = _compute_per_read_consensus_df(df)
+        row = self._row(out, "r1")
+        self.assertEqual(row["read_consensus_code"], "0000")
+        self.assertFalse(bool(row["read_is_mixed"]))
+
+    def test_schema_qualifier_preserved_in_consensus(self):
+        # When code_tokens are schema-qualified, the consensus code should also be qualified.
+        df = pd.DataFrame(
+            {
+                "code_order": ["A|B|C|D", "A|B|C|D"],
+                "code":       ["0001", "1101"],
+                "best_group": ["D", "A"],
+                "is_best_group": [True, True],
+            },
+            index=pd.Index(["r1", "r1"], name="readname"),
+        )
+        df["code_token"] = df["code_order"] + "::" + df["code"]
+        out = _compute_per_read_consensus_df(df)
+        row = self._row(out, "r1")
+        self.assertEqual(row["read_consensus_code"], "A|B|C|D::0001")
+        self.assertFalse(bool(row["read_is_mixed"]))
+
+    def test_multiple_reads_independent(self):
+        # r1 is clean (intersection "01"), r2 is mixed (50/50 conflict, threshold 0.66).
+        df = self._make_df([
+            ("r1", "A|B", "11"),
+            ("r1", "A|B", "01"),
+            ("r2", "A|B", "10"),
+            ("r2", "A|B", "01"),
+        ])
+        out = _compute_per_read_consensus_df(df, per_read_min_agreement=0.66)
+        r1 = self._row(out, "r1")
+        r2 = self._row(out, "r2")
+        self.assertEqual(r1["read_consensus_code"], "01")
+        self.assertFalse(bool(r1["read_is_mixed"]))
+        self.assertIsNone(r2["read_consensus_code"])
+        self.assertTrue(bool(r2["read_is_mixed"]))
+
+    def test_n_mixed_reads_in_sv_output(self):
+        # r1 has a genuine conflict below threshold → mixed; r2 is clean.
+        # Only r2 votes; n_mixed_reads should be 1.
+        sv_df = pd.DataFrame({
+            "chr": ["1"],
+            "location": [1000],
+            "id": ["sv1"],
+            "supporting_reads": [["r1", "r2"]],
+        })
+        read_assignment_df = pd.DataFrame(
+            {
+                "code_order": ["A|B|C|D", "A|B|C|D", "A|B|C|D"],
+                "code":       ["0100",    "0010",    "0001"],
+                "best_group": ["B",       "C",       "D"],
+                "is_best_group": [True, True, True],
+                "chr":  ["1", "1", "1"],
+                "start": [100, 100, 200],
+                "end":   [150, 150, 250],
+            },
+            index=pd.Index(["r1", "r1", "r2"], name="readname"),
+        )
+        out = assign_sv_celltypes(sv_df, read_assignment_df, per_read_min_agreement=0.66)
+        row = out.iloc[0]
+        # r1: intersection("0100","0010")="0000", plurality=0.5 < 0.66 → mixed
+        # r2: single ctDMR "0001" → consensus "0001"
+        self.assertEqual(int(row["n_mixed_reads"]), 1)
+        self.assertEqual(int(row["n_overlapped"]), 2)
+        self.assertEqual(row["majority_code"], "0001")
 
 
 class TestParseArgs(unittest.TestCase):
@@ -691,6 +875,8 @@ class TestParseArgs(unittest.TestCase):
         self.assertEqual(args.command, "report")
         self.assertEqual(args.anno_output, "anno_out")
         self.assertAlmostEqual(args.min_overlap_pct, 0.8)
+        self.assertEqual(args.overlap_filter_mode, "gradient")
+        self.assertAlmostEqual(args.overlap_gradient_exponent, 0.5)
         self.assertAlmostEqual(args.min_majority_pct, 1.0)
         self.assertFalse(args.include_unassigned)
         self.assertFalse(args.allow_hard_conflict)

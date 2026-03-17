@@ -531,18 +531,24 @@ def sv_anno(args):
 
     min_overlap_pct = float(getattr(args, "min_overlap_pct", 0.0))
     min_agreement_pct = float(getattr(args, "min_agreement_pct", 1.0))
+    per_read_min_agreement = float(getattr(args, "per_read_min_agreement", 0.66))
     breakpoint_exclusion_frac = validate_breakpoint_exclusion_frac(getattr(args, "breakpoint_exclusion_frac", 0.0))
     if not (0.0 <= min_overlap_pct <= 1.0):
         raise ValueError("min_overlap_pct must be in [0, 1]")
     if not (0.0 <= min_agreement_pct <= 1.0):
         raise ValueError("min_agreement_pct must be in [0, 1]")
+    if not (0.0 <= per_read_min_agreement <= 1.0):
+        raise ValueError("per_read_min_agreement must be in [0, 1]")
 
     logger.info(
-        "SV assignment settings: evidence_mode=%s unique_reads_for_overlap=%s min_overlap_pct=%.3f min_agreement_pct=%.3f breakpoint_exclusion_frac=%.3f",
+        "SV assignment settings: evidence_mode=%s unique_reads_for_overlap=%s "
+        "min_overlap_pct=%.3f min_agreement_pct=%.3f per_read_min_agreement=%.3f "
+        "breakpoint_exclusion_frac=%.3f",
         evidence_mode,
         unique_reads_for_overlap,
         min_overlap_pct,
         min_agreement_pct,
+        per_read_min_agreement,
         breakpoint_exclusion_frac,
     )
 
@@ -554,6 +560,7 @@ def sv_anno(args):
         min_overlap_pct=min_overlap_pct,
         min_agreement_pct=min_agreement_pct,
         unique_reads_for_overlap=unique_reads_for_overlap,
+        per_read_min_agreement=per_read_min_agreement,
     )
     sv_assignment_df.to_csv(sv_assignment_path, sep="\t", index=False)
 

@@ -87,7 +87,26 @@ def parse_args(argv):
             "and skips the ctDMR phase, jumping directly to group splitting and BAM output."
         ),
     )
-    
+    deconv_parser.add_argument(
+        "--per_read_min_agreement",
+        type=float,
+        default=0.66,
+        help=(
+            "Per-read consensus: minimum plurality fraction to accept a read's majority code "
+            "when its ctDMRs have a genuine conflict (bitwise intersection = all zeros). "
+            "Set to 1.0 to mark all conflicted reads as mixed. Default=0.66."
+        ),
+    )
+    deconv_parser.add_argument(
+        "--skip_overall_summary",
+        action="store_true",
+        default=False,
+        help=(
+            "Skip writing deconv_summary.tsv. Useful when deconv is only being used to produce "
+            "per-read outputs and requested BAM splits, and whole-sample aggregation would add runtime."
+        ),
+    )
+
     # Subcommand: anno
     anno_parser = subparsers.add_parser("anno", help="Annotate variants with cell-type-specific methylation.")
     # add anno-specific args here
@@ -146,7 +165,17 @@ def parse_args(argv):
         default=1.0,
         help="Minimum majority agreement fraction required to keep assigned_code, default=1.0",
     )
-    
+    anno_parser.add_argument(
+        "--per_read_min_agreement",
+        type=float,
+        default=0.66,
+        help=(
+            "Per-read consensus: minimum plurality fraction to accept a read's majority code "
+            "when its ctDMRs have a genuine conflict (bitwise intersection = all zeros). "
+            "Set to 1.0 to mark all conflicted reads as mixed. Default=0.66."
+        ),
+    )
+
     svanno_parser = subparsers.add_parser("svanno", help="Use pre-annotated reads csv to annotate variants' cell types")
     svanno_parser.add_argument("-v", "--vcf", required=True, help="Input VCF file for variant annotation")
     svanno_parser.add_argument("-i", "--input", required=True, help="Input reads_classification.tsv file from anno step")
@@ -184,6 +213,16 @@ def parse_args(argv):
         type=float,
         default=1.0,
         help="Minimum majority agreement fraction required to keep assigned_code, default=1.0",
+    )
+    svanno_parser.add_argument(
+        "--per_read_min_agreement",
+        type=float,
+        default=0.66,
+        help=(
+            "Per-read consensus: minimum plurality fraction to accept a read's majority code "
+            "when its ctDMRs have a genuine conflict (bitwise intersection = all zeros). "
+            "Set to 1.0 to mark all conflicted reads as mixed. Default=0.66."
+        ),
     )
 
     dmsv_parser = subparsers.add_parser("dmsv", help="Find out which SV's supporting reads have differential methylation compared to non-supporting reads.")
@@ -441,7 +480,28 @@ def parse_args(argv):
         "--min_overlap_pct",
         type=float,
         default=0.8,
-        help="Minimum overlap_pct threshold for including an SV in report, default=0.8",
+        help="Base overlap threshold for including an SV in report, default=0.8",
+    )
+    report_parser.add_argument(
+        "--overlap_filter_mode",
+        choices=["gradient", "hard_clip"],
+        default="gradient",
+        help=(
+            "How report filters overlap support. "
+            "'gradient' scales the required n_overlapped sublinearly with n_supporting, "
+            "so larger SV support can tolerate a lower overlap fraction. "
+            "'hard_clip' uses the fixed overlap_pct threshold directly. Default=gradient"
+        ),
+    )
+    report_parser.add_argument(
+        "--overlap_gradient_exponent",
+        type=float,
+        default=0.5,
+        help=(
+            "Exponent used by report overlap_filter_mode=gradient. "
+            "Required overlapped reads are ceil(min_overlap_pct * n_supporting^exponent). "
+            "Lower values are more permissive for larger n_supporting. Default=0.5"
+        ),
     )
     report_parser.add_argument(
         "--min_majority_pct",

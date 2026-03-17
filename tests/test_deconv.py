@@ -8,10 +8,13 @@ import pysam
 from sniffcell.deconv.deconv import (
     _build_deconv_summary,
     _build_read_summary,
-    _parse_requested_split_groups,
     _resolve_output_paths,
-    _write_requested_split_group_outputs,
     _write_group_split_reads,
+)
+from sniffcell.deconv.bam_split import (
+    _compute_split_parallelism,
+    _parse_requested_split_groups,
+    _write_requested_split_group_outputs,
 )
 from sniffcell.parse_args import parse_args
 
@@ -59,6 +62,43 @@ class TestDeconvParseArgs(unittest.TestCase):
 
         self.assertEqual(args.split_bam_groups, "t_cell,b_cell,nk_cell;monocyte")
 
+    def test_deconv_accepts_per_read_min_agreement(self):
+        args = parse_args(
+            [
+                "deconv",
+                "-i",
+                "input.bam",
+                "-r",
+                "ref.fa",
+                "-b",
+                "ctdmr.tsv",
+                "-o",
+                "out_dir",
+                "--per_read_min_agreement",
+                "0.8",
+            ]
+        )
+
+        self.assertAlmostEqual(args.per_read_min_agreement, 0.8)
+
+    def test_deconv_accepts_skip_overall_summary(self):
+        args = parse_args(
+            [
+                "deconv",
+                "-i",
+                "input.bam",
+                "-r",
+                "ref.fa",
+                "-b",
+                "ctdmr.tsv",
+                "-o",
+                "out_dir",
+                "--skip_overall_summary",
+            ]
+        )
+
+        self.assertTrue(args.skip_overall_summary)
+
 
 class TestDeconvSummaries(unittest.TestCase):
     def setUp(self):
@@ -73,16 +113,44 @@ class TestDeconvSummaries(unittest.TestCase):
             index=pd.Index(["r1", "r1", "r2", "r2", "r3"], name="readname"),
         )
 
-    def test_build_read_summary_rolls_up_majority_vote_per_read(self):
+    def test_build_read_summary_uses_per_read_consensus(self):
         out = _build_read_summary(self.read_assignment_df)
 
         self.assertEqual(out["readname"].tolist(), ["r1", "r2", "r3"])
-        self.assertEqual(out["majority_code"].tolist(), ["10", "01", "01"])
+        # r1: 2×"10" → intersection "10"; r2: 2×"01" → "01"; r3: 1×"01" → "01"
+        self.assertEqual(out["consensus_code"].tolist(), ["10", "01", "01"])
         self.assertEqual(out["primary_celltype"].tolist(), ["A", "B", "B"])
         self.assertEqual(out["linked_celltypes"].tolist(), ["A", "B", "B"])
         self.assertEqual(out["linked_leaf_celltypes"].tolist(), ["A", "B", "B"])
         self.assertEqual(out["n_ctdmrs"].tolist(), [2, 2, 1])
-        self.assertAlmostEqual(float(out.loc[out["readname"] == "r1", "majority_pct"].iloc[0]), 1.0)
+        self.assertAlmostEqual(float(out.loc[out["readname"] == "r1", "agreement_pct"].iloc[0]), 1.0)
+        self.assertEqual(out["is_mixed"].tolist(), [False, False, False])
+
+    def test_build_read_summary_marks_conflicted_reads_as_mixed(self):
+        # r1: "10" vs "01" — intersection "00", no plurality ≥ 1.0 → mixed
+        # r2: "10" twice — intersection "10" → not mixed
+        df = pd.DataFrame(
+            {
+                "code_order": ["A|B", "A|B", "A|B", "A|B"],
+                "code": ["10", "01", "10", "10"],
+                "best_group": ["A", "B", "A", "A"],
+                "best_group_leaves": ["A", "B", "A", "A"],
+                "is_best_group": [True, True, True, True],
+            },
+            index=pd.Index(["r1", "r1", "r2", "r2"], name="readname"),
+        )
+        out = _build_read_summary(df, per_read_min_agreement=1.0)
+
+        r1 = out.loc[out["readname"] == "r1"].iloc[0]
+        r2 = out.loc[out["readname"] == "r2"].iloc[0]
+
+        self.assertTrue(r1["is_mixed"])
+        self.assertTrue(r1["primary_celltype"] == "")
+        self.assertTrue(r1["linked_leaf_celltypes"] == "")
+
+        self.assertFalse(r2["is_mixed"])
+        self.assertEqual(r2["consensus_code"], "10")
+        self.assertEqual(r2["primary_celltype"], "A")
 
     def test_build_deconv_summary_reports_all_rows_and_per_read_views(self):
         out = _build_deconv_summary(self.read_assignment_df)
@@ -139,6 +207,18 @@ class TestDeconvOutputPaths(unittest.TestCase):
 
 
 class TestRequestedBamSplits(unittest.TestCase):
+    def test_compute_split_parallelism_caps_threads_per_group(self):
+        max_workers, threads_per_group = _compute_split_parallelism(threads=20, n_groups=2)
+
+        self.assertEqual(max_workers, 2)
+        self.assertEqual(threads_per_group, 4)
+
+    def test_compute_split_parallelism_limits_workers_by_thread_budget(self):
+        max_workers, threads_per_group = _compute_split_parallelism(threads=3, n_groups=8)
+
+        self.assertEqual(max_workers, 3)
+        self.assertEqual(threads_per_group, 1)
+
     def _write_test_bam(self, bam_path: Path, read_names: list[str]) -> None:
         header = {"HD": {"VN": "1.6"}, "SQ": [{"SN": "chr1", "LN": 100000}]}
         with pysam.AlignmentFile(str(bam_path), "wb", header=header) as bam_out:

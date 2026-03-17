@@ -4,22 +4,22 @@ import json
 import logging
 import multiprocessing as mp
 import os
-import re
 from pathlib import Path
 
 import pandas as pd
-import pysam
 from tqdm import tqdm
 
 from sniffcell.anno.anno import _one_dmr
 from sniffcell.anno.variant_assignment import (
     _build_group_leaf_sets,
+    _compute_per_read_consensus_df,
     _decode_linked_celltypes_from_row,
     _normalize_binary_code,
     _resolve_hierarchy_labels,
-    _split_pipe_values,
+    _split_code_token_schema_bits,
     _summarize_celltype_links,
 )
+from sniffcell.deconv.bam_split import _sanitize_group_label, _write_requested_split_group_outputs
 
 
 def _resolve_output_paths(output_arg: str) -> dict[str, str]:
@@ -60,6 +60,7 @@ def _write_deconv_run_manifest(
     threads: int,
     read_assignment_mode: str,
     split_bam_groups: str | None,
+    per_read_min_agreement: float,
     outputs: dict[str, str],
 ) -> str:
     manifest_path = outputs["manifest"]
@@ -75,6 +76,7 @@ def _write_deconv_run_manifest(
             "threads": int(threads),
             "read_assignment_mode": str(read_assignment_mode),
             "split_bam_groups": split_bam_groups,
+            "per_read_min_agreement": float(per_read_min_agreement),
         },
         "outputs": {
             "requested_output": os.path.abspath(output_path),
@@ -316,13 +318,19 @@ def _assignment_reset_index(assignment: pd.DataFrame, *, read_col: str) -> pd.Da
     return out
 
 
-def _build_read_summary(read_assignment_df: pd.DataFrame, *, _prepared: bool = False) -> pd.DataFrame:
+def _build_read_summary(
+    read_assignment_df: pd.DataFrame,
+    *,
+    _prepared: bool = False,
+    per_read_min_agreement: float = 0.66,
+) -> pd.DataFrame:
     cols = [
         "readname",
         "n_ctdmrs",
-        "majority_code",
-        "majority_code_count",
-        "majority_pct",
+        "consensus_code",
+        "agreement_pct",
+        "is_mixed",
+        "used_intersection",
         "primary_celltype",
         "linked_celltypes",
         "linked_celltype_count",
@@ -338,32 +346,17 @@ def _build_read_summary(read_assignment_df: pd.DataFrame, *, _prepared: bool = F
     assignment_reset = _assignment_reset_index(assignment, read_col="readname")
     group_leaf_sets = _build_group_leaf_sets(assignment_reset)
 
-    # --- vectorized aggregation (replaces Python loop + nested groupby) ---
-    ar = assignment_reset
-    # Normalise code_token to plain str for groupby keys
-    ar = ar.assign(code_token_str=ar["code_token"].astype(str))
-    # Capture original readname order (first appearance) so we can restore it at the end.
+    ar = assignment_reset.assign(code_token_str=assignment_reset["code_token"].astype(str))
+    # Capture original readname order so we can restore it at the end.
     readname_order = ar["readname"].drop_duplicates().tolist()
 
-    # 1. Count per (readname, code_token) — single C-level groupby over all rows
+    # 1. code_counts string per readname (from raw ctDMR codes, for auditability)
     token_counts = (
         ar.groupby(["readname", "code_token_str"], sort=False, dropna=False)
         .size()
         .reset_index(name="count")
         .sort_values(["count", "code_token_str"], ascending=[False, True], kind="stable")
     )
-
-    # 2. Majority code = first row per readname after descending-count sort
-    majority_df = (
-        token_counts.drop_duplicates(subset=["readname"], keep="first")
-        [["readname", "code_token_str", "count"]]
-        .rename(columns={"code_token_str": "majority_code", "count": "majority_code_count"})
-    )
-
-    # 3. n_ctdmrs per readname
-    n_ctdmrs_df = ar.groupby("readname", sort=False).size().reset_index(name="n_ctdmrs")
-
-    # 4. code_counts string per readname
     code_counts_s = (
         token_counts
         .assign(pair=token_counts["code_token_str"] + ":" + token_counts["count"].astype(str))
@@ -372,38 +365,34 @@ def _build_read_summary(read_assignment_df: pd.DataFrame, *, _prepared: bool = F
         .reset_index(name="code_counts")
     )
 
-    # 5. Merge base stats
-    result = (
-        majority_df
-        .merge(n_ctdmrs_df, on="readname", how="left")
-        .merge(code_counts_s, on="readname", how="left")
-    )
-    result["majority_pct"] = result["majority_code_count"] / result["n_ctdmrs"].replace(0, 1)
+    # 2. Per-read consensus via bitwise intersection (replaces majority vote)
+    per_read = _compute_per_read_consensus_df(assignment, per_read_min_agreement=per_read_min_agreement)
 
-    # 6. Decode linked celltypes.
-    #    _decode_linked_celltypes_from_row depends only on a small set of columns.
-    #    For typical runs there are very few unique combinations (often just 2-10),
-    #    so we deduplicate first, decode once per unique key, then join — turning
-    #    7M iterrows() calls into O(n_unique_keys) calls + one vectorized merge.
+    # 3. One representative row per read (first occurrence) for code_order / best_group_leaves lookup
     decode_key_cols = [c for c in ("code_order", "code", "code_token_str", "best_group",
                                     "best_group_leaves", "is_best_group") if c in ar.columns]
+    rep_rows = ar.drop_duplicates(subset=["readname"], keep="first")[["readname"] + decode_key_cols].copy()
 
-    rep_rows = (
-        ar
-        .merge(
-            majority_df[["readname", "majority_code"]],
-            left_on=["readname", "code_token_str"],
-            right_on=["readname", "majority_code"],
-            how="inner",
-        )
-        .drop_duplicates(subset=["readname"])
+    # 4. Override code / code_token_str in rep_rows with the consensus code for non-mixed reads
+    consensus_map = per_read.set_index("readname")[
+        ["read_consensus_code", "read_is_mixed", "read_agreement_pct",
+         "read_n_ctdmrs", "read_used_intersection"]
+    ]
+    rep_rows = rep_rows.merge(consensus_map, left_on="readname", right_index=True, how="left")
+    non_mixed_mask = ~rep_rows["read_is_mixed"].fillna(False)
+    consensus_codes = rep_rows["read_consensus_code"].where(rep_rows["read_consensus_code"].notna(), "")
+    rep_rows.loc[non_mixed_mask, "code_token_str"] = consensus_codes[non_mixed_mask]
+    rep_rows.loc[non_mixed_mask, "code"] = consensus_codes[non_mixed_mask].map(
+        lambda x: _split_code_token_schema_bits(x)[1] if x else pd.NA
     )
+    # Mixed reads: clear code fields so decoding returns empty strings
+    rep_rows.loc[~non_mixed_mask, "code_token_str"] = ""
+    rep_rows.loc[~non_mixed_mask, "code"] = pd.NA
 
-    # Compute decode only for unique key combinations (typically ~2-10 rows).
-    unique_keys = rep_rows[decode_key_cols].drop_duplicates()
+    # 5. Decode linked celltypes — deduplicate unique key combinations (typically ~few rows)
+    unique_keys = rep_rows.loc[non_mixed_mask, decode_key_cols].drop_duplicates()
     key_decode_rows: list[dict[str, object]] = []
     for _, urow in unique_keys.iterrows():
-        # _decode_linked_celltypes_from_row reads "code_token" but we stored it as "code_token_str"
         row_as_series = urow.rename({"code_token_str": "code_token"}) if "code_token_str" in urow.index else urow
         _schema, linked = _decode_linked_celltypes_from_row(row_as_series)
         resolved = _resolve_hierarchy_labels(linked, group_leaf_sets) if linked else []
@@ -424,8 +413,6 @@ def _build_read_summary(read_assignment_df: pd.DataFrame, *, _prepared: bool = F
                                     "linked_celltype_count", "linked_leaf_celltypes",
                                     "linked_leaf_celltype_count", "is_multi_celltype_link"]
     )
-
-    # Vectorized join: each of the 7M reads maps to one of the ~few decoded keys.
     linked_df = (
         rep_rows[["readname"] + decode_key_cols]
         .merge(decode_map_df, on=decode_key_cols, how="left")
@@ -433,16 +420,40 @@ def _build_read_summary(read_assignment_df: pd.DataFrame, *, _prepared: bool = F
           "linked_leaf_celltypes", "linked_leaf_celltype_count", "is_multi_celltype_link"]]
     )
 
-    result = result.merge(linked_df, on="readname", how="left")
+    # 6. Assemble result
+    result = (
+        per_read
+        .rename(columns={
+            "readname": "readname",
+            "read_consensus_code": "consensus_code",
+            "read_agreement_pct": "agreement_pct",
+            "read_is_mixed": "is_mixed",
+            "read_n_ctdmrs": "n_ctdmrs",
+            "read_used_intersection": "used_intersection",
+        })
+        .merge(code_counts_s, on="readname", how="left")
+        .merge(linked_df, on="readname", how="left")
+    )
     for c in ("primary_celltype", "linked_celltypes", "linked_leaf_celltypes", "code_counts"):
         if c in result.columns:
             result[c] = result[c].fillna("")
-    # Restore original readname insertion order (matches original groupby sort=False behaviour).
+    # Mixed reads: ensure cell type fields are empty strings
+    mixed_mask = result["is_mixed"].fillna(False)
+    for c in ("primary_celltype", "linked_celltypes", "linked_leaf_celltypes"):
+        result.loc[mixed_mask, c] = ""
+    result.loc[mixed_mask, "linked_celltype_count"] = 0
+    result.loc[mixed_mask, "linked_leaf_celltype_count"] = 0
+
     result = result.set_index("readname").loc[readname_order].reset_index()
     return result[cols]
 
 
-def _build_deconv_summary(read_assignment_df: pd.DataFrame, *, _prepared: bool = False) -> pd.DataFrame:
+def _build_deconv_summary(
+    read_assignment_df: pd.DataFrame,
+    *,
+    _prepared: bool = False,
+    per_read_min_agreement: float = 0.66,
+) -> pd.DataFrame:
     cols = [
         "summary_mode",
         "n_assignment_rows",
@@ -490,13 +501,42 @@ def _build_deconv_summary(read_assignment_df: pd.DataFrame, *, _prepared: bool =
     evidence = _assignment_reset_index(assignment, read_col="read")
     evidence["sample_id"] = "sample"
 
-    rows = []
-    for summary_mode, unique_reads in (("all_rows", False), ("per_read", True)):
-        summary = _summarize_celltype_links(
-            evidence,
-            "sample_id",
-            unique_reads_for_overlap=unique_reads,
+    # Per-read consensus: used for the per_read summary mode
+    per_read_consensus = _compute_per_read_consensus_df(
+        assignment, per_read_min_agreement=per_read_min_agreement
+    )
+    n_mixed_reads = int(per_read_consensus["read_is_mixed"].sum())
+    non_mixed = per_read_consensus[~per_read_consensus["read_is_mixed"]]
+
+    # Build synthetic evidence df for the per_read mode: one row per non-mixed read,
+    # code_token overridden with the consensus code so _summarize_celltype_links decodes correctly.
+    if not non_mixed.empty:
+        non_mixed_reps = (
+            evidence.drop_duplicates(subset=["read"], keep="first")
+            .merge(
+                non_mixed[["readname", "read_consensus_code"]],
+                left_on="read", right_on="readname", how="inner",
+            )
+            .copy()
         )
+        non_mixed_reps["code_token"] = non_mixed_reps["read_consensus_code"]
+        non_mixed_reps["code"] = non_mixed_reps["read_consensus_code"].map(
+            lambda x: _split_code_token_schema_bits(x)[1] if pd.notna(x) and str(x) else pd.NA
+        )
+        per_read_evidence = non_mixed_reps
+    else:
+        per_read_evidence = pd.DataFrame(columns=evidence.columns)
+
+    rows = []
+    for summary_mode in ("all_rows", "per_read"):
+        if summary_mode == "all_rows":
+            ev = evidence
+            n_ev = n_assignment_rows
+        else:
+            ev = per_read_evidence
+            n_ev = n_unique_reads - n_mixed_reads
+
+        summary = _summarize_celltype_links(ev, "sample_id", unique_reads_for_overlap=False)
         if summary.empty:
             rows.append(
                 {
@@ -518,7 +558,7 @@ def _build_deconv_summary(read_assignment_df: pd.DataFrame, *, _prepared: bool =
             {
                 "summary_mode": summary_mode,
                 "n_assignment_rows": n_assignment_rows,
-                "n_evidence_units": n_unique_reads if unique_reads else n_assignment_rows,
+                "n_evidence_units": n_ev,
                 "n_unique_reads": n_unique_reads,
                 "primary_celltype": row.get("primary_celltype", ""),
                 "linked_celltypes": row.get("linked_celltypes", ""),
@@ -529,15 +569,6 @@ def _build_deconv_summary(read_assignment_df: pd.DataFrame, *, _prepared: bool =
         )
 
     return pd.DataFrame(rows, columns=cols)
-
-
-def _sanitize_group_label(value: object) -> str:
-    text = "" if pd.isna(value) else str(value).strip()
-    if not text:
-        text = "unlabeled"
-    text = re.sub(r"[^A-Za-z0-9._-]+", "_", text)
-    text = re.sub(r"_+", "_", text).strip("._")
-    return text or "unlabeled"
 
 
 def _write_group_split_reads(read_assignment_df: pd.DataFrame, output_dir: str) -> list[str]:
@@ -576,226 +607,6 @@ def _write_group_split_reads(read_assignment_df: pd.DataFrame, output_dir: str) 
     return written_paths
 
 
-def _normalize_split_label(value: object) -> str:
-    text = "" if value is None or pd.isna(value) else str(value).strip().lower()
-    return re.sub(r"[^a-z0-9]+", "", text)
-
-
-def _parse_requested_split_groups(spec_text: str | None) -> list[dict[str, object]]:
-    if spec_text is None:
-        return []
-    text = str(spec_text).strip()
-    if not text:
-        return []
-
-    specs: list[dict[str, object]] = []
-    used_names: set[str] = set()
-    for idx, raw_group in enumerate(text.split(";"), start=1):
-        raw_group = raw_group.strip()
-        if not raw_group:
-            continue
-
-        explicit_name = None
-        members_text = raw_group
-        if "=" in raw_group:
-            lhs, rhs = raw_group.split("=", 1)
-            lhs = lhs.strip()
-            rhs = rhs.strip()
-            if not lhs or not rhs:
-                raise ValueError(f"Invalid split group definition: {raw_group!r}")
-            explicit_name = lhs
-            members_text = rhs
-
-        members = [token.strip() for token in members_text.split(",") if token.strip()]
-        if not members:
-            raise ValueError(f"Split group {raw_group!r} does not contain any labels")
-
-        base_name = explicit_name or "_".join(members)
-        file_stub = _sanitize_group_label(base_name)
-        if not file_stub:
-            file_stub = f"group_{idx}"
-        deduped = file_stub
-        suffix = 2
-        while deduped in used_names:
-            deduped = f"{file_stub}.{suffix}"
-            suffix += 1
-        used_names.add(deduped)
-
-        specs.append(
-            {
-                "order": idx,
-                "raw_group": raw_group,
-                "name": explicit_name or ",".join(members),
-                "members": members,
-                "file_stub": deduped,
-            }
-        )
-
-    if not specs:
-        raise ValueError("split_bam_groups did not contain any usable group definitions")
-    return specs
-
-
-def _build_label_leaf_map(read_assignment_df: pd.DataFrame, *, _prepared: bool = False) -> dict[str, set[str]]:
-    if read_assignment_df.empty:
-        return {}
-
-    assignment = read_assignment_df.copy() if _prepared else _prepare_read_assignment_df(read_assignment_df)
-    assignment_reset = _assignment_reset_index(assignment, read_col="readname")
-    label_leaf_map = _build_group_leaf_sets(assignment_reset)
-
-    for col in ("code_order", "best_group_leaves", "other_group_leaves"):
-        if col not in assignment_reset.columns:
-            continue
-        for value in assignment_reset[col].dropna():
-            for label in _split_pipe_values(value):
-                label_leaf_map.setdefault(label, {label})
-
-    normalized: dict[str, set[str]] = {}
-    for label, leaves in label_leaf_map.items():
-        norm_label = _normalize_split_label(label)
-        if norm_label:
-            normalized.setdefault(norm_label, set()).update(str(leaf) for leaf in leaves if str(leaf).strip())
-        for leaf in leaves:
-            leaf_text = str(leaf).strip()
-            norm_leaf = _normalize_split_label(leaf_text)
-            if norm_leaf:
-                normalized.setdefault(norm_leaf, set()).add(leaf_text)
-    return normalized
-
-
-def _resolve_requested_split_group_targets(
-    split_specs: list[dict[str, object]],
-    read_assignment_df: pd.DataFrame,
-    *,
-    _prepared: bool = False,
-) -> list[dict[str, object]]:
-    label_leaf_map = _build_label_leaf_map(read_assignment_df, _prepared=_prepared)
-    resolved_specs: list[dict[str, object]] = []
-
-    for spec in split_specs:
-        target_leaves: set[str] = set()
-        unmatched_members: list[str] = []
-        matched_members: list[str] = []
-
-        for member in spec["members"]:
-            norm_member = _normalize_split_label(member)
-            leaves = label_leaf_map.get(norm_member)
-            if not leaves:
-                unmatched_members.append(str(member))
-                continue
-            target_leaves.update(leaves)
-            matched_members.append(str(member))
-
-        if not target_leaves:
-            raise ValueError(
-                f"Requested split group {spec['raw_group']!r} did not match any ctDMR labels or leaf cell types"
-            )
-
-        updated = dict(spec)
-        updated["target_leaves"] = sorted(target_leaves)
-        updated["matched_members"] = matched_members
-        updated["unmatched_members"] = unmatched_members
-        resolved_specs.append(updated)
-
-    return resolved_specs
-
-
-def _plan_requested_split_group_outputs(
-    read_summary_df: pd.DataFrame,
-    split_specs: list[dict[str, object]],
-) -> list[dict[str, object]]:
-    if "readname" not in read_summary_df.columns:
-        raise ValueError("read_summary_df must contain a 'readname' column")
-
-    summary = read_summary_df.copy()
-    if "linked_leaf_celltypes" not in summary.columns:
-        summary["linked_leaf_celltypes"] = summary.get("linked_celltypes", "")
-    summary["readname"] = summary["readname"].astype(str)
-    summary["_linked_leaf_set"] = summary["linked_leaf_celltypes"].map(lambda x: set(_split_pipe_values(x)))
-
-    planned: list[dict[str, object]] = []
-    for spec in split_specs:
-        target_leaves = set(str(x) for x in spec["target_leaves"])
-        subset = summary.loc[
-            summary["_linked_leaf_set"].map(lambda leaf_set: bool(leaf_set.intersection(target_leaves)))
-        ].copy()
-        subset["requested_group"] = spec["name"]
-        subset["requested_group_members"] = ",".join(str(x) for x in spec["members"])
-        subset["requested_group_target_leaves"] = "|".join(sorted(target_leaves))
-        subset["matched_requested_leaves"] = subset["_linked_leaf_set"].map(
-            lambda leaf_set: "|".join(sorted(leaf_set.intersection(target_leaves)))
-        )
-        subset.drop(columns=["_linked_leaf_set"], inplace=True)
-
-        updated = dict(spec)
-        updated["summary_df"] = subset
-        updated["readnames"] = set(subset["readname"].astype(str))
-        planned.append(updated)
-
-    return planned
-
-
-def _write_requested_split_group_outputs(
-    *,
-    bam_path: str,
-    read_summary_df: pd.DataFrame,
-    read_assignment_df: pd.DataFrame,
-    split_group_spec: str,
-    output_dir: str,
-    threads: int = 1,
-    _prepared: bool = False,
-) -> pd.DataFrame:
-    split_specs = _parse_requested_split_groups(split_group_spec)
-    resolved_specs = _resolve_requested_split_group_targets(split_specs, read_assignment_df, _prepared=_prepared)
-    planned_specs = _plan_requested_split_group_outputs(read_summary_df, resolved_specs)
-
-    split_dir = Path(output_dir)
-    split_dir.mkdir(parents=True, exist_ok=True)
-
-    manifest_rows: list[dict[str, object]] = []
-    tmp_dir = Path(os.path.expanduser("~/tmp"))
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-
-    for spec in tqdm(planned_specs, desc="Splitting BAM by group"):
-        bam_out = split_dir / f"{spec['file_stub']}.bam"
-        tsv_out = split_dir / f"{spec['file_stub']}.read_summary.tsv"
-        spec["summary_df"].to_csv(tsv_out, sep="\t", index=False)
-
-        names_file = tmp_dir / f"sniffcell_readnames_{spec['file_stub']}.txt"
-        names_file.write_text("\n".join(str(r) for r in spec["readnames"]))
-        try:
-            view_args = ["-N", str(names_file), "-b", "-o", str(bam_out)]
-            if threads > 1:
-                view_args += ["--threads", str(threads - 1)]
-            view_args.append(str(bam_path))
-            pysam.view(*view_args, catch_stdout=False)
-            index_args = ["-@", str(threads - 1), str(bam_out)] if threads > 1 else [str(bam_out)]
-            pysam.index(*index_args)
-        finally:
-            try:
-                names_file.unlink()
-            except Exception:
-                pass
-
-        manifest_rows.append(
-            {
-                "requested_group": spec["name"],
-                "requested_group_members": ",".join(str(x) for x in spec["members"]),
-                "matched_members": ",".join(str(x) for x in spec["matched_members"]),
-                "unmatched_members": ",".join(str(x) for x in spec["unmatched_members"]),
-                "target_leaves": "|".join(str(x) for x in spec["target_leaves"]),
-                "n_reads": int(len(spec["readnames"])),
-                "bam_path": str(bam_out),
-                "read_summary_path": str(tsv_out),
-            }
-        )
-
-    manifest_df = pd.DataFrame(manifest_rows)
-    manifest_df.to_csv(split_dir / "requested_group_splits.tsv", sep="\t", index=False)
-    return manifest_df
-
-
 def deconv_main(args):
     logger = logging.getLogger("sniffcell.deconv")
 
@@ -807,22 +618,28 @@ def deconv_main(args):
     read_assignment_mode = str(getattr(args, "read_assignment_mode", "closest_reference_mean")).strip().lower()
     split_bam_groups = getattr(args, "split_bam_groups", None)
     split_bam_groups = None if split_bam_groups is None else str(split_bam_groups).strip() or None
+    per_read_min_agreement = float(getattr(args, "per_read_min_agreement", 0.66))
+    skip_overall_summary = bool(getattr(args, "skip_overall_summary", False))
 
     if threads < 1:
         raise ValueError("threads must be >= 1")
     if read_assignment_mode not in {"closest_reference_mean", "kmeans"}:
         raise ValueError("read_assignment_mode must be one of: closest_reference_mean, kmeans")
+    if not (0.0 <= per_read_min_agreement <= 1.0):
+        raise ValueError("per_read_min_agreement must be in [0, 1]")
 
     outputs = _resolve_output_paths(output_arg)
     os.makedirs(outputs["output_dir"], exist_ok=True)
 
     logger.info(
-        "Starting deconvolution: bed=%s bam=%s ref=%s threads=%d read_assignment_mode=%s out=%s",
+        "Starting deconvolution: bed=%s bam=%s ref=%s threads=%d read_assignment_mode=%s "
+        "per_read_min_agreement=%.3f out=%s",
         bed_input,
         input_bam,
         reference,
         threads,
         read_assignment_mode,
+        per_read_min_agreement,
         output_arg,
     )
 
@@ -834,6 +651,7 @@ def deconv_main(args):
         threads=threads,
         read_assignment_mode=read_assignment_mode,
         split_bam_groups=split_bam_groups,
+        per_read_min_agreement=per_read_min_agreement,
         outputs=outputs,
     )
     logger.info("Wrote deconv run manifest: %s", manifest_path)
@@ -842,20 +660,26 @@ def deconv_main(args):
     reads_tsv = outputs["reads"]
     read_summary_tsv = outputs["read_summary"]
 
-    if resume and os.path.exists(reads_tsv) and os.path.exists(read_summary_tsv):
+    if resume and os.path.exists(reads_tsv):
         logger.info("--resume: loading existing reads classification from %s", reads_tsv)
-        read_assign_df = pd.read_csv(reads_tsv, sep="\t", low_memory=False)
+        read_assign_df = pd.read_csv(reads_tsv, sep="\t", low_memory=False, index_col=0)
         logger.info(
             "Preparing read assignment dataframe (n_rows=%d, n_unique_reads=%d)...",
             len(read_assign_df),
-            int(read_assign_df["readname"].nunique()) if "readname" in read_assign_df.columns else 0,
+            int(read_assign_df.index.astype(str).nunique()),
         )
         prepared_df = _prepare_read_assignment_df(read_assign_df)
-        logger.info("--resume: loading existing read summary from %s", read_summary_tsv)
-        read_summary_df = pd.read_csv(read_summary_tsv, sep="\t", low_memory=False)
+        # Always recompute the read summary so that parameter changes (e.g. per_read_min_agreement)
+        # take effect without re-running the slow ctDMR scan phase.
+        logger.info("Building per-read summary (recomputed from cached classification)...")
+        read_summary_df = _build_read_summary(
+            prepared_df, _prepared=True, per_read_min_agreement=per_read_min_agreement
+        )
+        logger.info("Writing per-read summary: %s", read_summary_tsv)
+        read_summary_df.to_csv(read_summary_tsv, sep="\t", index=False)
     else:
         if resume:
-            logger.warning("--resume requested but existing TSVs not found; running full ctDMR phase")
+            logger.warning("--resume requested but %s not found; running full ctDMR phase", reads_tsv)
 
         bed_df = _load_ctdmr_bed(bed_input)
         logger.info("Loaded BED with %d unique ctDMRs", len(bed_df))
@@ -880,7 +704,9 @@ def deconv_main(args):
         prepared_df = _prepare_read_assignment_df(read_assign_df)
 
         logger.info("Building per-read summary...")
-        read_summary_df = _build_read_summary(prepared_df, _prepared=True)
+        read_summary_df = _build_read_summary(
+            prepared_df, _prepared=True, per_read_min_agreement=per_read_min_agreement
+        )
         logger.info("Writing per-read summary: %s", outputs["read_summary"])
         read_summary_df.to_csv(outputs["read_summary"], sep="\t", index=False)
 
@@ -900,14 +726,22 @@ def deconv_main(args):
             _prepared=True,
         )
 
-    logger.info("Building overall deconv summary...")
-    summary_df = _build_deconv_summary(prepared_df, _prepared=True)
-    summary_df.to_csv(outputs["summary"], sep="\t", index=False)
+    if skip_overall_summary:
+        logger.info("Skipping overall deconv summary by request: %s", outputs["summary"])
+    else:
+        logger.info("Building overall deconv summary...")
+        summary_df = _build_deconv_summary(
+            prepared_df, _prepared=True, per_read_min_agreement=per_read_min_agreement
+        )
+        summary_df.to_csv(outputs["summary"], sep="\t", index=False)
 
     logger.info("Wrote row-level read assignments: %s", outputs["reads"])
     logger.info("Wrote ctDMR block summary: %s", outputs["blocks"])
     logger.info("Wrote per-read deconvolution summary: %s", outputs["read_summary"])
-    logger.info("Wrote overall deconvolution summary: %s", outputs["summary"])
+    if skip_overall_summary:
+        logger.info("Skipped overall deconvolution summary: %s", outputs["summary"])
+    else:
+        logger.info("Wrote overall deconvolution summary: %s", outputs["summary"])
     logger.info("Wrote %d per-group split read tables under: %s", len(group_paths), outputs["group_dir"])
     if requested_split_manifest is not None:
         unmatched = requested_split_manifest["unmatched_members"].fillna("").astype(str)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import math
 import html
 import json
 import logging
@@ -99,6 +100,9 @@ def _build_dashboard_records(selected_report_df: pd.DataFrame) -> list[dict[str,
         "majority_pct",
         "n_supporting",
         "n_overlapped",
+        "overlap_required_reads",
+        "overlap_required_pct",
+        "overlap_filter_mode",
         "primary_celltype",
         "linked_celltypes",
         "has_hard_conflict",
@@ -119,6 +123,65 @@ def _safe_slug(text: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9._-]+", "_", str(text).strip())
     slug = slug.strip("._")
     return slug or "sv"
+
+
+def _coerce_numeric_series(df: pd.DataFrame, column: str) -> pd.Series:
+    if column not in df.columns:
+        return pd.Series(pd.NA, index=df.index, dtype="Float64")
+    return pd.to_numeric(df[column], errors="coerce")
+
+
+def _resolve_supporting_counts(selected: pd.DataFrame) -> tuple[pd.Series, pd.Series]:
+    n_supporting = _coerce_numeric_series(selected, "n_supporting")
+    n_overlapped = _coerce_numeric_series(selected, "n_overlapped")
+    overlap_pct = _coerce_numeric_series(selected, "overlap_pct")
+
+    derived_supporting = n_overlapped / overlap_pct.where(overlap_pct > 0)
+    n_supporting = n_supporting.where(n_supporting.notna(), derived_supporting)
+    n_supporting = n_supporting.round().astype("Float64")
+    n_overlapped = n_overlapped.round().astype("Float64")
+    return n_supporting, n_overlapped
+
+
+def _compute_report_overlap_requirements(
+    selected: pd.DataFrame,
+    *,
+    min_overlap_pct: float,
+    overlap_filter_mode: str,
+    overlap_gradient_exponent: float,
+) -> pd.DataFrame:
+    if overlap_filter_mode not in {"gradient", "hard_clip"}:
+        raise ValueError("overlap_filter_mode must be one of {'gradient', 'hard_clip'}")
+    if float(overlap_gradient_exponent) < 0.0:
+        raise ValueError("overlap_gradient_exponent must be >= 0")
+
+    n_supporting, n_overlapped = _resolve_supporting_counts(selected)
+    overlap_pct = _coerce_numeric_series(selected, "overlap_pct")
+
+    out = selected.copy()
+    out["n_supporting"] = n_supporting.astype("Int64")
+    out["n_overlapped"] = n_overlapped.astype("Int64")
+
+    required_reads = pd.Series(pd.NA, index=out.index, dtype="Float64")
+    valid_mask = n_supporting.notna() & (n_supporting > 0)
+    if overlap_filter_mode == "hard_clip":
+        required_reads.loc[valid_mask] = n_supporting.loc[valid_mask] * float(min_overlap_pct)
+    else:
+        support_power = n_supporting.loc[valid_mask].pow(float(overlap_gradient_exponent))
+        required_reads.loc[valid_mask] = support_power.mul(float(min_overlap_pct)).map(math.ceil)
+
+    required_pct = required_reads / n_supporting.where(n_supporting > 0)
+    overlap_pass = pd.Series(False, index=out.index, dtype="boolean")
+    can_eval = required_reads.notna() & n_overlapped.notna()
+    overlap_pass.loc[can_eval] = n_overlapped.loc[can_eval] >= required_reads.loc[can_eval]
+    fallback_mask = (~can_eval) & overlap_pct.notna()
+    overlap_pass.loc[fallback_mask] = overlap_pct.loc[fallback_mask] >= float(min_overlap_pct)
+
+    out["overlap_required_reads"] = required_reads.astype("Float64")
+    out["overlap_required_pct"] = required_pct.astype("Float64")
+    out["overlap_filter_pass"] = overlap_pass.astype("boolean")
+    out["overlap_filter_mode"] = pd.Series(str(overlap_filter_mode), index=out.index, dtype="string")
+    return out
 
 
 def _normalize_review_status(value: object) -> str:
@@ -275,6 +338,8 @@ def _select_high_confidence_svs(
     sv_df: pd.DataFrame,
     *,
     min_overlap_pct: float,
+    overlap_filter_mode: str,
+    overlap_gradient_exponent: float,
     min_majority_pct: float,
     include_unassigned: bool,
     allow_hard_conflict: bool,
@@ -284,6 +349,8 @@ def _select_high_confidence_svs(
         raise ValueError("min_overlap_pct must be in [0, 1]")
     if not (0.0 <= float(min_majority_pct) <= 1.0):
         raise ValueError("min_majority_pct must be in [0, 1]")
+    if float(overlap_gradient_exponent) < 0.0:
+        raise ValueError("overlap_gradient_exponent must be >= 0")
     if int(max_sv) < 0:
         raise ValueError("max_sv must be >= 0")
 
@@ -314,11 +381,17 @@ def _select_high_confidence_svs(
         keep_mask = ~selected["has_hard_conflict"].fillna(False).astype(bool)
         selected = selected.loc[keep_mask]
 
-    selected = selected[selected["overlap_pct"].fillna(0.0) >= float(min_overlap_pct)]
+    selected = _compute_report_overlap_requirements(
+        selected,
+        min_overlap_pct=float(min_overlap_pct),
+        overlap_filter_mode=str(overlap_filter_mode),
+        overlap_gradient_exponent=float(overlap_gradient_exponent),
+    )
+    selected = selected[selected["overlap_filter_pass"].fillna(False).astype(bool)]
     selected = selected[selected["majority_pct"].fillna(0.0) >= float(min_majority_pct)]
     selected = selected.sort_values(
-        ["majority_pct", "overlap_pct", "n_overlapped", "id"],
-        ascending=[False, False, False, True],
+        ["majority_pct", "overlap_pct", "n_overlapped", "overlap_required_pct", "id"],
+        ascending=[False, False, False, False, True],
         kind="stable",
         ignore_index=True,
     )
@@ -739,6 +812,8 @@ def _build_report_html(
     page.append(
         "<div class=\"filter\">"
         f"Filters: min_overlap_pct={filters['min_overlap_pct']}, "
+        f"overlap_filter_mode={filters['overlap_filter_mode']}, "
+        f"overlap_gradient_exponent={filters['overlap_gradient_exponent']}, "
         f"min_majority_pct={filters['min_majority_pct']}, "
         f"include_unassigned={filters['include_unassigned']}, "
         f"allow_hard_conflict={filters['allow_hard_conflict']}, "
@@ -848,6 +923,9 @@ def _build_report_html(
             assigned_code = html.escape(assigned_code_text)
             majority = _fmt_float(item.get("majority_pct"))
             overlap = _fmt_float(item.get("overlap_pct"))
+            overlap_required_pct = _fmt_float(item.get("overlap_required_pct"))
+            overlap_required_reads = _fmt_float(item.get("overlap_required_reads"), digits=0)
+            overlap_filter_mode = _fmt_text(item.get("overlap_filter_mode", ""))
             vaf = _fmt_float(item.get("vaf"))
             n_supporting = "NA" if pd.isna(item.get("n_supporting")) else int(item["n_supporting"])
             n_overlapped = "NA" if pd.isna(item.get("n_overlapped")) else int(item["n_overlapped"])
@@ -954,6 +1032,11 @@ def _build_report_html(
             page.append(
                 f"<div class=\"kv\"><b>n_supporting:</b> {html.escape(n_supporting_text)} | "
                 f"<b>n_overlapped:</b> {html.escape(n_overlapped_text)}</div>"
+            )
+            page.append(
+                f"<div class=\"kv\"><b>overlap filter:</b> {html.escape(overlap_filter_mode)} | "
+                f"<b>required overlap_pct:</b> {overlap_required_pct} | "
+                f"<b>required overlapped reads:</b> {overlap_required_reads}</div>"
             )
             page.append(f"<div class=\"kv\"><b>has_hard_conflict:</b> {html.escape(hard_conflict_display)}</div>")
             page.append(f"<div class=\"kv\"><b>viz status:</b> {status}</div>")
@@ -1894,16 +1977,20 @@ def report_main(args) -> None:
     selected = _select_high_confidence_svs(
         sv_df,
         min_overlap_pct=float(args.min_overlap_pct),
+        overlap_filter_mode=str(args.overlap_filter_mode),
+        overlap_gradient_exponent=float(args.overlap_gradient_exponent),
         min_majority_pct=float(args.min_majority_pct),
         include_unassigned=bool(args.include_unassigned),
         allow_hard_conflict=bool(args.allow_hard_conflict),
         max_sv=int(args.max_sv),
     )
     logger.info(
-        "Selected %d/%d SVs for report (min_overlap_pct=%.3f min_majority_pct=%.3f include_unassigned=%s allow_hard_conflict=%s max_sv=%d)",
+        "Selected %d/%d SVs for report (min_overlap_pct=%.3f overlap_filter_mode=%s overlap_gradient_exponent=%.3f min_majority_pct=%.3f include_unassigned=%s allow_hard_conflict=%s max_sv=%d)",
         len(selected),
         len(sv_df),
         float(args.min_overlap_pct),
+        str(args.overlap_filter_mode),
+        float(args.overlap_gradient_exponent),
         float(args.min_majority_pct),
         bool(args.include_unassigned),
         bool(args.allow_hard_conflict),
@@ -2275,6 +2362,8 @@ def report_main(args) -> None:
 
     filters = {
         "min_overlap_pct": float(args.min_overlap_pct),
+        "overlap_filter_mode": str(args.overlap_filter_mode),
+        "overlap_gradient_exponent": float(args.overlap_gradient_exponent),
         "min_majority_pct": float(args.min_majority_pct),
         "include_unassigned": bool(args.include_unassigned),
         "allow_hard_conflict": bool(args.allow_hard_conflict),

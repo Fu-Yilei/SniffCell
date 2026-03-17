@@ -131,6 +131,7 @@ sniffcell deconv \
 - `--read_assignment_mode {closest_reference_mean,kmeans}` — assignment algorithm (default: `closest_reference_mean`)
 - `--split_bam_groups` — after deconvolution, split reads into per-group BAMs. Use `;` between groups and `,` between labels within a group. Named splits use `=`. Example: `lymph=t_cell,b_cell,nk_cell;myeloid=monocyte`
 - `--resume` — skip ctDMR classification and reload existing TSVs; useful for re-splitting without reprocessing
+- `--skip_overall_summary` — skip writing `deconv_summary.tsv`; useful when you only need per-read outputs and split BAMs
 
 **Outputs in `<output>/`:**
 - `deconv_reads_classification.tsv` — one row per (read × ctDMR)
@@ -204,6 +205,7 @@ Filters high-confidence SVs from `anno` output and builds an interactive HTML re
 sniffcell report \
   --anno_output anno_out \
   --min_overlap_pct 0.8 \
+  --overlap_filter_mode gradient \
   --min_majority_pct 1.0
 
 # With viz figures and IGV screenshots
@@ -225,7 +227,10 @@ sniffcell report \
 - `assigned_code` must be non-empty
 - `linked_celltypes` must be non-empty
 - `has_hard_conflict` must be `False`
-- `--min_overlap_pct` ≥ `0.8` and `--min_majority_pct` ≥ `1.0`
+- `--overlap_filter_mode gradient` with `--min_overlap_pct 0.8`
+- `--min_majority_pct` ≥ `1.0`
+
+`gradient` uses `ceil(min_overlap_pct * n_supporting^exponent)` overlapped reads, with default `--overlap_gradient_exponent 0.5`. Use `--overlap_filter_mode hard_clip` to recover the previous fixed `overlap_pct` behavior.
 
 **Outputs under `<anno_output>/report/`:**
 - `index.html` — interactive report with genome-wide plots and per-SV panels

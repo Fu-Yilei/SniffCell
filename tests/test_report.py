@@ -29,6 +29,8 @@ class TestReportSelection(unittest.TestCase):
         selected = _select_high_confidence_svs(
             sv_df,
             min_overlap_pct=0.0,
+            overlap_filter_mode="gradient",
+            overlap_gradient_exponent=0.5,
             min_majority_pct=0.0,
             include_unassigned=False,
             allow_hard_conflict=False,
@@ -54,6 +56,8 @@ class TestReportSelection(unittest.TestCase):
         selected = _select_high_confidence_svs(
             sv_df,
             min_overlap_pct=0.5,
+            overlap_filter_mode="hard_clip",
+            overlap_gradient_exponent=0.5,
             min_majority_pct=0.9,
             include_unassigned=False,
             allow_hard_conflict=False,
@@ -62,17 +66,17 @@ class TestReportSelection(unittest.TestCase):
 
         self.assertEqual(selected["id"].tolist(), ["svC"])
 
-    def test_select_high_confidence_allows_partial_support_with_strict_majority(self):
+    def test_select_high_confidence_gradient_allows_partial_support_with_more_reads(self):
         sv_df = pd.DataFrame(
             {
                 "id": ["sv_partial", "sv_drop"],
                 "assigned_code": ["10", "10"],
                 "linked_celltypes": ["A", "A"],
                 "has_hard_conflict": [False, False],
-                "overlap_pct": [0.8, 0.79],
+                "overlap_pct": [0.5, 0.5],
                 "majority_pct": [1.0, 1.0],
-                "n_supporting": [5, 5],
-                "n_overlapped": [4, 4],
+                "n_supporting": [4, 2],
+                "n_overlapped": [2, 1],
             }
         )
         sv_df["has_hard_conflict"] = sv_df["has_hard_conflict"].astype("boolean")
@@ -80,6 +84,8 @@ class TestReportSelection(unittest.TestCase):
         selected = _select_high_confidence_svs(
             sv_df,
             min_overlap_pct=0.8,
+            overlap_filter_mode="gradient",
+            overlap_gradient_exponent=0.5,
             min_majority_pct=1.0,
             include_unassigned=False,
             allow_hard_conflict=False,
@@ -87,8 +93,38 @@ class TestReportSelection(unittest.TestCase):
         )
 
         self.assertEqual(selected["id"].tolist(), ["sv_partial"])
-        self.assertEqual(int(selected.iloc[0]["n_overlapped"]), 4)
-        self.assertEqual(int(selected.iloc[0]["n_supporting"]), 5)
+        self.assertEqual(int(selected.iloc[0]["n_overlapped"]), 2)
+        self.assertEqual(int(selected.iloc[0]["n_supporting"]), 4)
+        self.assertEqual(float(selected.iloc[0]["overlap_required_reads"]), 2.0)
+        self.assertAlmostEqual(float(selected.iloc[0]["overlap_required_pct"]), 0.5, places=6)
+
+    def test_select_high_confidence_hard_clip_preserves_fixed_threshold(self):
+        sv_df = pd.DataFrame(
+            {
+                "id": ["sv_partial"],
+                "assigned_code": ["10"],
+                "linked_celltypes": ["A"],
+                "has_hard_conflict": [False],
+                "overlap_pct": [0.5],
+                "majority_pct": [1.0],
+                "n_supporting": [4],
+                "n_overlapped": [2],
+            }
+        )
+        sv_df["has_hard_conflict"] = sv_df["has_hard_conflict"].astype("boolean")
+
+        selected = _select_high_confidence_svs(
+            sv_df,
+            min_overlap_pct=0.8,
+            overlap_filter_mode="hard_clip",
+            overlap_gradient_exponent=0.5,
+            min_majority_pct=1.0,
+            include_unassigned=False,
+            allow_hard_conflict=False,
+            max_sv=0,
+        )
+
+        self.assertEqual(len(selected), 0)
 
 
 class TestReportMain(unittest.TestCase):
@@ -96,6 +132,8 @@ class TestReportMain(unittest.TestCase):
         return SimpleNamespace(
             anno_output=str(anno_output),
             min_overlap_pct=0.0,
+            overlap_filter_mode="gradient",
+            overlap_gradient_exponent=0.5,
             min_majority_pct=0.0,
             include_unassigned=False,
             allow_hard_conflict=False,
@@ -176,6 +214,7 @@ class TestReportMain(unittest.TestCase):
             selected = pd.read_csv(selected_path, sep="\t")
             self.assertEqual(selected["id"].tolist(), ["sv_pass"])
             self.assertEqual(selected["viz_status"].tolist(), ["rendered"])
+            self.assertEqual(selected["overlap_filter_mode"].tolist(), ["gradient"])
 
     def test_report_main_reuses_existing_viz(self):
         with tempfile.TemporaryDirectory() as td:
