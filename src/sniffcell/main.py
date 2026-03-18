@@ -5,6 +5,7 @@ from sniffcell.find import find
 from sniffcell.parse_args import parse_args  # assuming you defined parse_args in args.py
 from sniffcell.deconv import deconv  # assuming these modules exist
 from sniffcell.dmsv import dmsv
+from sniffcell.postprocess import postprocess_main
 from sniffcell.viz import viz
 from sniffcell.viz import igvviz
 from sniffcell.report import report_main
@@ -34,6 +35,8 @@ def main(argv=None):
         igvviz.igvviz_main(args)
     elif args.command == "report":
         report_main(args)
+    elif args.command == "postprocess":
+        postprocess_main(args)
     return 0
 
 
