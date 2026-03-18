@@ -1524,9 +1524,10 @@ def _plot_sv_panel(
         )
 
     read_meth_map = _build_read_methylation_map(methyl_df)
-    meth_threshold = 0.50
-    methylated_color = "#d73027"   # IGV-style: methylated -> red
-    unmethylated_color = "#4575b4" # IGV-style: unmethylated -> blue
+    methyl_cmap = plt.cm.bwr
+    low_methylation_color = methyl_cmap(0.0)
+    mid_methylation_color = methyl_cmap(0.5)
+    high_methylation_color = methyl_cmap(1.0)
     insertion_color = "#7b3294"
     deletion_edge = "#e66101"
     deletion_face = "#fff7bc"
@@ -1634,8 +1635,8 @@ def _plot_sv_panel(
                 seg_end = min(r_end, int(mrow.end))
                 if seg_end <= seg_start:
                     continue
-                meth = float(mrow.mean_methylation)
-                seg_color = methylated_color if meth >= meth_threshold else unmethylated_color
+                meth = float(np.clip(float(mrow.mean_methylation), 0.0, 1.0))
+                seg_color = methyl_cmap(meth)
                 # Black outline for visibility, then colored methylation segment on top.
                 ax_reads.hlines(
                     y,
@@ -1678,7 +1679,7 @@ def _plot_sv_panel(
                 if not is_supporting:
                     continue
                 marker_x = max(r_start, r_end - read_marker_offset)
-                marker_color = methylated_color if float(meth) >= meth_threshold else unmethylated_color
+                marker_color = methyl_cmap(float(np.clip(float(meth), 0.0, 1.0)))
                 ax_reads.scatter(
                     [marker_x],
                     [y],
@@ -1867,7 +1868,7 @@ def _plot_sv_panel(
         ax_dmrs.set_yticks([])
     else:
         dmrs_plot = dmrs.reset_index(drop=True)
-        cmap = plt.cm.bwr
+        cmap = methyl_cmap
         n_celltypes = len(ref_mean_cols)
         min_dmr_display_bp = max(30, min(300, int(round(max(1, region_end - region_start) * 0.008))))
         if dmrs_plot.empty:
@@ -2111,8 +2112,9 @@ def _plot_sv_panel(
         Patch(facecolor=insertion_color, edgecolor="#111111", linewidth=1.1, label=f"Insertion >= {indel_min_bp} bp"),
         Patch(facecolor=deletion_face, edgecolor=deletion_edge, linewidth=1.1, label=f"Deletion >= {indel_min_bp} bp"),
         Line2D([0], [0], color="#6baed6", lw=5.0, label="Read methylation on ctDMR overlap"),
-        Line2D([0], [0], linestyle="None", marker="o", markerfacecolor=methylated_color, markeredgecolor="#111111", markersize=7, label="Methylated (red)"),
-        Line2D([0], [0], linestyle="None", marker="o", markerfacecolor=unmethylated_color, markeredgecolor="#111111", markersize=7, label="Unmethylated (blue)"),
+        Line2D([0], [0], linestyle="None", marker="o", markerfacecolor=low_methylation_color, markeredgecolor="#111111", markersize=7, label="Methylation 0.0"),
+        Line2D([0], [0], linestyle="None", marker="o", markerfacecolor=mid_methylation_color, markeredgecolor="#111111", markersize=7, label="Methylation 0.5"),
+        Line2D([0], [0], linestyle="None", marker="o", markerfacecolor=high_methylation_color, markeredgecolor="#111111", markersize=7, label="Methylation 1.0"),
         Patch(facecolor="#3182bd", alpha=0.20, label="SV interval"),
         Patch(facecolor="#f7f7f7", edgecolor="#2ca25f", alpha=0.95, label="ctDMR hyper (edge)"),
         Patch(facecolor="#f7f7f7", edgecolor="#756bb1", alpha=0.95, label="ctDMR hypo/other (edge)"),

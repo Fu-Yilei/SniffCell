@@ -2303,11 +2303,11 @@ def report_main(args) -> None:
 
         igv_manifest_path = Path(str(report_row["igvviz_manifest"]))
         igv_dir_path = Path(str(report_row["igvviz_dir"]))
-        if (not with_igvviz) and igv_manifest_path.exists():
+        if with_igvviz and (not str(report_row.get("igvviz_status", "")).strip()) and igv_manifest_path.exists():
             report_row["igvviz_status"] = "existing"
-        if igv_dir_path.exists():
+        if with_igvviz and igv_dir_path.exists():
             report_row["igvviz_dir_rel"] = igv_dir_path.relative_to(html_path.parent).as_posix()
-        if igv_manifest_path.exists():
+        if with_igvviz and igv_manifest_path.exists():
             igvviz_rendered_count += 1
             report_row["igvviz_manifest_rel"] = igv_manifest_path.relative_to(html_path.parent).as_posix()
             snap_rows = _load_igvviz_snapshot_rows(igv_manifest_path, html_path.parent)

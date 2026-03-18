@@ -543,6 +543,52 @@ class TestReportMain(unittest.TestCase):
             self.assertEqual(selected["igvviz_status"].tolist(), ["rendered"])
             self.assertIn("sv_img.01.a.igv.png", str(selected.iloc[0]["igvviz_snapshots_rel"]))
 
+    def test_report_main_ignores_stale_igvviz_when_disabled(self):
+        with tempfile.TemporaryDirectory() as td:
+            anno_dir = Path(td) / "anno_out"
+            anno_dir.mkdir(parents=True, exist_ok=True)
+            (anno_dir / "anno_run_manifest.json").write_text(json.dumps({"inputs": {}, "outputs": {}}), encoding="utf-8")
+
+            sv_df = pd.DataFrame(
+                [
+                    {
+                        "id": "sv_stale_igv",
+                        "assigned_code": "10",
+                        "linked_celltypes": "A",
+                        "primary_celltype": "A",
+                        "has_hard_conflict": False,
+                        "overlap_pct": 0.8,
+                        "majority_pct": 0.9,
+                        "n_supporting": 8,
+                        "n_overlapped": 6,
+                    }
+                ]
+            )
+            sv_df.to_csv(anno_dir / "sv_assignment.tsv", sep="\t", index=False)
+
+            report_dir = anno_dir / "report"
+            igvviz_dir = report_dir / "igvviz" / "sv_stale_igv"
+            igvviz_dir.mkdir(parents=True, exist_ok=True)
+            snap = igvviz_dir / "sv_stale_igv.01.a.igv.png"
+            snap.write_text("stale image", encoding="utf-8")
+            manifest = igvviz_dir / "sv_stale_igv.igvviz.manifest.json"
+            manifest.write_text(
+                json.dumps({"jobs": [{"bam": "/tmp/a.bam", "snapshot": str(snap)}]}),
+                encoding="utf-8",
+            )
+
+            args = self._base_args(anno_dir)
+            report_main(args)
+
+            html_text = (report_dir / "index.html").read_text(encoding="utf-8")
+            selected = pd.read_csv(report_dir / "high_confidence_sv.tsv", sep="\t")
+            manifest_payload = json.loads((report_dir / "report_manifest.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(selected["igvviz_status"].tolist(), ["not_rendered"])
+            self.assertNotIn("sv_stale_igv.igvviz.manifest.json", html_text)
+            self.assertNotIn("sv_stale_igv.01.a.igv.png", html_text)
+            self.assertEqual(int(manifest_payload["counts"]["igvviz_rendered_or_reused"]), 0)
+
     def test_report_main_runs_igvreport_and_links_alternate_html(self):
         with tempfile.TemporaryDirectory() as td:
             anno_dir = Path(td) / "anno_out"
