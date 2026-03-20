@@ -644,6 +644,8 @@ def parse_args(argv):
         help="Execution mode. local runs sequentially; slurm renders or submits HPC scripts.",
     )
     postprocess_parser.add_argument("--submit", action="store_true", default=False, help="In slurm mode, submit the rendered jobs.")
+    postprocess_parser.add_argument("--slurm-partition", default="medium", help="Slurm partition for rendered/submitted jobs. Default=medium.")
+    postprocess_parser.add_argument("--slurm-account", default="proj-fs0006", help="Slurm account for rendered/submitted jobs. Default=proj-fs0006.")
     postprocess_parser.add_argument("--split-dir", default=None, help="Optional override for the deconv_requested_group_splits directory.")
     postprocess_parser.add_argument("--sample-id", default=None, help="Optional sample ID override.")
     postprocess_parser.add_argument("--groups", default=None, help="Comma-separated split group names to process.")

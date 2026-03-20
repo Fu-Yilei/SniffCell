@@ -26,6 +26,8 @@ class TestPostprocessParseArgs(unittest.TestCase):
 
         self.assertEqual(args.command, "postprocess")
         self.assertEqual(args.scheduler, "local")
+        self.assertEqual(args.slurm_partition, "medium")
+        self.assertEqual(args.slurm_account, "proj-fs0006")
         self.assertEqual(args.sniffles_threads, 24)
         self.assertEqual(args.medaka_workers, 8)
         self.assertEqual(args.mods_mode, "separate")
@@ -122,6 +124,8 @@ class TestPostprocessContextAndSlurm(unittest.TestCase):
             sniffles_script = ctx.slurm_dir / "sniffles.array.sbatch.sh"
             self.assertTrue(sniffles_script.exists())
             script_text = sniffles_script.read_text()
+            self.assertIn("#SBATCH --partition=medium", script_text)
+            self.assertIn("#SBATCH --account=proj-fs0006", script_text)
             self.assertIn('${GROUP_NAME}', script_text)
             self.assertIn("--scheduler local", script_text)
 
