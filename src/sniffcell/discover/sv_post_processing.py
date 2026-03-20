@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from sniffcell.postprocess.postprocess import (
+from sniffcell.discover.discover import (
     DEFAULT_MOSAIC_FILTER_EXPR,
     REPO_ROOT,
     SplitGroup,
@@ -349,7 +349,7 @@ def _filter_sample_specific_by_ad(
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m sniffcell.postprocess.sv_post_processing",
+        prog="python -m sniffcell.discover.sv_post_processing",
         description="Compare two per-BAM Sniffles VCFs, genotype merged sites with Kanpig, and emit AD-based sample-specific SV sets.",
     )
     parser.add_argument("--split-dir", required=True, help="deconv_requested_group_splits directory")

@@ -163,12 +163,22 @@ def _plan_requested_split_group_outputs(
         summary["linked_leaf_celltypes"] = summary.get("linked_celltypes", "")
     summary["readname"] = summary["readname"].astype(str)
     summary["_linked_leaf_set"] = summary["linked_leaf_celltypes"].map(lambda x: set(_split_pipe_values(x)))
+    summary["_matching_requested_groups"] = summary["_linked_leaf_set"].map(
+        lambda leaf_set: [
+            str(spec["name"])
+            for spec in split_specs
+            if leaf_set and leaf_set.intersection(set(str(x) for x in spec["target_leaves"]))
+        ]
+    )
+    summary["_matching_requested_group_count"] = summary["_matching_requested_groups"].map(len)
 
     planned: list[dict[str, object]] = []
     for spec in split_specs:
         target_leaves = set(str(x) for x in spec["target_leaves"])
         subset = summary.loc[
             summary["_linked_leaf_set"].map(lambda leaf_set: bool(leaf_set.intersection(target_leaves)))
+            & summary["_matching_requested_group_count"].eq(1)
+            & summary["_matching_requested_groups"].map(lambda groups: bool(groups) and groups[0] == str(spec["name"]))
         ].copy()
         subset["requested_group"] = spec["name"]
         subset["requested_group_members"] = ",".join(str(x) for x in spec["members"])
@@ -176,7 +186,11 @@ def _plan_requested_split_group_outputs(
         subset["matched_requested_leaves"] = subset["_linked_leaf_set"].map(
             lambda leaf_set: "|".join(sorted(leaf_set.intersection(target_leaves)))
         )
-        subset.drop(columns=["_linked_leaf_set"], inplace=True)
+        subset["matched_requested_groups"] = subset["_matching_requested_groups"].map(lambda groups: "|".join(groups))
+        subset.drop(
+            columns=["_linked_leaf_set", "_matching_requested_groups", "_matching_requested_group_count"],
+            inplace=True,
+        )
 
         updated = dict(spec)
         updated["summary_df"] = subset

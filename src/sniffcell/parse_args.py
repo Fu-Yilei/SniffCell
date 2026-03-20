@@ -17,7 +17,7 @@ def parse_args(argv):
         version=f"sniffcell {version}"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
-    valid_commands = ["find", "deconv", "anno", "svanno", "dmsv", "viz", "igvviz", "report", "postprocess"]
+    valid_commands = ["find", "deconv", "anno", "svanno", "dmsv", "viz", "igvviz", "report", "discover"]
     # Subcommand: find
     find_parser = subparsers.add_parser("find", help="Find cell type-specific DMRs.")
     atlas_dir = os.path.abspath("atlas")
@@ -629,84 +629,85 @@ def parse_args(argv):
         ),
     )
 
-    postprocess_parser = subparsers.add_parser(
-        "postprocess",
+    discover_parser = subparsers.add_parser(
+        "discover",
         help="Postprocess deconv split BAM outputs with SV, TR, and methylation workflows.",
     )
-    postprocess_parser.add_argument("--deconv-dir", required=True, help="Path to the sample deconv directory.")
-    postprocess_parser.add_argument("--reference", required=True, help="Reference FASTA used by downstream tools.")
-    postprocess_parser.add_argument("--tr-bed", required=True, help="Tandem repeat BED for medaka tandem.")
-    postprocess_parser.add_argument("--sex", required=True, choices=["female", "male"], help="Sample sex for medaka tandem.")
-    postprocess_parser.add_argument(
+    discover_parser.add_argument("--deconv-dir", required=True, help="Path to the sample deconv directory.")
+    discover_parser.add_argument("--reference", required=True, help="Reference FASTA used by downstream tools.")
+    discover_parser.add_argument("--tr-bed", required=True, help="Tandem repeat BED for medaka tandem.")
+    discover_parser.add_argument("--sex", required=True, choices=["female", "male"], help="Sample sex for medaka tandem.")
+    discover_parser.add_argument(
         "--scheduler",
         default="local",
         choices=["local", "slurm"],
         help="Execution mode. local runs sequentially; slurm renders or submits HPC scripts.",
     )
-    postprocess_parser.add_argument("--submit", action="store_true", default=False, help="In slurm mode, submit the rendered jobs.")
-    postprocess_parser.add_argument("--slurm-partition", default="medium", help="Slurm partition for rendered/submitted jobs. Default=medium.")
-    postprocess_parser.add_argument("--slurm-account", default="proj-fs0006", help="Slurm account for rendered/submitted jobs. Default=proj-fs0006.")
-    postprocess_parser.add_argument("--split-dir", default=None, help="Optional override for the deconv_requested_group_splits directory.")
-    postprocess_parser.add_argument("--sample-id", default=None, help="Optional sample ID override.")
-    postprocess_parser.add_argument("--groups", default=None, help="Comma-separated split group names to process.")
-    postprocess_parser.add_argument("--stages", default=None, help="Comma-separated stages or aliases such as sv,tdb,mods.")
-    postprocess_parser.add_argument("--run-id", default=None, help="Optional run ID. Defaults to a timestamped name.")
-    postprocess_parser.add_argument("--dry-run", action="store_true", default=False, help="Write manifests and commands without executing.")
-    postprocess_parser.add_argument("--force", action="store_true", default=False, help="Rerun stages even if done markers already exist.")
-    postprocess_parser.add_argument("--rerun-failed", action="store_true", default=False, help="Allow rerunning tasks that previously failed.")
-    postprocess_parser.add_argument("--keep-going", action="store_true", default=False, help="Continue independent stages after a task failure.")
-    postprocess_parser.add_argument("--sniffles-bin", default=None, help="Optional Sniffles executable path.")
-    postprocess_parser.add_argument("--bcftools-bin", default=None, help="Optional bcftools executable path.")
-    postprocess_parser.add_argument("--kanpig-bin", default=None, help="Optional Kanpig executable path.")
-    postprocess_parser.add_argument("--truvari-bin", default=None, help="Optional Truvari executable path.")
-    postprocess_parser.add_argument("--medaka-bin", default=None, help="Optional Medaka executable path.")
-    postprocess_parser.add_argument("--tdb-bin", default=None, help="Optional tdb executable path.")
-    postprocess_parser.add_argument("--modkit-bin", default=None, help="Optional modkit executable path.")
-    postprocess_parser.add_argument("--tabix-bin", default=None, help="Optional tabix executable path.")
-    postprocess_parser.add_argument("--sniffles-threads", type=int, default=24, help="Threads for Sniffles. Default=24.")
-    postprocess_parser.add_argument(
+    discover_parser.add_argument("--slurm-account", default=None, help="Slurm account written into the generated submit_pipeline.sh. Optional.")
+    discover_parser.add_argument("--split-dir", default=None, help="Optional override for the deconv_requested_group_splits directory.")
+    discover_parser.add_argument("--sample-id", default=None, help="Optional sample ID override.")
+    discover_parser.add_argument("--groups", default=None, help=argparse.SUPPRESS)
+    discover_parser.add_argument("--stages", default=None, help=argparse.SUPPRESS)
+    discover_parser.add_argument("--run-id", default=None, help=argparse.SUPPRESS)
+    discover_parser.add_argument("--dry-run", action="store_true", default=False, help="Write manifests and commands without executing.")
+    discover_parser.add_argument("--force", action="store_true", default=False, help="Rerun stages even if done markers already exist.")
+    discover_parser.add_argument("--rerun-failed", action="store_true", default=False, help="Allow rerunning tasks that previously failed.")
+    discover_parser.add_argument("--sniffles-bin", default=None, help="Optional Sniffles executable path.")
+    discover_parser.add_argument("--bcftools-bin", default=None, help="Optional bcftools executable path.")
+    discover_parser.add_argument("--kanpig-bin", default=None, help="Optional Kanpig executable path.")
+    discover_parser.add_argument("--truvari-bin", default=None, help="Optional Truvari executable path.")
+    discover_parser.add_argument("--medaka-bin", default=None, help="Optional Medaka executable path.")
+    discover_parser.add_argument("--tdb-bin", default=None, help="Optional tdb executable path.")
+    discover_parser.add_argument("--modkit-bin", default=None, help="Optional modkit executable path.")
+    discover_parser.add_argument("--tabix-bin", default=None, help="Optional tabix executable path.")
+    discover_parser.add_argument("--threads", type=int, default=16, help="Threads used by all tools (sniffles, kanpig, medaka, modkit, clair3, clairS, tdb merge). Default=16.")
+    discover_parser.add_argument(
         "--sniffles-mosaic-filter-expression",
         default="INFO/MOSAIC=1",
         help="bcftools expression used with -f PASS to derive the Kanpig handoff VCF. Default=INFO/MOSAIC=1.",
     )
-    postprocess_parser.add_argument("--kanpig-threads", type=int, default=8, help="Threads for Kanpig. Default=8.")
-    postprocess_parser.add_argument("--kanpig-seqsim", type=float, default=0.8, help="Kanpig seqsim. Default=0.8.")
-    postprocess_parser.add_argument("--kanpig-sizesim", type=float, default=0.85, help="Kanpig sizesim. Default=0.85.")
-    postprocess_parser.add_argument("--kanpig-passonly", action="store_true", default=True, help="Use --passonly for Kanpig.")
-    postprocess_parser.add_argument(
+    discover_parser.add_argument("--kanpig-seqsim", type=float, default=0.8, help="Kanpig seqsim. Default=0.8.")
+    discover_parser.add_argument("--kanpig-sizesim", type=float, default=0.85, help="Kanpig sizesim. Default=0.85.")
+    discover_parser.add_argument("--kanpig-passonly", action="store_true", default=True, help="Use --passonly for Kanpig.")
+    discover_parser.add_argument(
         "--kanpig-sample-name-template",
         default="{sample_id}_{group}",
         help="Sample naming template for Kanpig. Default={sample_id}_{group}.",
     )
-    postprocess_parser.add_argument("--collapse-use", choices=["kanpig", "sniffles"], default="kanpig", help="Which callset to collapse. Default=kanpig.")
-    postprocess_parser.add_argument("--truvari-refdist", type=int, default=500, help="Truvari refdist. Default=500.")
-    postprocess_parser.add_argument("--truvari-pctseq", type=float, default=0.95, help="Truvari pctseq. Default=0.95.")
-    postprocess_parser.add_argument("--truvari-pctsize", type=float, default=0.95, help="Truvari pctsize. Default=0.95.")
-    postprocess_parser.add_argument("--truvari-passonly", action="store_true", default=True, help="Use --passonly for truvari collapse.")
-    postprocess_parser.add_argument("--medaka-workers", type=int, default=8, help="Workers for medaka tandem. Default=8.")
-    postprocess_parser.add_argument(
+    discover_parser.add_argument("--collapse-use", choices=["kanpig", "sniffles"], default="kanpig", help="Which callset to collapse. Default=kanpig.")
+    discover_parser.add_argument("--truvari-refdist", type=int, default=500, help="Truvari refdist. Default=500.")
+    discover_parser.add_argument("--truvari-pctseq", type=float, default=0.95, help="Truvari pctseq. Default=0.95.")
+    discover_parser.add_argument("--truvari-pctsize", type=float, default=0.95, help="Truvari pctsize. Default=0.95.")
+    discover_parser.add_argument("--truvari-passonly", action="store_true", default=True, help="Use --passonly for truvari collapse.")
+    discover_parser.add_argument(
         "--medaka-model",
         default="dna_r10.4.1_e8.2_400bps_sup@v4.3.0:consensus",
         help="Model for medaka tandem.",
     )
-    postprocess_parser.add_argument("--medaka-padding", type=int, default=250, help="Padding for medaka tandem. Default=250.")
-    postprocess_parser.add_argument(
+    discover_parser.add_argument("--medaka-padding", type=int, default=250, help="Padding for medaka tandem. Default=250.")
+    discover_parser.add_argument(
         "--medaka-sample-name-template",
         default="{sample_id}.{group}",
         help="Sample naming template for medaka tandem. Default={sample_id}.{group}.",
     )
-    postprocess_parser.add_argument("--tdb-create-mem", type=int, default=4, help="Memory in GB for tdb create. Default=4.")
-    postprocess_parser.add_argument("--tdb-create-force", action="store_true", default=False, help="Pass --force to tdb create.")
-    postprocess_parser.add_argument("--tdb-merge-threads", type=int, default=1, help="Threads for tdb merge. Default=1.")
-    postprocess_parser.add_argument("--post-tdb-script", default=None, help="Optional custom post-tdb script.")
-    postprocess_parser.add_argument("--post-tdb-args", default=None, help="Optional extra args passed to the post-tdb script.")
-    postprocess_parser.add_argument("--modkit-threads", type=int, default=8, help="Threads for modkit pileup. Default=8.")
-    postprocess_parser.add_argument(
+    discover_parser.add_argument("--tdb-create-mem", type=int, default=4, help="Memory in GB for tdb create. Default=4.")
+    discover_parser.add_argument("--tdb-create-force", action="store_true", default=False, help="Pass --force to tdb create.")
+    discover_parser.add_argument(
         "--mods-mode",
         choices=["combined", "separate"],
         default="separate",
         help="Output mode label for modkit-derived methylation summaries. Default=separate.",
     )
+    discover_parser.add_argument("--clair3-bin", default=None, help="Optional run_clair3.sh executable path.")
+    discover_parser.add_argument("--clair3-platform", default="ont", help="Sequencing platform for Clair3 (e.g. ont, hifi). Default=ont.")
+    discover_parser.add_argument("--clair3-model-path", default=None, help="Path to Clair3 model directory. Required when running the clair3 stage.")
+    discover_parser.add_argument("--clairs-bin", default=None, help="Optional run_clairs executable path.")
+    discover_parser.add_argument(
+        "--clairs-platform",
+        default="ont_r10_dorado_sup_5khz",
+        help="Sequencing platform for ClairS. Default=ont_r10_dorado_sup_5khz.",
+    )
+    discover_parser.add_argument("--clairs-tumor-group", default=None, help=argparse.SUPPRESS)
 
 
     if len(argv) == 0:
@@ -739,8 +740,8 @@ def parse_args(argv):
     elif len(argv) == 1 and argv[0] == "report":
         report_parser.print_help(sys.stderr)
         sys.exit(1)
-    elif len(argv) == 1 and argv[0] == "postprocess":
-        postprocess_parser.print_help(sys.stderr)
+    elif len(argv) == 1 and argv[0] == "discover":
+        discover_parser.print_help(sys.stderr)
         sys.exit(1)
     args = parser.parse_args(argv)
     return args

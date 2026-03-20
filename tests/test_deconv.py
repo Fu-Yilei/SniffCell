@@ -293,6 +293,49 @@ class TestRequestedBamSplits(unittest.TestCase):
             self.assertEqual(first_tsv["readname"].tolist(), ["r1", "r2"])
             self.assertEqual(second_tsv["readname"].tolist(), ["r3"])
 
+    def test_requested_group_splits_exclude_reads_matching_multiple_requested_groups(self):
+        read_summary_df = pd.DataFrame(
+            {
+                "readname": ["r1", "r2", "r3"],
+                "linked_leaf_celltypes": ["A", "A|D", "D"],
+                "linked_celltypes": ["A", "A|D", "D"],
+            }
+        )
+        read_assignment_df = pd.DataFrame(
+            {
+                "best_group": ["A", "D", "A"],
+                "best_group_leaves": ["A", "D", "A"],
+                "other_group_leaves": ["D", "A", "D"],
+                "code_order": ["A|D", "A|D", "A|D"],
+                "code": ["10", "01", "10"],
+                "is_best_group": [True, True, True],
+            },
+            index=pd.Index(["r1", "r2", "r3"], name="readname"),
+        )
+
+        with tempfile.TemporaryDirectory() as td:
+            bam_path = Path(td) / "input.bam"
+            self._write_test_bam(bam_path, ["r1", "r2", "r3"])
+
+            manifest = _write_requested_split_group_outputs(
+                bam_path=str(bam_path),
+                read_summary_df=read_summary_df,
+                read_assignment_df=read_assignment_df,
+                split_group_spec="A;D",
+                output_dir=str(Path(td) / "splits"),
+            )
+
+            self.assertEqual(manifest["n_reads"].tolist(), [1, 1])
+            first_bam = Path(td) / "splits" / "A.bam"
+            second_bam = Path(td) / "splits" / "D.bam"
+            self.assertEqual(self._read_bam_names(first_bam), ["r1"])
+            self.assertEqual(self._read_bam_names(second_bam), ["r3"])
+
+            first_tsv = pd.read_csv(Path(td) / "splits" / "A.read_summary.tsv", sep="\t")
+            second_tsv = pd.read_csv(Path(td) / "splits" / "D.read_summary.tsv", sep="\t")
+            self.assertEqual(first_tsv["readname"].tolist(), ["r1"])
+            self.assertEqual(second_tsv["readname"].tolist(), ["r3"])
+
 
 if __name__ == "__main__":
     unittest.main()

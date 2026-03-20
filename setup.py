@@ -11,4 +11,17 @@ setup(
     description='SniffCell: Annotate SVs cell type based on CpG methylation',
     long_description=open('README.md').read(),
     long_description_content_type='text/markdown',
+    python_requires='>=3.10',
+    install_requires=[
+        'numpy',
+        'pandas',
+        'scipy',
+        'scikit-learn',
+        'pysam',
+        'tqdm',
+        'matplotlib',
+    ],
+    extras_require={
+        'igvreport': ['igv-reports'],
+    },
 )

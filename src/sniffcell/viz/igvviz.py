@@ -364,7 +364,7 @@ def _build_igv_batch_lines(
     support_phase_group_tag: str,
     snapshot_width: int,
     snapshot_height: int,
-    hide_methylation: bool,
+    hide_methylation: bool = False,
 ) -> list[str]:
     def _append_binary_basemod_preferences(out_lines: list[str]) -> None:
         out_lines.append(f"preference BASEMOD.THRESHOLD {_BASEMOD_BINARY_THRESHOLD}")

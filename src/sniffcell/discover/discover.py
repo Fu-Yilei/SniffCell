@@ -931,7 +931,7 @@ def _run_sv_post_processing(ctx: RunContext) -> None:
     cmd = [
         sys.executable,
         "-m",
-        "sniffcell.postprocess.sv_post_processing",
+        "sniffcell.discover.sv_post_processing",
         "--split-dir",
         str(ctx.split_dir),
         "--reference",
@@ -1119,7 +1119,7 @@ def _run_tr_post_processing(ctx: RunContext) -> None:
     cmd = [
         sys.executable,
         "-m",
-        "sniffcell.postprocess.tr_post_processing",
+        "sniffcell.discover.tr_post_processing",
         "--split-dir",
         str(ctx.split_dir),
         "--groups",

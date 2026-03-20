@@ -81,6 +81,30 @@ class TestIgvVizHelpers(unittest.TestCase):
         self.assertIn("preference SAM.MAX_VISIBLE_RANGE 250000", text)
         self.assertNotIn("setWindowBounds 50 50 2800 1500", text)
 
+    def test_build_batch_lines_can_hide_methylation_tracks(self):
+        lines = _build_igv_batch_lines(
+            jobs=[
+                {
+                    "tagged_bam": "/tmp/a.tagged.bam",
+                    "ctdmr_track": "/tmp/a.ctdmr.bed",
+                    "locus": "chr1:100-200",
+                    "snapshot_name": "sv1.a.igv.png",
+                }
+            ],
+            snapshot_dir=Path("/tmp/out"),
+            reference_path="/tmp/ref.fa",
+            gene_track_path=None,
+            visibility_window=250000,
+            phase_tag="HP",
+            support_phase_group_tag="SG",
+            snapshot_width=2800,
+            snapshot_height=1500,
+            hide_methylation=True,
+        )
+        text = "\n".join(lines)
+        self.assertNotIn("colorBy BASE_MODIFICATION_2COLOR", text)
+        self.assertNotIn("preference BASEMOD.THRESHOLD 0.7", text)
+
     def test_infer_gene_track_for_hg38_reference(self):
         self.assertEqual(
             _infer_gene_track("/tmp/GCA_000001405.15_GRCh38_no_alt_analysis_set.fa"),

@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from sniffcell.postprocess.postprocess import (
+from sniffcell.discover.discover import (
     _expand_path,
     _infer_sample_id,
     _sanitize_token,
@@ -60,7 +60,7 @@ class TrPostArgs:
 
 def _build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m sniffcell.postprocess.tr_post_processing",
+        prog="python -m sniffcell.discover.tr_post_processing",
         description=(
             "Summarize pairwise tandem-repeat length differences between two split groups "
             "using merged TDB output and Medaka trimmed reads."
