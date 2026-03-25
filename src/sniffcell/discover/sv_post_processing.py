@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import gzip
+import json
 import logging
 import shutil
 import subprocess
@@ -31,10 +32,13 @@ class TwoSampleSvArgs:
     group_a: str
     group_b: str
     mosaic_filter_expression: str
-    min_total_ad: int
+    apply_mosaic_filter: bool
+    min_dp: int
     min_target_alt_ad: int
     other_max_alt_ad: int
     bcftools_bin: str
+    bgzip_bin: str
+    tabix_bin: str
     truvari_bin: str
     kanpig_bin: str
     threads: int
@@ -112,23 +116,17 @@ def _filter_sniffles_vcf(
     input_vcf: Path,
     output_vcf: Path,
     expr: str,
+    apply_mosaic_filter: bool,
     stdout_path: Path,
     stderr_path: Path,
 ) -> None:
     output_vcf.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [bcftools_bin, "view", "-f", "PASS"]
+    if apply_mosaic_filter:
+        cmd += ["-i", expr]
+    cmd += ["-Oz", "-o", str(output_vcf), str(input_vcf)]
     _run(
-        [
-            bcftools_bin,
-            "view",
-            "-f",
-            "PASS",
-            "-i",
-            expr,
-            "-Oz",
-            "-o",
-            str(output_vcf),
-            str(input_vcf),
-        ],
+        cmd,
         stdout_path=stdout_path,
         stderr_path=stderr_path,
     )
@@ -144,6 +142,8 @@ def _collapse_two_vcfs(
     bcftools_bin: str,
     truvari_bin: str,
     reference: Path,
+    group_a_label: str,
+    group_b_label: str,
     group_a_vcf: Path,
     group_b_vcf: Path,
     stage_dir: Path,
@@ -151,8 +151,8 @@ def _collapse_two_vcfs(
     stderr_path: Path,
 ) -> tuple[Path, Path]:
     stage_dir.mkdir(parents=True, exist_ok=True)
-    sampleless_a = stage_dir / f"{group_a_vcf.stem.replace('.vcf', '')}.sites.vcf.gz"
-    sampleless_b = stage_dir / f"{group_b_vcf.stem.replace('.vcf', '')}.sites.vcf.gz"
+    sampleless_a = stage_dir / f"{_sanitize_token(group_a_label)}.sites.vcf.gz"
+    sampleless_b = stage_dir / f"{_sanitize_token(group_b_label)}.sites.vcf.gz"
     merged_input = stage_dir / "collapse.inputs.vcf.gz"
     raw_output = stage_dir / "collapsed.vcf"
     removed_vcf = stage_dir / "removed.vcf"
@@ -269,24 +269,24 @@ def _run_kanpig_on_merged_sites(
     return output_vcf
 
 
-def _alt_present(gt: str) -> bool:
-    return gt in {"0/1", "1/0", "1/1", "0|1", "1|0", "1|1"}
-
-
-def _parse_ad(sample_field: str) -> tuple[str, int, int] | None:
-    parts = sample_field.rstrip().split(":")
-    if len(parts) < 7:
+def _parse_sample_fields(format_field: str, sample_field: str) -> tuple[str, int | None, int, int] | None:
+    keys = format_field.rstrip().split(":")
+    values = sample_field.rstrip().split(":")
+    if not keys:
         return None
-    gt = parts[0]
-    ad = parts[6]
+    sample_map = {key: values[idx] if idx < len(values) else "." for idx, key in enumerate(keys)}
+    gt = sample_map.get("GT", ".")
+    dp_value = sample_map.get("DP", ".")
+    dp = int(dp_value) if dp_value not in {None, ".", ""} else None
+    ad = sample_map.get("AD", ".")
     if ad in {".", "./."}:
-        return gt, 0, 0
+        return gt, dp, 0, 0
     vals = ad.split(",")
     if len(vals) < 2:
-        return gt, 0, 0
+        return gt, dp, 0, 0
     ref = int(vals[0]) if vals[0] != "." else 0
     alt = int(vals[1]) if vals[1] != "." else 0
-    return gt, ref, alt
+    return gt, dp, ref, alt
 
 
 def _filter_sample_specific_by_ad(
@@ -294,7 +294,9 @@ def _filter_sample_specific_by_ad(
     kanpig_vcf_gz: Path,
     sample_a_label: str,
     sample_b_label: str,
-    min_total_ad: int,
+    bgzip_bin: str,
+    tabix_bin: str,
+    min_dp: int,
     min_target_alt_ad: int,
     other_max_alt_ad: int,
     output_dir: Path,
@@ -322,29 +324,236 @@ def _filter_sample_specific_by_ad(
             row = line.rstrip("\n").split("\t")
             if len(row) < 11:
                 continue
-            parsed_a = _parse_ad(row[9])
-            parsed_b = _parse_ad(row[10])
+            parsed_a = _parse_sample_fields(row[8], row[9])
+            parsed_b = _parse_sample_fields(row[8], row[10])
             if parsed_a is None or parsed_b is None:
                 continue
-            gt_a, ref_a, alt_a = parsed_a
-            gt_b, ref_b, alt_b = parsed_b
-            if (ref_a + alt_a) <= min_total_ad or (ref_b + alt_b) <= min_total_ad:
+            _gt_a, dp_a, ref_a, alt_a = parsed_a
+            _gt_b, dp_b, ref_b, alt_b = parsed_b
+            depth_a = dp_a if dp_a is not None else ref_a + alt_a
+            depth_b = dp_b if dp_b is not None else ref_b + alt_b
+            if depth_a < min_dp or depth_b < min_dp:
                 continue
             if alt_a >= min_target_alt_ad and alt_b <= other_max_alt_ad:
                 a_handle.write(line)
             elif alt_b >= min_target_alt_ad and alt_a <= other_max_alt_ad:
                 b_handle.write(line)
-            elif _alt_present(gt_a) and _alt_present(gt_b):
+            elif alt_a >= min_target_alt_ad and alt_b >= min_target_alt_ad:
                 shared_handle.write(line)
 
     for plain in (out_a, out_b, out_shared):
-        subprocess.run(["bgzip", "-f", str(plain)], check=True)
-        subprocess.run(["tabix", "-f", "-p", "vcf", str(plain) + ".gz"], check=True)
+        subprocess.run([bgzip_bin, "-f", str(plain)], check=True)
+        subprocess.run([tabix_bin, "-f", "-p", "vcf", str(plain) + ".gz"], check=True)
     return {
         "sample_a_only": Path(str(out_a) + ".gz"),
         "sample_b_only": Path(str(out_b) + ".gz"),
         "shared": Path(str(out_shared) + ".gz"),
     }
+
+
+def _parse_rnames_tsv(rnames_tsv: Path) -> dict[tuple[str, str | None], list[str]]:
+    """Load kanpig --rnames output.
+
+    Supported formats:
+      1. variant_id <tab> sample_name <tab> read1,read2,...
+      2. variant_id <tab> read_name
+
+    The first form is stored under ``(variant_id, sample_name)`` and the second
+    under ``(variant_id, None)``. Comment/header lines starting with ``#`` are
+    ignored. Returns an empty dict if the file is missing.
+    """
+    lookup: dict[tuple[str, str | None], list[str]] = {}
+    if not rnames_tsv.exists():
+        return lookup
+    with rnames_tsv.open(encoding="utf-8") as handle:
+        for line in handle:
+            line = line.rstrip("\n")
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split("\t")
+            if len(parts) < 2:
+                continue
+            if len(parts) >= 3:
+                variant_id, sample, rnames_str = parts[0], parts[1], parts[2]
+                lookup[(variant_id, sample)] = [r for r in rnames_str.split(",") if r]
+                continue
+            variant_id, read_name = parts[0], parts[1]
+            key = (variant_id, None)
+            lookup.setdefault(key, []).append(read_name)
+    return lookup
+
+
+def _load_group_read_names(read_summary_path: str | None) -> set[str]:
+    read_names: set[str] = set()
+    if not read_summary_path:
+        return read_names
+    path = Path(read_summary_path)
+    if not path.exists():
+        return read_names
+    with path.open(encoding="utf-8") as handle:
+        reader = csv.DictReader(handle, delimiter="\t")
+        for row in reader:
+            read_name = str(row.get("readname", "")).strip()
+            if read_name:
+                read_names.add(read_name)
+    return read_names
+
+
+def _parse_sv_vcf_to_rows(
+    vcf_gz: Path,
+    category: str,
+    rnames: dict[tuple[str, str | None], list[str]],
+    *,
+    group_a_read_names: set[str],
+    group_b_read_names: set[str],
+) -> list[dict]:
+    """Parse a kanpig two-sample VCF into BED-like row dicts.
+
+    Sample names are read from the #CHROM header line (columns 9 and 10) so
+    they can be used to look up read names in the rnames dict.
+    Coordinates are converted to 0-based BED (start = POS-1, end from INFO/END
+    or POS+|SVLEN|).
+    """
+    rows: list[dict] = []
+    sample_a_name: str | None = None
+    sample_b_name: str | None = None
+    opener = gzip.open
+    with vcf_gz.open("rb") as probe:
+        if probe.read(2) != b"\x1f\x8b":
+            opener = open
+    with opener(vcf_gz, "rt", encoding="utf-8") as handle:
+        for line in handle:
+            if line.startswith("##"):
+                continue
+            if line.startswith("#CHROM"):
+                cols = line.rstrip("\n").split("\t")
+                if len(cols) > 9:
+                    sample_a_name = cols[9]
+                if len(cols) > 10:
+                    sample_b_name = cols[10]
+                continue
+            fields = line.rstrip("\n").split("\t")
+            if len(fields) < 10:
+                continue
+            chrom = fields[0]
+            pos = int(fields[1])
+            sv_id = fields[2] if fields[2] not in (".", "") else f"{chrom}:{pos}"
+            vcf_filter = fields[6]
+            info_str = fields[7]
+            info: dict[str, str] = {}
+            for item in info_str.split(";"):
+                if "=" in item:
+                    k, v = item.split("=", 1)
+                    info[k] = v
+            svtype = info.get("SVTYPE", ".")
+            svlen_str = info.get("SVLEN", "")
+            svlen: int | None = None
+            if svlen_str not in ("", "."):
+                try:
+                    svlen = int(svlen_str)
+                except ValueError:
+                    pass
+            end_str = info.get("END", "")
+            if end_str:
+                end = int(end_str)
+            elif svlen is not None:
+                end = pos + abs(svlen)
+            else:
+                end = pos + max(len(fields[3]) - 1, 0)
+
+            parsed_a = _parse_sample_fields(fields[8], fields[9])
+            parsed_b = _parse_sample_fields(fields[8], fields[10]) if len(fields) > 10 else None
+
+            gt_a = ad_ref_a = ad_alt_a = "."
+            gt_b = ad_ref_b = ad_alt_b = "."
+            if parsed_a:
+                gt_a, _dp_a, ad_ref_a, ad_alt_a = parsed_a
+            if parsed_b:
+                gt_b, _dp_b, ad_ref_b, ad_alt_b = parsed_b
+
+            a_reads = rnames.get((sv_id, sample_a_name), []) if sample_a_name else []
+            b_reads = rnames.get((sv_id, sample_b_name), []) if sample_b_name else []
+            if (not a_reads) and (not b_reads):
+                merged_reads = rnames.get((sv_id, None), [])
+                if merged_reads:
+                    a_reads = [read_name for read_name in merged_reads if read_name in group_a_read_names]
+                    b_reads = [read_name for read_name in merged_reads if read_name in group_b_read_names]
+
+            rows.append({
+                "chrom": chrom,
+                "start": pos - 1,
+                "end": end,
+                "sv_id": sv_id,
+                "sv_type": svtype,
+                "sv_len": svlen if svlen is not None else ".",
+                "filter": vcf_filter,
+                "category": category,
+                "group_a_gt": gt_a,
+                "group_a_ad_ref": ad_ref_a,
+                "group_a_ad_alt": ad_alt_a,
+                "group_b_gt": gt_b,
+                "group_b_ad_ref": ad_ref_b,
+                "group_b_ad_alt": ad_alt_b,
+                "group_a_read_names": json.dumps(a_reads),
+                "group_b_read_names": json.dumps(b_reads),
+            })
+    return rows
+
+
+_SV_BED_COLS: list[str] = [
+    "chrom", "start", "end", "sv_id", "sv_type", "sv_len", "filter", "category",
+    "group_a_gt", "group_a_ad_ref", "group_a_ad_alt",
+    "group_b_gt", "group_b_ad_ref", "group_b_ad_alt",
+    "group_a_read_names", "group_b_read_names",
+]
+
+
+def _write_sv_bed_tsv(
+    *,
+    sample_a_only_vcf: Path,
+    sample_b_only_vcf: Path,
+    shared_vcf: Path,
+    rnames_tsv: Path,
+    group_a_read_names: set[str],
+    group_b_read_names: set[str],
+    output_path: Path,
+) -> None:
+    """Write a combined BED-like TSV from all three AD-filtered VCFs.
+
+    Rows from each VCF are tagged with category: group_a_only, group_b_only,
+    or shared.  Read names are joined from the kanpig rnames TSV.
+    Coordinates are 0-based BED (start) / 1-based (end).
+    """
+    rnames = _parse_rnames_tsv(rnames_tsv)
+    all_rows = (
+        _parse_sv_vcf_to_rows(
+            sample_a_only_vcf,
+            "group_a_only",
+            rnames,
+            group_a_read_names=group_a_read_names,
+            group_b_read_names=group_b_read_names,
+        )
+        + _parse_sv_vcf_to_rows(
+            sample_b_only_vcf,
+            "group_b_only",
+            rnames,
+            group_a_read_names=group_a_read_names,
+            group_b_read_names=group_b_read_names,
+        )
+        + _parse_sv_vcf_to_rows(
+            shared_vcf,
+            "shared",
+            rnames,
+            group_a_read_names=group_a_read_names,
+            group_b_read_names=group_b_read_names,
+        )
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, delimiter="\t", fieldnames=_SV_BED_COLS)
+        writer.writeheader()
+        for row in all_rows:
+            writer.writerow(row)
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -358,10 +567,20 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", default=None, help="Output directory. Default: <split-dir>/postprocess/sv_post_processing_<timestamp>")
     parser.add_argument("--sample-id", default=None, help="Optional sample ID override")
     parser.add_argument("--mosaic-filter-expression", default=DEFAULT_MOSAIC_FILTER_EXPR)
-    parser.add_argument("--min-total-ad", type=int, default=5, help="Require AD_ref + AD_alt > this threshold in both samples. Default=5")
-    parser.add_argument("--min-target-alt-ad", type=int, default=1, help="Minimum AD_alt for the kept sample. Default=1")
+    parser.add_argument("--mosaic-filter", action="store_true", default=False, help="Apply mosaic filter expression to bcftools view. Default: disabled")
+    parser.add_argument(
+        "--min-dp",
+        "--min-total-ad",
+        dest="min_dp",
+        type=int,
+        default=5,
+        help="Require DP >= this threshold in both samples; fallback to AD_ref + AD_alt if DP is missing. Default=5",
+    )
+    parser.add_argument("--min-target-alt-ad", type=int, default=2, help="Minimum AD_alt for the kept sample. Default=2")
     parser.add_argument("--other-max-alt-ad", type=int, default=0, help="Maximum AD_alt allowed in the absent sample. Default=0")
     parser.add_argument("--bcftools-bin", default=None)
+    parser.add_argument("--bgzip-bin", default=None)
+    parser.add_argument("--tabix-bin", default=None)
     parser.add_argument("--truvari-bin", default=None)
     parser.add_argument("--kanpig-bin", default=None)
     parser.add_argument("--threads", type=int, default=16)
@@ -385,10 +604,13 @@ def _resolve_args(raw_args) -> TwoSampleSvArgs:
         group_a=tokens[0],
         group_b=tokens[1],
         mosaic_filter_expression=str(raw_args.mosaic_filter_expression),
-        min_total_ad=int(raw_args.min_total_ad),
+        apply_mosaic_filter=bool(raw_args.mosaic_filter),
+        min_dp=int(raw_args.min_dp),
         min_target_alt_ad=int(raw_args.min_target_alt_ad),
         other_max_alt_ad=int(raw_args.other_max_alt_ad),
         bcftools_bin=_ensure_tool("bcftools", raw_args.bcftools_bin),
+        bgzip_bin=_ensure_tool("bgzip", raw_args.bgzip_bin),
+        tabix_bin=_ensure_tool("tabix", raw_args.tabix_bin),
         truvari_bin=_ensure_tool("truvari", raw_args.truvari_bin),
         kanpig_bin=_ensure_tool("kanpig", raw_args.kanpig_bin),
         threads=int(raw_args.threads),
@@ -426,13 +648,14 @@ def sv_post_processing_main(cli_args=None) -> dict[str, str]:
     for path in (args.output_dir, logs_dir, filtered_dir, collapse_dir, kanpig_dir, ad_dir):
         path.mkdir(parents=True, exist_ok=True)
 
-    filtered_a = filtered_dir / _sanitize_token(group_a.name) / "sniffles.mosaic_only.vcf.gz"
-    filtered_b = filtered_dir / _sanitize_token(group_b.name) / "sniffles.mosaic_only.vcf.gz"
+    filtered_a = filtered_dir / _sanitize_token(group_a.name) / "sniffles.pass_filtered.vcf.gz"
+    filtered_b = filtered_dir / _sanitize_token(group_b.name) / "sniffles.pass_filtered.vcf.gz"
     _filter_sniffles_vcf(
         bcftools_bin=args.bcftools_bin,
         input_vcf=_sniffles_vcf_path(args.split_dir, group_a.name),
         output_vcf=filtered_a,
         expr=args.mosaic_filter_expression,
+        apply_mosaic_filter=args.apply_mosaic_filter,
         stdout_path=logs_dir / f"sniffles_filter.{_sanitize_token(group_a.name)}.out",
         stderr_path=logs_dir / f"sniffles_filter.{_sanitize_token(group_a.name)}.err",
     )
@@ -441,6 +664,7 @@ def sv_post_processing_main(cli_args=None) -> dict[str, str]:
         input_vcf=_sniffles_vcf_path(args.split_dir, group_b.name),
         output_vcf=filtered_b,
         expr=args.mosaic_filter_expression,
+        apply_mosaic_filter=args.apply_mosaic_filter,
         stdout_path=logs_dir / f"sniffles_filter.{_sanitize_token(group_b.name)}.out",
         stderr_path=logs_dir / f"sniffles_filter.{_sanitize_token(group_b.name)}.err",
     )
@@ -449,6 +673,8 @@ def sv_post_processing_main(cli_args=None) -> dict[str, str]:
         bcftools_bin=args.bcftools_bin,
         truvari_bin=args.truvari_bin,
         reference=args.reference,
+        group_a_label=group_a.name,
+        group_b_label=group_b.name,
         group_a_vcf=filtered_a,
         group_b_vcf=filtered_b,
         stage_dir=collapse_dir,
@@ -477,10 +703,25 @@ def sv_post_processing_main(cli_args=None) -> dict[str, str]:
         kanpig_vcf_gz=kanpig_merged,
         sample_a_label=group_a.name,
         sample_b_label=group_b.name,
-        min_total_ad=args.min_total_ad,
+        bgzip_bin=args.bgzip_bin,
+        tabix_bin=args.tabix_bin,
+        min_dp=args.min_dp,
         min_target_alt_ad=args.min_target_alt_ad,
         other_max_alt_ad=args.other_max_alt_ad,
         output_dir=ad_dir,
+    )
+
+    group_a_read_names = _load_group_read_names(group_a.read_summary_path)
+    group_b_read_names = _load_group_read_names(group_b.read_summary_path)
+    sv_bed_path = args.output_dir / "sv_changes.bed.tsv"
+    _write_sv_bed_tsv(
+        sample_a_only_vcf=filtered_outputs["sample_a_only"],
+        sample_b_only_vcf=filtered_outputs["sample_b_only"],
+        shared_vcf=filtered_outputs["shared"],
+        rnames_tsv=kanpig_dir / "kanpig_merged.rnames.tsv",
+        group_a_read_names=group_a_read_names,
+        group_b_read_names=group_b_read_names,
+        output_path=sv_bed_path,
     )
 
     summary = {
@@ -496,10 +737,12 @@ def sv_post_processing_main(cli_args=None) -> dict[str, str]:
         "sample_a_only_vcf": str(filtered_outputs["sample_a_only"]),
         "sample_b_only_vcf": str(filtered_outputs["sample_b_only"]),
         "shared_vcf": str(filtered_outputs["shared"]),
+        "sv_bed_tsv": str(sv_bed_path),
         "params": {
-            "min_total_ad": args.min_total_ad,
+            "min_dp": args.min_dp,
             "min_target_alt_ad": args.min_target_alt_ad,
             "other_max_alt_ad": args.other_max_alt_ad,
+            "apply_mosaic_filter": args.apply_mosaic_filter,
             "mosaic_filter_expression": args.mosaic_filter_expression,
             "threads": args.threads,
             "kanpig_seqsim": args.kanpig_seqsim,

@@ -12,14 +12,17 @@ import subprocess
 import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Iterable, Sequence
+
+from sniffcell.discover.harmonize_variants import write_harmonized_variants
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_MOSAIC_FILTER_EXPR = "INFO/MOSAIC=1"
-DEFAULT_SV_POST_MIN_TOTAL_AD = 5
-DEFAULT_SV_POST_MIN_TARGET_ALT_AD = 1
+DEFAULT_SV_POST_MIN_DP = 5
+DEFAULT_SV_POST_MIN_TARGET_ALT_AD = 2
 DEFAULT_SV_POST_OTHER_MAX_ALT_AD = 0
 DEFAULT_STAGE_ORDER = (
     "sniffles",
@@ -48,6 +51,18 @@ GROUP_SCOPED_STAGES = {
     "tdb_create",
     "clair3",
     "modkit",
+}
+STAGE_RUNTIME_TOOLS = {
+    "sniffles": {"sniffles", "bcftools"},
+    "sniffles_filter": {"bcftools"},
+    "kanpig": {"kanpig", "bcftools"},
+    "collapse": {"bcftools", "truvari", "kanpig", "bgzip", "tabix"},
+    "medaka": {"medaka"},
+    "tdb_create": {"tdb"},
+    "tdb_merge": {"tdb"},
+    "clair3": {"clair3"},
+    "clairs": {"clairs"},
+    "modkit": {"modkit", "tabix"},
 }
 
 
@@ -103,6 +118,25 @@ def _ensure_tool(tool: str, explicit_path: str | None = None) -> str:
     if not found:
         raise FileNotFoundError(f"Required executable not found in PATH: {tool}")
     return found
+
+
+@lru_cache(maxsize=None)
+def _tool_help_text(tool_path: str) -> str:
+    try:
+        completed = subprocess.run(
+            [tool_path, "--help"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        return ""
+    return "\n".join(part for part in (completed.stdout, completed.stderr) if part)
+
+
+def _sniffles_supports_sample_name(tool_path: str) -> bool:
+    return "--sample-name" in _tool_help_text(tool_path)
 
 
 def _resolve_tool_optional(tool: str, explicit_path: str | None, required: bool) -> str:
@@ -206,6 +240,13 @@ def _parse_stages(stage_text: str | None) -> tuple[str, ...]:
     return tuple(requested)
 
 
+def _required_tools_for_stages(stages: Sequence[str]) -> set[str]:
+    required = {"python"}
+    for stage in stages:
+        required.update(STAGE_RUNTIME_TOOLS.get(stage, set()))
+    return required
+
+
 def _infer_sample_id(deconv_dir: Path) -> str:
     parent = deconv_dir.parent
     if parent.name:
@@ -269,18 +310,20 @@ def _build_context(args) -> RunContext:
     run_id = args.run_id or f"discover_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     run_root = split_dir / "discover" / run_id
     stages = _parse_stages(args.stages)
+    required_tools = _required_tools_for_stages(stages)
     tool_paths = {
-        "bcftools": _ensure_tool("bcftools", args.bcftools_bin),
-        "kanpig": _ensure_tool("kanpig", args.kanpig_bin),
-        "medaka": _ensure_tool("medaka", args.medaka_bin),
-        "modkit": _ensure_tool("modkit", args.modkit_bin),
+        "bcftools": _resolve_tool_optional("bcftools", args.bcftools_bin, required="bcftools" in required_tools),
+        "bgzip": _resolve_tool_optional("bgzip", args.bgzip_bin, required="bgzip" in required_tools),
+        "kanpig": _resolve_tool_optional("kanpig", args.kanpig_bin, required="kanpig" in required_tools),
+        "medaka": _resolve_tool_optional("medaka", args.medaka_bin, required="medaka" in required_tools),
+        "modkit": _resolve_tool_optional("modkit", args.modkit_bin, required="modkit" in required_tools),
         "python": _ensure_tool("python", sys.executable),
-        "sniffles": _ensure_tool("sniffles", args.sniffles_bin),
-        "tabix": _ensure_tool("tabix", args.tabix_bin),
-        "tdb": _ensure_tool("tdb", args.tdb_bin),
-        "truvari": _ensure_tool("truvari", args.truvari_bin),
-        "clair3": _resolve_tool_optional("run_clair3.sh", args.clair3_bin, required=False),
-        "clairs": _resolve_tool_optional("run_clairs", args.clairs_bin, required=False),
+        "sniffles": _resolve_tool_optional("sniffles", args.sniffles_bin, required="sniffles" in required_tools),
+        "tabix": _resolve_tool_optional("tabix", args.tabix_bin, required="tabix" in required_tools),
+        "tdb": _resolve_tool_optional("tdb", args.tdb_bin, required="tdb" in required_tools),
+        "truvari": _resolve_tool_optional("truvari", args.truvari_bin, required="truvari" in required_tools),
+        "clair3": _resolve_tool_optional("run_clair3.sh", args.clair3_bin, required="clair3" in required_tools),
+        "clairs": _resolve_tool_optional("run_clairs", args.clairs_bin, required="clairs" in required_tools),
     }
     reference = _expand_path(args.reference)
     tr_bed = _expand_path(args.tr_bed)
@@ -295,9 +338,11 @@ def _build_context(args) -> RunContext:
         "kanpig_sizesim": args.kanpig_sizesim,
         "medaka_model": args.medaka_model,
         "medaka_padding": args.medaka_padding,
+        "medaka_phasing": args.medaka_phasing,
         "medaka_sample_name_template": args.medaka_sample_name_template,
         "mods_mode": args.mods_mode,
         "mosaic_filter_expression": args.sniffles_mosaic_filter_expression,
+        "sniffles_cluster_merge_len": args.sniffles_cluster_merge_len,
         "slurm_account": args.slurm_account,
         "sniffles_include_germline": True,
         "sniffles_mosaic": True,
@@ -604,6 +649,68 @@ def _update_status(ctx: RunContext, task_id: str, payload: dict[str, object]) ->
         fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
+def _selected_task_specs(ctx: RunContext) -> list[tuple[str, str | None]]:
+    specs: list[tuple[str, str | None]] = []
+    for stage in ctx.stages:
+        if stage in GROUP_SCOPED_STAGES:
+            specs.extend((stage, group_name) for group_name in ctx.selected_groups)
+            continue
+        if stage == "collapse":
+            specs.extend(
+                [
+                    ("collapse_inputs", None),
+                    ("collapse", None),
+                    ("sv_post_processing", None),
+                ]
+            )
+            continue
+        if stage == "tdb_merge":
+            specs.append(("tdb_merge", None))
+            continue
+        if stage == "clairs":
+            if len(ctx.selected_groups) != 2:
+                raise ValueError("clairs requires exactly two selected groups")
+            tumor_override = ctx.params.get("clairs_tumor_group")
+            if tumor_override:
+                normal = next(group for group in ctx.selected_groups if group != tumor_override)
+                specs.append(("clairs", f"{_sanitize_token(tumor_override)}_vs_{_sanitize_token(normal)}"))
+            else:
+                group_a, group_b = ctx.selected_groups
+                specs.extend(
+                    [
+                        ("clairs", f"{_sanitize_token(group_a)}_vs_{_sanitize_token(group_b)}"),
+                        ("clairs", f"{_sanitize_token(group_b)}_vs_{_sanitize_token(group_a)}"),
+                    ]
+                )
+            continue
+        raise ValueError(f"Unsupported stage: {stage}")
+    return specs
+
+
+def _clear_force_rerun_state(ctx: RunContext) -> None:
+    if not ctx.force:
+        return
+    status_path = ctx.status_dir / "discover_status.json"
+    status_payload = _read_json(status_path) if status_path.exists() else {}
+    changed = False
+    seen: set[tuple[str, str | None]] = set()
+    for stage, group_name in _selected_task_specs(ctx):
+        spec = (stage, group_name)
+        if spec in seen:
+            continue
+        seen.add(spec)
+        task = _task_id(stage, group_name)
+        if task in status_payload:
+            status_payload.pop(task, None)
+            changed = True
+        for marker in (_done_path(ctx, stage, group_name), _failed_path(ctx, stage, group_name)):
+            if marker.exists():
+                marker.unlink()
+                changed = True
+    if changed:
+        _write_json(status_path, status_payload)
+
+
 def _run_task(
     *,
     ctx: RunContext,
@@ -672,7 +779,7 @@ def _run_sniffles(ctx: RunContext, group_name: str) -> None:
     stage_dir = _sniffles_stage_dir(ctx, group_name)
     stage_dir.mkdir(parents=True, exist_ok=True)
     output_vcf, output_snf = _sniffles_output_paths(ctx, group_name)
-    sample_name = f"{ctx.sample_id}_{group_name}"
+    sample_name = _sample_name(str(ctx.params["kanpig_sample_name_template"]), ctx.sample_id, group_name)
     cmd = [
         ctx.tool_paths["sniffles"],
         "--input",
@@ -685,13 +792,15 @@ def _run_sniffles(ctx: RunContext, group_name: str) -> None:
         str(output_snf),
         "--threads",
         str(ctx.params["threads"]),
-        "--sample-name",
-        sample_name,
         "--mosaic",
         "--mosaic-include-germline",
         "--output-rnames",
         "--allow-overwrite",
+        "--cluster-merge-len",
+        str(ctx.params["sniffles_cluster_merge_len"]),
     ]
+    if _sniffles_supports_sample_name(ctx.tool_paths["sniffles"]):
+        cmd[9:9] = ["--sample-name", sample_name]
     _run_task(ctx=ctx, stage="sniffles", group_name=group_name, command=cmd, outputs=[output_vcf, output_snf])
     if not ctx.dry_run:
         subprocess.run(
@@ -942,6 +1051,10 @@ def _run_sv_post_processing(ctx: RunContext) -> None:
         str(output_dir),
         "--bcftools-bin",
         ctx.tool_paths["bcftools"],
+        "--bgzip-bin",
+        ctx.tool_paths["bgzip"],
+        "--tabix-bin",
+        ctx.tool_paths["tabix"],
         "--truvari-bin",
         ctx.tool_paths["truvari"],
         "--kanpig-bin",
@@ -952,10 +1065,11 @@ def _run_sv_post_processing(ctx: RunContext) -> None:
         str(ctx.params["kanpig_seqsim"]),
         "--kanpig-sizesim",
         str(ctx.params["kanpig_sizesim"]),
+        "--mosaic-filter",
         "--mosaic-filter-expression",
         str(ctx.params["mosaic_filter_expression"]),
-        "--min-total-ad",
-        str(DEFAULT_SV_POST_MIN_TOTAL_AD),
+        "--min-dp",
+        str(DEFAULT_SV_POST_MIN_DP),
         "--min-target-alt-ad",
         str(DEFAULT_SV_POST_MIN_TARGET_ALT_AD),
         "--other-max-alt-ad",
@@ -1045,6 +1159,8 @@ def _run_medaka(ctx: RunContext, group_name: str) -> None:
         ctx.sex,
         str(stage_dir),
     ]
+    if ctx.params["medaka_phasing"]:
+        cmd[2:2] = ["--phasing", str(ctx.params["medaka_phasing"])]
     _run_task(
         ctx=ctx,
         stage="medaka",
@@ -1139,6 +1255,10 @@ def _run_tr_post_processing(ctx: RunContext) -> None:
         "--group-b-fasta",
         str(_resolve_trimmed_reads_input(ctx, group_b)),
     ]
+    if bool(ctx.params.get("tail_expansion_rescue", False)):
+        cmd.append("--tail-expansion-rescue")
+    if not bool(ctx.params.get("tail_require_sample_range_support", True)):
+        cmd.append("--no-tail-expansion-require-sample-range-support")
     _run_task(
         ctx=ctx,
         stage="tr_post_processing",
@@ -1223,7 +1343,52 @@ def _run_clairs(ctx: RunContext, tumor_group: str, normal_group: str) -> None:
     _run_task(ctx=ctx, stage="clairs", group_name=direction, command=cmd, outputs=[output_vcf])
 
 
+def _write_harmonized_variant_summary(ctx: RunContext) -> Path | None:
+    if len(ctx.selected_groups) != 2:
+        return None
+
+    sv_summary = _sv_post_stage_dir(ctx) / "summary.json"
+    tr_summary = _tr_post_stage_dir(ctx) / "summary.json"
+
+    sv_payload = _read_json(sv_summary) if sv_summary.exists() else {}
+    tr_payload = _read_json(tr_summary) if tr_summary.exists() else {}
+
+    sv_bed_text = str(sv_payload.get("sv_bed_tsv", "")).strip() if isinstance(sv_payload, dict) else ""
+    tr_bed_text = str(tr_payload.get("tr_bed_tsv", "")).strip() if isinstance(tr_payload, dict) else ""
+
+    sv_bed = Path(sv_bed_text) if sv_bed_text else None
+    tr_bed = Path(tr_bed_text) if tr_bed_text else None
+    if (sv_bed is None or not sv_bed.exists()) and (tr_bed is None or not tr_bed.exists()):
+        return None
+
+    group_a, group_b = ctx.selected_groups
+    group_a_label = _sample_name(str(ctx.params["medaka_sample_name_template"]), ctx.sample_id, group_a)
+    group_b_label = _sample_name(str(ctx.params["medaka_sample_name_template"]), ctx.sample_id, group_b)
+    output_path = ctx.run_root / "harmonized_variants.tsv"
+    stats = write_harmonized_variants(
+        output=output_path,
+        group_a_label=group_a_label,
+        group_b_label=group_b_label,
+        tr_bed=tr_bed,
+        sv_bed=sv_bed,
+    )
+    _write_json(
+        ctx.run_root / "harmonized_variants_manifest.json",
+        {
+            "created_at": _now_utc(),
+            "output": str(output_path),
+            "group_a_label": group_a_label,
+            "group_b_label": group_b_label,
+            "tr_bed_tsv": (str(tr_bed) if tr_bed is not None and tr_bed.exists() else ""),
+            "sv_bed_tsv": (str(sv_bed) if sv_bed is not None and sv_bed.exists() else ""),
+            "counts": stats,
+        },
+    )
+    return output_path
+
+
 def _write_finalize_summary(ctx: RunContext) -> None:
+    harmonized_path = _write_harmonized_variant_summary(ctx)
     summary = {
         "completed_at": _now_utc(),
         "sample_id": ctx.sample_id,
@@ -1233,11 +1398,13 @@ def _write_finalize_summary(ctx: RunContext) -> None:
         "selected_groups": ctx.selected_groups,
         "scheduler": ctx.scheduler,
         "dry_run": ctx.dry_run,
+        "harmonized_variants_tsv": (str(harmonized_path) if harmonized_path is not None else ""),
     }
     _write_json(ctx.run_root / "run_summary.json", summary)
 
 
 def _execute_local(ctx: RunContext) -> None:
+    _clear_force_rerun_state(ctx)
     task_rows: list[dict[str, str]] = []
     for group_name in ctx.selected_groups:
         task_rows.append(
@@ -1320,6 +1487,8 @@ def _build_recursive_cli(
         ctx.tool_paths["sniffles"],
         "--bcftools-bin",
         ctx.tool_paths["bcftools"],
+        "--bgzip-bin",
+        ctx.tool_paths["bgzip"],
         "--kanpig-bin",
         ctx.tool_paths["kanpig"],
         "--truvari-bin",
@@ -1340,6 +1509,8 @@ def _build_recursive_cli(
         str(ctx.params["kanpig_sizesim"]),
         "--sniffles-mosaic-filter-expression",
         str(ctx.params["mosaic_filter_expression"]),
+        "--sniffles-cluster-merge-len",
+        str(ctx.params["sniffles_cluster_merge_len"]),
         "--truvari-refdist",
         str(ctx.params["truvari_refdist"]),
         "--truvari-pctseq",
@@ -1367,6 +1538,8 @@ def _build_recursive_cli(
         "--clairs-platform",
         str(ctx.params["clairs_platform"]),
     ]
+    if ctx.params.get("medaka_phasing"):
+        cmd.extend(["--medaka-phasing", str(ctx.params["medaka_phasing"])])
     if ctx.params["collapse_use"] != "kanpig":
         cmd.extend(["--collapse-use", str(ctx.params["collapse_use"])])
     if ctx.params.get("tdb_create_force"):

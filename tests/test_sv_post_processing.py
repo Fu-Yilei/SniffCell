@@ -1,9 +1,11 @@
+import gzip
 import stat
 import tempfile
 import unittest
 from pathlib import Path
 
 from sniffcell.discover.sv_post_processing import (
+    _collapse_two_vcfs,
     _filter_sample_specific_by_ad,
     _resolve_args,
     sv_post_processing_main,
@@ -128,7 +130,9 @@ class TestFilterSampleSpecificByAd(unittest.TestCase):
                 "#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\tFORMAT\tA\tB\n"
                 "chr1\t10\tsv1\tA\t<DEL>\t60\tPASS\t.\tGT:FT:SQ:GQ:PS:DP:AD:KS\t0|1:0:0:0:1:12:6,6:99\t0|0:0:0:0:1:15:15,0:99\n"
                 "chr1\t20\tsv2\tA\t<DEL>\t60\tPASS\t.\tGT:FT:SQ:GQ:PS:DP:AD:KS\t0|0:0:0:0:1:15:15,0:99\t1|0:0:0:0:1:12:3,9:99\n"
-                "chr1\t30\tsv3\tA\t<DEL>\t60\tPASS\t.\tGT:FT:SQ:GQ:PS:DP:AD:KS\t0|1:0:0:0:1:12:5,7:99\t0|1:0:0:0:1:12:5,7:99\n",
+                "chr1\t30\tsv3\tA\t<DEL>\t60\tPASS\t.\tGT:FT:SQ:GQ:PS:DP:AD:KS\t0|1:0:0:0:1:12:5,7:99\t0|1:0:0:0:1:12:5,7:99\n"
+                "chr1\t40\tsv4\tA\t<DEL>\t60\tPASS\t.\tGT:FT:SQ:GQ:PS:DP:AD:KS\t0|1:0:0:0:1:12:5,7:99\t0|1:0:0:0:1:12:11,1:99\n"
+                "chr1\t50\tsv5\tA\t<DEL>\t60\tPASS\t.\tGT:FT:SQ:GQ:PS:DP:AD:KS\t0|1:0:0:0:1:4:0,4:99\t0|0:0:0:0:1:4:4,0:99\n",
                 encoding="utf-8",
             )
             import subprocess
@@ -138,14 +142,53 @@ class TestFilterSampleSpecificByAd(unittest.TestCase):
                 kanpig_vcf_gz=Path(str(vcf) + ".gz"),
                 sample_a_label="A",
                 sample_b_label="B",
-                min_total_ad=5,
-                min_target_alt_ad=1,
+                bgzip_bin="bgzip",
+                tabix_bin="tabix",
+                min_dp=5,
+                min_target_alt_ad=2,
                 other_max_alt_ad=0,
                 output_dir=root / "out",
             )
             self.assertTrue(outputs["sample_a_only"].exists())
             self.assertTrue(outputs["sample_b_only"].exists())
             self.assertTrue(outputs["shared"].exists())
+            with gzip.open(outputs["sample_a_only"], "rt", encoding="utf-8") as handle:
+                self.assertEqual([line for line in handle if not line.startswith("#")], ["chr1\t10\tsv1\tA\t<DEL>\t60\tPASS\t.\tGT:FT:SQ:GQ:PS:DP:AD:KS\t0|1:0:0:0:1:12:6,6:99\t0|0:0:0:0:1:15:15,0:99\n"])
+            with gzip.open(outputs["sample_b_only"], "rt", encoding="utf-8") as handle:
+                self.assertEqual([line for line in handle if not line.startswith("#")], ["chr1\t20\tsv2\tA\t<DEL>\t60\tPASS\t.\tGT:FT:SQ:GQ:PS:DP:AD:KS\t0|0:0:0:0:1:15:15,0:99\t1|0:0:0:0:1:12:3,9:99\n"])
+            with gzip.open(outputs["shared"], "rt", encoding="utf-8") as handle:
+                self.assertEqual([line for line in handle if not line.startswith("#")], ["chr1\t30\tsv3\tA\t<DEL>\t60\tPASS\t.\tGT:FT:SQ:GQ:PS:DP:AD:KS\t0|1:0:0:0:1:12:5,7:99\t0|1:0:0:0:1:12:5,7:99\n"])
+
+
+class TestCollapseTwoVcfs(unittest.TestCase):
+    def test_collapse_uses_unique_sampleless_paths_for_same_basenames(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _split_dir, reference, tools = _build_two_group_env(root)
+            filtered_a = root / "run" / "sv" / "sniffles" / "A" / "sniffles.pass_filtered.vcf.gz"
+            filtered_b = root / "run" / "sv" / "sniffles" / "B" / "sniffles.pass_filtered.vcf.gz"
+            filtered_a.parent.mkdir(parents=True, exist_ok=True)
+            filtered_b.parent.mkdir(parents=True, exist_ok=True)
+            filtered_a.write_text("vcf\n", encoding="utf-8")
+            filtered_b.write_text("vcf\n", encoding="utf-8")
+
+            collapsed_vcf, removed_vcf = _collapse_two_vcfs(
+                bcftools_bin=tools["bcftools"],
+                truvari_bin=tools["truvari"],
+                reference=reference,
+                group_a_label="A",
+                group_b_label="B",
+                group_a_vcf=filtered_a,
+                group_b_vcf=filtered_b,
+                stage_dir=root / "collapse",
+                stdout_path=root / "logs" / "collapse.out",
+                stderr_path=root / "logs" / "collapse.err",
+            )
+
+            self.assertTrue((root / "collapse" / "A.sites.vcf.gz").exists())
+            self.assertTrue((root / "collapse" / "B.sites.vcf.gz").exists())
+            self.assertTrue(collapsed_vcf.exists())
+            self.assertTrue(removed_vcf.exists())
 
 
 class TestSvPostProcessingMain(unittest.TestCase):
@@ -168,6 +211,8 @@ class TestSvPostProcessingMain(unittest.TestCase):
             self.assertTrue(Path(summary["sample_a_only_vcf"]).exists())
             self.assertTrue(Path(summary["sample_b_only_vcf"]).exists())
             self.assertTrue(Path(summary["shared_vcf"]).exists())
+            self.assertEqual(summary["params"]["min_dp"], 5)
+            self.assertEqual(summary["params"]["min_target_alt_ad"], 2)
 
     def test_resolve_args_requires_two_groups(self):
         parser = type("Args", (), {
@@ -177,10 +222,12 @@ class TestSvPostProcessingMain(unittest.TestCase):
             "output_dir": None,
             "sample_id": None,
             "mosaic_filter_expression": "INFO/MOSAIC=1",
-            "min_total_ad": 5,
-            "min_target_alt_ad": 1,
+            "min_dp": 5,
+            "min_target_alt_ad": 2,
             "other_max_alt_ad": 0,
             "bcftools_bin": "/bin/true",
+            "bgzip_bin": "/bin/true",
+            "tabix_bin": "/bin/true",
             "truvari_bin": "/bin/true",
             "kanpig_bin": "/bin/true",
             "threads": 16,

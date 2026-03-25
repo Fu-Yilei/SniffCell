@@ -111,7 +111,11 @@ def parse_args(argv):
     anno_parser = subparsers.add_parser("anno", help="Annotate variants with cell-type-specific methylation.")
     # add anno-specific args here
     anno_parser.add_argument("-i", "--input", required=True, help="Input BAM file")
-    anno_parser.add_argument("-v", "--vcf", required=True, help="Input VCF file for variant annotation")
+    anno_parser.add_argument(
+        "-v", "--vcf", "--variants",
+        required=True,
+        help="Variant input for annotation. Accepts a harmonized TSV from sniffcell discover or a VCF file.",
+    )
     anno_parser.add_argument("-r", "--reference", required=True, help="Reference FASTA file")
     anno_parser.add_argument(
         "-b", "--bed",
@@ -176,11 +180,29 @@ def parse_args(argv):
         ),
     )
 
-    svanno_parser = subparsers.add_parser("svanno", help="Use pre-annotated reads csv to annotate variants' cell types")
-    svanno_parser.add_argument("-v", "--vcf", required=True, help="Input VCF file for variant annotation")
-    svanno_parser.add_argument("-i", "--input", required=True, help="Input reads_classification.tsv file from anno step")
+    svanno_parser = subparsers.add_parser(
+        "svanno",
+        help=(
+            "SV annotation. Full mode matches the historical sniffcell anno workflow "
+            "(BAM + VCF + ref + ctDMR BED). Reassignment mode recomputes from an existing reads_classification.tsv."
+        ),
+    )
+    svanno_parser.add_argument(
+        "-v", "--vcf", "--variants",
+        required=True,
+        help="Variant input. Full mode expects a VCF; reassignment mode also accepts a harmonized TSV.",
+    )
+    svanno_parser.add_argument("-i", "--input", required=True, help="Input BAM in full mode, or reads_classification.tsv in reassignment mode")
+    svanno_parser.add_argument("-r", "--reference", required=False, default=None, help="Reference FASTA for full annotation mode")
+    svanno_parser.add_argument(
+        "-b", "--bed",
+        required=False,
+        default=None,
+        help="Input ctDMR BED/TSV from sniffcell find for full annotation mode.",
+    )
     svanno_parser.add_argument( "-krn", "--kanpig_read_names", type=str, default=None, help="Read names TSV from kanpig output, will use Sniffles read names if not sepecified." )
-    svanno_parser.add_argument("-w", "--window", type=int, default=5000, help="Window size for SV-aware region matching, default=5000")
+    svanno_parser.add_argument("-t", "--threads", type=int, default=1, help="Number of threads to use in full annotation mode, default=1")
+    svanno_parser.add_argument("-w", "--window", type=int, default=5000, help="Window size for variant-aware region matching, default=5000")
     svanno_parser.add_argument(
         "--breakpoint_exclusion_frac",
         type=float,
@@ -190,7 +212,22 @@ def parse_args(argv):
             "Example: 0.1 excludes ctDMRs within +/-10% of SV length around breakpoints. Default=0.0"
         ),
     )
-    svanno_parser.add_argument("-o", "--output", required=True, help="Output TSV file path for sv_assignment")
+    svanno_parser.add_argument(
+        "--read_assignment_mode",
+        type=str,
+        choices=["closest_reference_mean", "kmeans"],
+        default="closest_reference_mean",
+        help=(
+            "How to assign each read to best_group vs other_group within each ctDMR in full annotation mode. "
+            "'closest_reference_mean' compares per-read methylation mean to mean_best_value/mean_rest_value, "
+            "'kmeans' uses unsupervised clustering. Default=closest_reference_mean."
+        ),
+    )
+    svanno_parser.add_argument(
+        "-o", "--output",
+        required=True,
+        help="Output folder in full mode, or output folder / TSV path in reassignment mode.",
+    )
     svanno_parser.add_argument(
         "--evidence_mode",
         type=str,
@@ -467,20 +504,20 @@ def parse_args(argv):
     report_parser = subparsers.add_parser(
         "report",
         help=(
-            "Generate an HTML report for high-confidence SV assignments. "
+            "Generate an HTML report for high-confidence variant assignments. "
             "By default this is figure-less (fast); add --with_figures to render viz panels."
         ),
     )
     report_parser.add_argument(
         "--anno_output",
         required=True,
-        help="sniffcell anno output folder containing sv_assignment.tsv and anno_run_manifest.json.",
+        help="sniffcell anno output folder containing variant_assignment.tsv and anno_run_manifest.json.",
     )
     report_parser.add_argument(
         "--min_overlap_pct",
         type=float,
         default=0.8,
-        help="Base overlap threshold for including an SV in report, default=0.8",
+        help="Base overlap threshold for including a variant in report, default=0.8",
     )
     report_parser.add_argument(
         "--overlap_filter_mode",
@@ -506,30 +543,30 @@ def parse_args(argv):
     report_parser.add_argument(
         "--min_majority_pct",
         type=float,
-        default=1.0,
-        help="Minimum majority_pct threshold for including an SV in report, default=1.0",
+        default=0.8,
+        help="Minimum majority_pct threshold for including a variant in report, default=0.8",
     )
     report_parser.add_argument(
         "--include_unassigned",
         action="store_true",
-        help="Include SVs with empty assigned_code (default filters to assigned SVs only).",
+        help="Include variants with empty assigned_code (default filters to assigned rows only, except linked TR rows).",
     )
     report_parser.add_argument(
         "--allow_hard_conflict",
         action="store_true",
-        help="Include SVs with has_hard_conflict=True (default excludes them).",
+        help="Include non-TR variants with has_hard_conflict=True (default excludes them).",
     )
     report_parser.add_argument(
         "--max_sv",
         type=int,
         default=0,
-        help="Maximum number of SVs to include after filtering. 0 means no limit.",
+        help="Maximum number of variants to include after filtering. 0 means no limit.",
     )
     report_parser.add_argument(
         "--with_figures",
         action="store_true",
         help=(
-            "Render viz panel figures for selected SVs. "
+            "Render viz panel figures for selected variants. "
             "Default is figure-less report (no viz rendering)."
         ),
     )
@@ -549,7 +586,7 @@ def parse_args(argv):
         "-f", "--format",
         default="png",
         choices=["png", "pdf"],
-        help="Figure format for SV panels, default=png",
+        help="Figure format for report panels, default=png",
     )
     report_parser.add_argument(
         "--figure_profile",
@@ -566,7 +603,7 @@ def parse_args(argv):
     report_parser.add_argument(
         "--reuse_existing_viz",
         action="store_true",
-        help="Reuse existing per-SV viz figure files when present instead of regenerating.",
+        help="Reuse existing per-variant viz figure files when present instead of regenerating.",
     )
     report_parser.add_argument(
         "--figure_threads",
@@ -577,7 +614,7 @@ def parse_args(argv):
     report_parser.add_argument(
         "--with_igvviz",
         action="store_true",
-        help="Render IGV screenshots for selected SVs using sniffcell igvviz.",
+        help="Render IGV screenshots for selected variants using sniffcell igvviz.",
     )
     report_parser.add_argument(
         "--igv_bams",
@@ -616,7 +653,7 @@ def parse_args(argv):
     report_parser.add_argument(
         "--with_igvreport",
         action="store_true",
-        help="Generate an alternate igv-reports HTML page for the selected SVs.",
+        help="Generate an alternate igv-reports HTML page for the selected variants.",
     )
     report_parser.add_argument(
         "-o", "--output",
@@ -654,6 +691,7 @@ def parse_args(argv):
     discover_parser.add_argument("--rerun-failed", action="store_true", default=False, help="Allow rerunning tasks that previously failed.")
     discover_parser.add_argument("--sniffles-bin", default=None, help="Optional Sniffles executable path.")
     discover_parser.add_argument("--bcftools-bin", default=None, help="Optional bcftools executable path.")
+    discover_parser.add_argument("--bgzip-bin", default=None, help="Optional bgzip executable path.")
     discover_parser.add_argument("--kanpig-bin", default=None, help="Optional Kanpig executable path.")
     discover_parser.add_argument("--truvari-bin", default=None, help="Optional Truvari executable path.")
     discover_parser.add_argument("--medaka-bin", default=None, help="Optional Medaka executable path.")
@@ -666,6 +704,7 @@ def parse_args(argv):
         default="INFO/MOSAIC=1",
         help="bcftools expression used with -f PASS to derive the Kanpig handoff VCF. Default=INFO/MOSAIC=1.",
     )
+    discover_parser.add_argument("--sniffles-cluster-merge-len", type=float, default=0.2, help="Sniffles --cluster-merge-len. Default=0.2.")
     discover_parser.add_argument("--kanpig-seqsim", type=float, default=0.8, help="Kanpig seqsim. Default=0.8.")
     discover_parser.add_argument("--kanpig-sizesim", type=float, default=0.85, help="Kanpig sizesim. Default=0.85.")
     discover_parser.add_argument("--kanpig-passonly", action="store_true", default=True, help="Use --passonly for Kanpig.")
@@ -686,9 +725,35 @@ def parse_args(argv):
     )
     discover_parser.add_argument("--medaka-padding", type=int, default=250, help="Padding for medaka tandem. Default=250.")
     discover_parser.add_argument(
+        "--medaka-phasing",
+        choices=["hybrid", "abpoa", "unphased", "prephased"],
+        default=None,
+        help="Optional medaka tandem phasing mode. When unset, medaka uses its own default.",
+    )
+    discover_parser.add_argument(
         "--medaka-sample-name-template",
         default="{sample_id}.{group}",
         help="Sample naming template for medaka tandem. Default={sample_id}.{group}.",
+    )
+    discover_parser.add_argument(
+        "--tail-expansion-rescue",
+        action="store_true",
+        default=False,
+        help=(
+            "Experimental: let tr_post_processing rescue loci with little/no TDB hap delta when one group "
+            "shows a hap-specific expansion tail in the trimmed reads."
+        ),
+    )
+    discover_parser.add_argument(
+        "--tail-expansion-require-sample-range-support",
+        dest="tail_require_sample_range_support",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "When tail-expansion rescue is enabled, require the rescued haplotype to also show same-haplotype "
+            "TDB sample-range support. Use --no-tail-expansion-require-sample-range-support to allow "
+            "trimmed-read-only tail rescue."
+        ),
     )
     discover_parser.add_argument("--tdb-create-mem", type=int, default=4, help="Memory in GB for tdb create. Default=4.")
     discover_parser.add_argument("--tdb-create-force", action="store_true", default=False, help="Pass --force to tdb create.")
@@ -710,9 +775,13 @@ def parse_args(argv):
     discover_parser.add_argument("--clairs-tumor-group", default=None, help=argparse.SUPPRESS)
 
 
+    top_level_passthrough = {"-h", "--help", "-v", "--version"}
+
     if len(argv) == 0:
         parser.print_help(sys.stderr)
         sys.exit(1)
+    elif argv[0] in top_level_passthrough:
+        return parser.parse_args(argv)
     elif len(argv) >= 1 and argv[0] not in valid_commands:
         parser.print_help(sys.stderr)
         sys.exit(1)

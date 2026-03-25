@@ -1,5 +1,6 @@
 import os
 import json
+from pathlib import Path
 import pandas as pd
 import pysam
 from sniffcell.anno.breakpoint_exclusion import validate_breakpoint_exclusion_frac
@@ -55,7 +56,8 @@ def _write_anno_run_manifest(
     *,
     output_dir: str,
     bam: str,
-    vcf: str,
+    variant_input: str,
+    variant_source: str,
     reference: str,
     bed: str,
     reads_classification: str,
@@ -67,12 +69,16 @@ def _write_anno_run_manifest(
     read_assignment_mode: str,
 ) -> str:
     manifest_path = os.path.join(output_dir, "anno_run_manifest.json")
+    output_dir_abs = os.path.abspath(output_dir)
+    variant_input_abs = os.path.abspath(variant_input)
     payload = {
         "command": "anno",
         "version": "v1",
         "inputs": {
             "bam": os.path.abspath(bam),
-            "vcf": os.path.abspath(vcf),
+            "vcf": (variant_input_abs if variant_source == "vcf" else None),
+            "variants": variant_input_abs,
+            "variant_source": str(variant_source),
             "reference": os.path.abspath(reference),
             "bed": os.path.abspath(bed),
             "kanpig_read_names": os.path.abspath(kanpig_read_names) if kanpig_read_names else None,
@@ -84,9 +90,12 @@ def _write_anno_run_manifest(
             "read_assignment_mode": str(read_assignment_mode),
         },
         "outputs": {
-            "output_dir": os.path.abspath(output_dir),
+            "output_dir": output_dir_abs,
             "reads_classification": os.path.abspath(reads_classification),
             "blocks_classification": os.path.abspath(blocks_classification),
+            "variant_assignment": os.path.abspath(os.path.join(output_dir, "variant_assignment.tsv")),
+            "variant_assignment_readable": os.path.abspath(os.path.join(output_dir, "variant_assignment_readable.tsv")),
+            "variant_assignment_readable_long": os.path.abspath(os.path.join(output_dir, "variant_assignment_readable_long.tsv")),
             "sv_assignment": os.path.abspath(os.path.join(output_dir, "sv_assignment.tsv")),
             "sv_assignment_readable": os.path.abspath(os.path.join(output_dir, "sv_assignment_readable.tsv")),
             "sv_assignment_readable_long": os.path.abspath(os.path.join(output_dir, "sv_assignment_readable_long.tsv")),
@@ -95,6 +104,183 @@ def _write_anno_run_manifest(
     with open(manifest_path, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=2, sort_keys=True)
     return manifest_path
+
+
+def _detect_variant_source(path_text: str) -> str:
+    path = Path(path_text)
+    lowered = path.name.lower()
+    if lowered.endswith((".vcf", ".vcf.gz", ".bcf")):
+        return "vcf"
+    if lowered.endswith((".tsv", ".tsv.gz", ".txt", ".txt.gz", ".bed", ".bed.gz", ".csv", ".csv.gz")):
+        try:
+            cols = set(pd.read_csv(path, sep="\t", nrows=0).columns)
+        except Exception:
+            cols = set()
+        if {"chrom", "start", "end", "variant_id"}.issubset(cols):
+            return "harmonized"
+    return "vcf"
+
+
+def _parse_json_read_names(value) -> list[str]:
+    try:
+        if pd.isna(value):
+            return []
+    except TypeError:
+        pass
+    if isinstance(value, (list, tuple, set)):
+        return [str(v).strip() for v in value if str(v).strip()]
+    text = str(value).strip()
+    if not text or text in {".", "NA", "None", "null"}:
+        return []
+    try:
+        parsed = json.loads(text)
+    except Exception:
+        parsed = None
+    if isinstance(parsed, list):
+        return [str(v).strip() for v in parsed if str(v).strip()]
+    if "|" in text:
+        return [tok.strip() for tok in text.split("|") if tok.strip()]
+    if "," in text:
+        return [tok.strip() for tok in text.split(",") if tok.strip()]
+    return [text]
+
+
+def _normalize_supporting_read_names(read_names: list[str], *, variant_class: str) -> list[str]:
+    normalized: list[str] = []
+    is_tr = str(variant_class).strip().upper() == "TR"
+    for raw_name in read_names:
+        name = str(raw_name).strip()
+        if not name:
+            continue
+        if is_tr and "_chr" in name:
+            name = name.split("_chr", 1)[0].strip()
+        if name:
+            normalized.append(name)
+    return normalized
+
+
+def read_harmonized_variants_to_df(path: str) -> pd.DataFrame:
+    df = pd.read_csv(path, sep="\t")
+    required = {"chrom", "start", "end", "variant_id"}
+    missing = required - set(df.columns)
+    if missing:
+        raise ValueError(f"Harmonized variant TSV missing required columns: {sorted(missing)}")
+
+    out = df.copy()
+    for col, default in (
+        ("variant_class", "SV"),
+        ("variant_subtype", ""),
+        ("category", ""),
+        ("change_size_bp", pd.NA),
+        ("group_a_alt_reads", pd.NA),
+        ("group_b_alt_reads", pd.NA),
+        ("group_a_read_names", "[]"),
+        ("group_b_read_names", "[]"),
+    ):
+        if col not in out.columns:
+            out[col] = default
+
+    out["start"] = pd.to_numeric(out["start"], errors="coerce")
+    out["end"] = pd.to_numeric(out["end"], errors="coerce")
+    out = out.dropna(subset=["start", "end"]).copy()
+    out["start"] = out["start"].astype("int64")
+    out["end"] = out["end"].astype("int64")
+    bad = out["end"] < (out["start"] + 1)
+    if bad.any():
+        out.loc[bad, "end"] = out.loc[bad, "start"] + 1
+
+    group_a_lists: list[list[str]] = []
+    group_b_lists: list[list[str]] = []
+    supporting_lists: list[list[str]] = []
+    for _, row in out.iterrows():
+        variant_class = str(row.get("variant_class", "SV"))
+        a_reads = _normalize_supporting_read_names(
+            _parse_json_read_names(row.get("group_a_read_names", "[]")),
+            variant_class=variant_class,
+        )
+        b_reads = _normalize_supporting_read_names(
+            _parse_json_read_names(row.get("group_b_read_names", "[]")),
+            variant_class=variant_class,
+        )
+        group_a_lists.append(a_reads)
+        group_b_lists.append(b_reads)
+        supporting_lists.append(list(dict.fromkeys(a_reads + b_reads)))
+    out["group_a_read_names"] = group_a_lists
+    out["group_b_read_names"] = group_b_lists
+    out["supporting_reads"] = supporting_lists
+    out["chr"] = out["chrom"].astype(str)
+    out["location"] = out["start"] + 1
+    out["ref_start"] = out["start"] + 1
+    out["ref_end"] = out["end"]
+    out["id"] = out["variant_id"].astype(str)
+    out["sv_type"] = out["variant_subtype"].astype("string")
+    out["sv_len"] = pd.to_numeric(out["change_size_bp"], errors="coerce").astype("Int64")
+    out["vaf"] = pd.Series(pd.NA, index=out.index, dtype="Float64")
+    return out
+
+
+def _load_variant_table(path: str, variant_source: str | None = None) -> pd.DataFrame:
+    source = variant_source or _detect_variant_source(path)
+    if source == "harmonized":
+        return read_harmonized_variants_to_df(path)
+    return read_vcf_to_df(path)
+
+
+def _merge_variant_metadata(assignment_df: pd.DataFrame, variant_df: pd.DataFrame) -> pd.DataFrame:
+    extras = [col for col in [
+        "id",
+        "variant_class",
+        "variant_subtype",
+        "category",
+        "change_size_bp",
+        "group_a_alt_reads",
+        "group_b_alt_reads",
+        "group_a_read_names",
+        "group_b_read_names",
+    ] if col in variant_df.columns]
+    if len(extras) <= 1:
+        return assignment_df
+
+    extra_df = variant_df[extras].drop_duplicates(subset=["id"]).copy()
+    if "variant_subtype" in extra_df.columns and "sv_type" not in assignment_df.columns:
+        extra_df["sv_type"] = extra_df["variant_subtype"]
+
+    merged = assignment_df.merge(extra_df, on="id", how="left")
+    if "variant_class" not in merged.columns:
+        merged["variant_class"] = "SV"
+    else:
+        merged["variant_class"] = merged["variant_class"].fillna("SV").astype("string")
+    if "variant_subtype" not in merged.columns:
+        merged["variant_subtype"] = merged.get("sv_type", pd.Series("", index=merged.index, dtype="string"))
+    else:
+        merged["variant_subtype"] = merged["variant_subtype"].fillna("").astype("string")
+    if "category" not in merged.columns:
+        merged["category"] = pd.Series("", index=merged.index, dtype="string")
+    else:
+        merged["category"] = merged["category"].fillna("").astype("string")
+    return merged
+
+
+def _write_assignment_outputs(
+    assignment_df: pd.DataFrame,
+    output_dir: str,
+) -> tuple[str, str, str]:
+    variant_assignment_path = os.path.join(output_dir, "variant_assignment.tsv")
+    variant_readable_path = os.path.join(output_dir, "variant_assignment_readable.tsv")
+    variant_readable_long_path = os.path.join(output_dir, "variant_assignment_readable_long.tsv")
+    sv_assignment_path = os.path.join(output_dir, "sv_assignment.tsv")
+    sv_readable_path = os.path.join(output_dir, "sv_assignment_readable.tsv")
+    sv_readable_long_path = os.path.join(output_dir, "sv_assignment_readable_long.tsv")
+
+    assignment_df.to_csv(variant_assignment_path, sep="\t", index=False)
+    assignment_df.to_csv(sv_assignment_path, sep="\t", index=False)
+
+    readable_report_df, readable_report_long_df = _build_sv_readable_reports(assignment_df)
+    readable_report_df.to_csv(variant_readable_path, sep="\t", index=False)
+    readable_report_long_df.to_csv(variant_readable_long_path, sep="\t", index=False)
+    readable_report_df.to_csv(sv_readable_path, sep="\t", index=False)
+    readable_report_long_df.to_csv(sv_readable_long_path, sep="\t", index=False)
+    return variant_assignment_path, variant_readable_path, variant_readable_long_path
 
 def _parse_pipe_values(value) -> list[str]:
     if isinstance(value, (list, tuple, set)):
@@ -489,29 +675,27 @@ def _one_dmr(args):
         logger.exception(f"[{chrom}:{start}-{end}] failed with error")
         return None
 
-def sv_anno(args):
-    logger = logging.getLogger("anno.sv_anno")
-    logger.info("Starting SV annotation from pre-annotated reads")
+def _variant_anno_from_reads(args, *, variant_source: str | None = None):
+    logger = logging.getLogger("anno.variant_anno_from_reads")
+    logger.info("Starting variant annotation from pre-annotated reads")
     if args.command == "svanno":
         input_file = args.input
         output_arg = str(args.output)
         # Backward compatibility: treat extension-less output as directory.
         if os.path.isdir(output_arg) or os.path.splitext(output_arg)[1] == "":
             output_dir = output_arg
-            sv_assignment_path = os.path.join(output_dir, "sv_assignment.tsv")
         else:
-            sv_assignment_path = output_arg
             output_dir = os.path.dirname(output_arg) or "."
     else:
         output_dir = args.output
         input_file = os.path.join(output_dir, "reads_classification.tsv")
-        sv_assignment_path = os.path.join(output_dir, "sv_assignment.tsv")
 
     os.makedirs(output_dir, exist_ok=True)
+    resolved_variant_source = variant_source or _detect_variant_source(args.vcf)
     if args.kanpig_read_names is not None:
-        logger.info(f"Using kanpig read names from: {args.kanpig_read_names}")
+        logger.info("Using kanpig read names from: %s", args.kanpig_read_names)
     else:
-        logger.info("No kanpig read names provided; using Sniffles read names from VCF")
+        logger.info("No kanpig read names provided; using read names from variant source")
     read_assign_df = pd.read_csv(
         input_file,
         sep="\t",
@@ -541,9 +725,10 @@ def sv_anno(args):
         raise ValueError("per_read_min_agreement must be in [0, 1]")
 
     logger.info(
-        "SV assignment settings: evidence_mode=%s unique_reads_for_overlap=%s "
+        "Variant assignment settings: variant_source=%s evidence_mode=%s unique_reads_for_overlap=%s "
         "min_overlap_pct=%.3f min_agreement_pct=%.3f per_read_min_agreement=%.3f "
         "breakpoint_exclusion_frac=%.3f",
+        resolved_variant_source,
         evidence_mode,
         unique_reads_for_overlap,
         min_overlap_pct,
@@ -552,8 +737,9 @@ def sv_anno(args):
         breakpoint_exclusion_frac,
     )
 
-    sv_assignment_df = assign_sv_celltypes(
-        read_vcf_to_df(args.vcf, kanpig_read_names=args.kanpig_read_names),
+    variant_df = _load_variant_table(args.vcf, resolved_variant_source)
+    variant_assignment_df = assign_sv_celltypes(
+        variant_df,
         read_assign_df,
         window=int(getattr(args, "window", 5000)),
         breakpoint_exclusion_frac=breakpoint_exclusion_frac,
@@ -562,48 +748,56 @@ def sv_anno(args):
         unique_reads_for_overlap=unique_reads_for_overlap,
         per_read_min_agreement=per_read_min_agreement,
     )
-    sv_assignment_df.to_csv(sv_assignment_path, sep="\t", index=False)
+    variant_assignment_df = _merge_variant_metadata(variant_assignment_df, variant_df)
 
-    readable_report_df, readable_report_long_df = _build_sv_readable_reports(sv_assignment_df)
-    readable_report_path = os.path.join(output_dir, "sv_assignment_readable.tsv")
-    readable_report_long_path = os.path.join(output_dir, "sv_assignment_readable_long.tsv")
-    readable_report_df.to_csv(readable_report_path, sep="\t", index=False)
-    readable_report_long_df.to_csv(readable_report_long_path, sep="\t", index=False)
-    logger.info(f"Wrote SV assignment report: {sv_assignment_path}")
-    logger.info(f"Wrote readable SV report: {readable_report_path}")
-    logger.info(f"Wrote long-format readable SV report: {readable_report_long_path}")
-
+    variant_assignment_path, readable_report_path, readable_report_long_path = _write_assignment_outputs(
+        variant_assignment_df,
+        output_dir,
+    )
+    logger.info("Wrote variant assignment report: %s", variant_assignment_path)
+    logger.info("Wrote readable variant report: %s", readable_report_path)
+    logger.info("Wrote long-format readable variant report: %s", readable_report_long_path)
 
 
+def sv_anno(args):
+    _variant_anno_from_reads(args)
 
-def anno_main(args):
-    # print(args)
-    # return
+
+def _run_annotation_pipeline(args, *, variant_source: str):
     logger = logging.getLogger("anno.main")
 
-    bed_input  = args.bed
-    base_out   = args.output    # writes <output>.reads.tsv and <output>.blocks.tsv
+    bed_input = args.bed
+    base_out = args.output
     input_file = args.input
-    reference  = args.reference
-    threads    = int(args.threads)
-    window     = int(args.window)
+    reference = args.reference
+    threads = int(args.threads)
+    window = int(args.window)
     breakpoint_exclusion_frac = validate_breakpoint_exclusion_frac(getattr(args, "breakpoint_exclusion_frac", 0.0))
     read_assignment_mode = str(getattr(args, "read_assignment_mode", "closest_reference_mean")).strip().lower()
     if read_assignment_mode not in {"closest_reference_mean", "kmeans"}:
         raise ValueError("read_assignment_mode must be one of: closest_reference_mean, kmeans")
     logger.info(
-        f"Starting annotation: bed={bed_input} bam={input_file} ref={reference} "
-        f"threads={threads} read_assignment_mode={read_assignment_mode} "
-        f"breakpoint_exclusion_frac={breakpoint_exclusion_frac:.3f} out_base={base_out}"
+        "Starting annotation: variant_source=%s variants=%s bed=%s bam=%s ref=%s threads=%d "
+        "read_assignment_mode=%s breakpoint_exclusion_frac=%.3f out_base=%s",
+        variant_source,
+        args.vcf,
+        bed_input,
+        input_file,
+        reference,
+        threads,
+        read_assignment_mode,
+        breakpoint_exclusion_frac,
+        base_out,
     )
 
-    # Output paths
-    reads_out  = os.path.join(base_out, "reads_classification.tsv")
+    os.makedirs(base_out, exist_ok=True)
+    reads_out = os.path.join(base_out, "reads_classification.tsv")
     blocks_out = os.path.join(base_out, "blocks_classification.tsv")
     manifest_path = _write_anno_run_manifest(
         output_dir=base_out,
         bam=input_file,
-        vcf=args.vcf,
+        variant_input=args.vcf,
+        variant_source=variant_source,
         reference=reference,
         bed=bed_input,
         reads_classification=reads_out,
@@ -616,73 +810,65 @@ def anno_main(args):
     )
     logger.info("Wrote anno run manifest: %s", manifest_path)
 
-    # Load and (optionally) filter BED
     bed = pd.read_csv(bed_input, sep="\t")
     if not bed.empty and isinstance(bed.columns[0], str) and bed.columns[0].startswith("#"):
         bed.rename(columns={bed.columns[0]: bed.columns[0].lstrip("#")}, inplace=True)
     bed = bed.drop_duplicates(ignore_index=True)
-    logger.info(f"Loaded BED with {len(bed)} unique DMR rows")
+    logger.info("Loaded BED with %d unique DMR rows", len(bed))
 
-    sv_df = read_vcf_to_df(args.vcf)
+    variant_df = _load_variant_table(args.vcf, variant_source)
     filtered_bed = filter_bed_based_on_variants(
         bed,
-        sv_df=sv_df,
+        sv_df=variant_df,
         window=window,
         breakpoint_exclusion_frac=breakpoint_exclusion_frac,
     )
 
     for col in ["chr", "start", "end", "best_group", "best_dir"]:
         if col not in filtered_bed.columns:
-            logger.error(f"BED missing required column: {col}")
+            logger.error("BED missing required column: %s", col)
             raise ValueError(f"BED missing required column: {col}")
 
     n_tasks = len(filtered_bed)
-    logger.info(f"Filtered BED to {n_tasks} DMRs after variant overlap filtering, window size = {window}")
+    logger.info(
+        "Filtered BED to %d DMRs after variant overlap filtering, window size = %d",
+        n_tasks,
+        window,
+    )
 
-    # Sort by (chr, start) so each worker's fetches are roughly sequential on NFS.
     filtered_bed = filtered_bed.sort_values(["chr", "start"], ignore_index=True)
     tasks = [(dict(row), input_file, reference, read_assignment_mode) for _, row in filtered_bed.iterrows()]
 
-    # --- Prepare outputs: truncate files and reset header flags ---
-    # We'll only write headers on the first real chunk for each file.
-    open(reads_out,  "w").close()
+    open(reads_out, "w").close()
     open(blocks_out, "w").close()
-    reads_header_written  = False
+    reads_header_written = False
     blocks_header_written = False
-    blocks_cols_locked: list[str] | None = None  # we lock schema to the first block we see
+    blocks_cols_locked: list[str] | None = None
 
-    # Stream results and append immediately
     with mp.Pool(threads) as pool:
-        for res in tqdm(pool.imap(_one_dmr, tasks, chunksize=50),
-                        total=n_tasks, desc="Processing DMRs"):
+        for res in tqdm(pool.imap(_one_dmr, tasks, chunksize=50), total=n_tasks, desc="Processing DMRs"):
             if res is None:
                 continue
 
             a_df, s_df = res
 
-            # --- APPEND READS ---
             if a_df is not None and not a_df.empty:
                 if not reads_header_written:
-                    # first write: include header and index (readname)
                     a_df.to_csv(reads_out, sep="\t", index=True, mode="a", header=True)
                     reads_header_written = True
                 else:
                     a_df.to_csv(reads_out, sep="\t", index=True, mode="a", header=False)
 
-            # --- APPEND BLOCKS (variable columns across DMRs) ---
             if s_df is not None and not s_df.empty:
                 if not blocks_header_written:
-                    # lock the schema to the first encountered block columns
                     blocks_cols_locked = list(s_df.columns)
                     s_df.to_csv(blocks_out, sep="\t", index=False, mode="a", header=True)
                     blocks_header_written = True
                 else:
-                    # align columns to locked header; drop extras, add missing as NaN
                     assert blocks_cols_locked is not None
                     s_df_aligned = s_df.reindex(columns=blocks_cols_locked)
                     s_df_aligned.to_csv(blocks_out, sep="\t", index=False, mode="a", header=False)
 
-    # If nothing was written, emit empty files with headers to be friendly downstream
     if not reads_header_written:
         empty_reads = pd.DataFrame(
             columns=[
@@ -707,9 +893,24 @@ def anno_main(args):
         logger.warning("No per-read assignments generated; wrote empty reads header only")
 
     if not blocks_header_written:
-        pd.DataFrame(columns=["chr","start","end","cpgstart","cpgend"]).to_csv(
+        pd.DataFrame(columns=["chr", "start", "end", "cpgstart", "cpgend"]).to_csv(
             blocks_out, sep="\t", index=False, header=True
         )
         logger.warning("No block states generated; wrote empty blocks header only")
-    sv_anno(args)
+
+    _variant_anno_from_reads(args, variant_source=variant_source)
     logger.info("Annotation complete")
+
+
+def anno_main(args):
+    variant_source = _detect_variant_source(args.vcf)
+    _run_annotation_pipeline(args, variant_source=variant_source)
+
+
+def svanno_main(args):
+    variant_source = _detect_variant_source(args.vcf)
+    full_pipeline_mode = bool(getattr(args, "reference", None)) and bool(getattr(args, "bed", None))
+    if full_pipeline_mode:
+        _run_annotation_pipeline(args, variant_source=variant_source)
+    else:
+        _variant_anno_from_reads(args, variant_source=variant_source)

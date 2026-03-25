@@ -1,27 +1,5 @@
-from setuptools import setup, find_packages
+from setuptools import setup
 
-setup(
-    name='sniffcell',
-    version='0.7.0',
-    packages=find_packages(),
-    url='https://github.com/Fu-Yilei/SniffCell',
-    license='MIT',
-    author='Yilei Fu',
-    author_email='yilei.fu@bcm.edu',
-    description='SniffCell: Annotate SVs cell type based on CpG methylation',
-    long_description=open('README.md').read(),
-    long_description_content_type='text/markdown',
-    python_requires='>=3.10',
-    install_requires=[
-        'numpy',
-        'pandas',
-        'scipy',
-        'scikit-learn',
-        'pysam',
-        'tqdm',
-        'matplotlib',
-    ],
-    extras_require={
-        'igvreport': ['igv-reports'],
-    },
-)
+
+if __name__ == "__main__":
+    setup()

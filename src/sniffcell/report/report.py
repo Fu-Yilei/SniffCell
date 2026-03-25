@@ -94,6 +94,9 @@ def _build_dashboard_records(selected_report_df: pd.DataFrame) -> list[dict[str,
         "sv_chr",
         "sv_pos",
         "sv_type",
+        "variant_class",
+        "variant_subtype",
+        "category",
         "sv_len",
         "vaf",
         "overlap_pct",
@@ -218,6 +221,8 @@ def _review_state_label(status: str) -> str:
 
 def _load_sv_assignment(path: Path) -> pd.DataFrame:
     df = pd.read_csv(path, sep="\t")
+    if "id" not in df.columns and "variant_id" in df.columns:
+        df = df.rename(columns={"variant_id": "id"})
     if "id" not in df.columns:
         raise ValueError(f"sv_assignment file is missing required column 'id': {path}")
 
@@ -250,10 +255,21 @@ def _load_sv_assignment(path: Path) -> pd.DataFrame:
         out["vaf"] = pd.NA
     out["vaf"] = pd.to_numeric(out["vaf"], errors="coerce")
 
+    if "sv_type" not in out.columns and "variant_subtype" in out.columns:
+        out["sv_type"] = out["variant_subtype"]
     if "sv_type" not in out.columns:
         out["sv_type"] = pd.Series("", index=out.index, dtype="string")
     else:
         out["sv_type"] = out["sv_type"].astype("string")
+
+    for col, default in (
+        ("variant_class", "SV"),
+        ("variant_subtype", out["sv_type"] if "sv_type" in out.columns else ""),
+        ("category", ""),
+    ):
+        if col not in out.columns:
+            out[col] = default
+        out[col] = out[col].fillna(default if not isinstance(default, pd.Series) else "").astype("string")
 
     if "has_hard_conflict" not in out.columns:
         out["has_hard_conflict"] = pd.Series(pd.array([pd.NA] * len(out), dtype="boolean"))
@@ -262,6 +278,12 @@ def _load_sv_assignment(path: Path) -> pd.DataFrame:
 
     out["id"] = out["id"].astype("string")
     return out
+
+
+def _viz_supported_for_row(row: dict[str, object], manifest_payload: dict[str, object]) -> bool:
+    del manifest_payload
+    variant_class = str(row.get("variant_class", "SV")).strip().upper()
+    return variant_class in {"", "SV", "TR"}
 
 
 def _backfill_sv_fields_from_manifest_vcf(
@@ -334,8 +356,8 @@ def _backfill_sv_fields_from_manifest_vcf(
     return merged
 
 
-def _select_high_confidence_svs(
-    sv_df: pd.DataFrame,
+def _select_high_confidence_variants(
+    variant_df: pd.DataFrame,
     *,
     min_overlap_pct: float,
     overlap_filter_mode: str,
@@ -354,7 +376,7 @@ def _select_high_confidence_svs(
     if int(max_sv) < 0:
         raise ValueError("max_sv must be >= 0")
 
-    selected = sv_df.copy()
+    selected = variant_df.copy()
     if "assigned_code" not in selected.columns:
         selected["assigned_code"] = pd.Series("", index=selected.index, dtype="string")
     if "linked_celltypes" not in selected.columns:
@@ -369,16 +391,21 @@ def _select_high_confidence_svs(
         selected["n_overlapped"] = pd.Series(pd.NA, index=selected.index, dtype="Int64")
     if "id" not in selected.columns:
         selected["id"] = pd.Series(pd.NA, index=selected.index, dtype="string")
+    variant_class = selected.get("variant_class", pd.Series("SV", index=selected.index)).astype("string").str.upper()
     linked_mask = selected["linked_celltypes"].map(_has_text)
     linked_mask = pd.Series(linked_mask, index=selected.index).fillna(False).astype(bool)
     selected = selected.loc[linked_mask]
+    variant_class = variant_class.loc[selected.index]
 
     if not include_unassigned:
         assigned_mask = selected["assigned_code"].map(_has_text)
         assigned_mask = pd.Series(assigned_mask, index=selected.index).fillna(False).astype(bool)
-        selected = selected.loc[assigned_mask]
+        selected = selected.loc[assigned_mask | variant_class.eq("TR")]
+        variant_class = variant_class.loc[selected.index]
     if not allow_hard_conflict:
-        keep_mask = ~selected["has_hard_conflict"].fillna(False).astype(bool)
+        # Linked TR rows often bridge more than one cell-type label. Keep them in the
+        # review set and let the support/overlap filters determine whether they survive.
+        keep_mask = (~selected["has_hard_conflict"].fillna(False).astype(bool)) | variant_class.eq("TR")
         selected = selected.loc[keep_mask]
 
     selected = _compute_report_overlap_requirements(
@@ -399,6 +426,9 @@ def _select_high_confidence_svs(
     if int(max_sv) > 0:
         selected = selected.iloc[: int(max_sv)].copy()
     return selected
+
+
+_select_high_confidence_svs = _select_high_confidence_variants
 
 
 def _report_dir_from_archive_path(archive_path: Path) -> Path:
@@ -703,12 +733,12 @@ def _build_report_html(
     *,
     generated_at: str,
     anno_output: Path,
-    sv_assignment_path: Path,
+    variant_assignment_path: Path,
     review_storage_key: str,
     filters: dict[str, object],
     viz: dict[str, object],
     igvreport: dict[str, object],
-    total_sv: int,
+    total_variants: int,
     selected_count: int,
     rendered_count: int,
     failed_count: int,
@@ -721,7 +751,7 @@ def _build_report_html(
     page.append("<head>")
     page.append("<meta charset=\"utf-8\">")
     page.append("<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">")
-    page.append("<title>SniffCell SV Report</title>")
+    page.append("<title>SniffCell Variant Report</title>")
     page.append("<style>")
     page.append(
         "body{font-family:Helvetica,Arial,sans-serif;background:#f3f5f7;color:#13212c;margin:0;padding:24px;}"
@@ -795,17 +825,17 @@ def _build_report_html(
     page.append("</head>")
     page.append("<body>")
     page.append("<div class=\"wrap\">")
-    page.append("<h1>SniffCell High-Confidence SV Report</h1>")
+    page.append("<h1>SniffCell High-Confidence Variant Report</h1>")
     page.append(
         "<div class=\"meta\">"
         f"Generated: {html.escape(generated_at)}"
         f" | anno_output: <code>{html.escape(str(anno_output))}</code>"
-        f" | sv_assignment: <code>{html.escape(str(sv_assignment_path))}</code>"
+        f" | variant_assignment: <code>{html.escape(str(variant_assignment_path))}</code>"
         "</div>"
     )
     page.append("<div class=\"stats\">")
-    page.append(f"<div class=\"card\"><div class=\"label\">Total SVs</div><div class=\"value\">{total_sv}</div></div>")
-    page.append(f"<div class=\"card\"><div class=\"label\">Selected SVs</div><div class=\"value\">{selected_count}</div></div>")
+    page.append(f"<div class=\"card\"><div class=\"label\">Total Variants</div><div class=\"value\">{total_variants}</div></div>")
+    page.append(f"<div class=\"card\"><div class=\"label\">Selected Variants</div><div class=\"value\">{selected_count}</div></div>")
     page.append(f"<div class=\"card\"><div class=\"label\">Rendered Viz</div><div class=\"value\">{rendered_count}</div></div>")
     page.append(f"<div class=\"card\"><div class=\"label\">Viz Failures</div><div class=\"value\">{failed_count}</div></div>")
     page.append("</div>")
@@ -859,9 +889,9 @@ def _build_report_html(
             )
         page.append("</section>")
     page.append("<section class=\"review-controls\">")
-    page.append("<h2>SV Review Controls</h2>")
+    page.append("<h2>Variant Review Controls</h2>")
     page.append("<div class=\"review-row\">")
-    page.append("<label for=\"review-filter\"><b>Show SVs:</b></label>")
+    page.append("<label for=\"review-filter\"><b>Show Variants:</b></label>")
     page.append(
         "<select id=\"review-filter\" class=\"review-select\" onchange=\"applyReviewFilter()\">"
         "<option value=\"all\">All</option>"
@@ -876,10 +906,10 @@ def _build_report_html(
         "<option value=\"all\">All assigned cell types</option>"
         "</select>"
     )
-    page.append("<label for=\"svtype-filter\"><b>SV type:</b></label>")
+    page.append("<label for=\"svtype-filter\"><b>Variant type:</b></label>")
     page.append(
         "<select id=\"svtype-filter\" class=\"review-select\" onchange=\"applyReviewFilter()\">"
-        "<option value=\"all\">All SV types</option>"
+        "<option value=\"all\">All variant types</option>"
         "</select>"
     )
     page.append("<label for=\"hard-conflict-filter\"><b>Hard conflict:</b></label>")
@@ -909,7 +939,7 @@ def _build_report_html(
     page.append("</section>")
 
     if not rows:
-        page.append("<div class=\"empty\">No SVs passed the report filters.</div>")
+        page.append("<div class=\"empty\">No variants passed the report filters.</div>")
     else:
         for item in rows:
             sv_id_text = str(item["id"])
@@ -933,8 +963,12 @@ def _build_report_html(
             n_supporting_text = str(n_supporting)
             n_overlapped_text = str(n_overlapped)
             status_text = _fmt_text(item.get("viz_status", ""))
+            variant_class_text = _fmt_text(item.get("variant_class", "SV"))
+            category_text = _fmt_text(item.get("category", ""))
             sv_type_text = _fmt_text(item.get("sv_type", ""))
             sv_type = html.escape(sv_type_text)
+            variant_class = html.escape(variant_class_text)
+            category = html.escape(category_text)
             hard_conflict_token = "unknown"
             hard_conflict_display = "NA"
             hard_conflict_raw = item.get("has_hard_conflict", pd.NA)
@@ -1021,10 +1055,12 @@ def _build_report_html(
             page.append(f"<div class=\"kv\"><b>Review:</b> <span class=\"review-badge\">{html.escape(review_label)}</span></div>")
             page.append(f"<div class=\"kv\"><b>Primary cell type:</b> {primary}</div>")
             page.append(f"<div class=\"kv\"><b>Linked cell types:</b> {linked}</div>")
-            page.append(f"<div class=\"kv\"><b>SV type:</b> {sv_type}</div>")
+            page.append(f"<div class=\"kv\"><b>Variant class:</b> {variant_class}</div>")
+            page.append(f"<div class=\"kv\"><b>Variant subtype:</b> {sv_type}</div>")
+            page.append(f"<div class=\"kv\"><b>Category:</b> {category}</div>")
             page.append(f"<div class=\"kv\"><b>Assigned code:</b> {assigned_code}</div>")
-            page.append(f"<div class=\"kv\"><b>SV length:</b> {html.escape(sv_len_display)}</div>")
-            page.append(f"<div class=\"kv\"><b>IGV SV locus:</b> <code>{html.escape(sv_igv_text)}</code></div>")
+            page.append(f"<div class=\"kv\"><b>Variant size:</b> {html.escape(sv_len_display)}</div>")
+            page.append(f"<div class=\"kv\"><b>Variant locus:</b> <code>{html.escape(sv_igv_text)}</code></div>")
             page.append(
                 f"<div class=\"kv\"><b>majority_pct:</b> {majority} | <b>overlap_pct:</b> {overlap} | "
                 f"<b>vaf:</b> {vaf}</div>"
@@ -1052,7 +1088,7 @@ def _build_report_html(
 
             fig_rel = str(item.get("viz_figure_rel", "")).strip()
             if fig_rel:
-                page.append(f"<div style=\"margin-top:10px\"><img src=\"{html.escape(fig_rel)}\" alt=\"SV plot for {sv_id}\" loading=\"lazy\"></div>")
+                page.append(f"<div style=\"margin-top:10px\"><img src=\"{html.escape(fig_rel)}\" alt=\"Variant plot for {sv_id}\" loading=\"lazy\"></div>")
             igv_manifest_rel = str(item.get("igvviz_manifest_rel", "")).strip()
             if igv_manifest_rel:
                 page.append(
@@ -1418,7 +1454,7 @@ function summaryScopeLabel(filterState){
     }
     parts.push(`cell type: ${cellLabel}`);
   }
-  if(wantedSvType!=='all') parts.push(`SV type: ${wantedSvType}`);
+  if(wantedSvType!=='all') parts.push(`Variant type: ${wantedSvType}`);
   if(wantedHardConflict!=='all'){
     parts.push(
       wantedHardConflict==='true'
@@ -1451,8 +1487,8 @@ function renderSummaries(filterState){
   const titleSuffix=(scope==='all')?'':` [${scope}]`;
   if(data.length===0){
     const msg=(scope==='all')
-      ?'No selected SVs for summary plots.'
-      :`No SVs in '${scope}' for summary plots.`;
+      ?'No selected variants for summary plots.'
+      :`No variants in '${scope}' for summary plots.`;
     ['chart-genome-location','chart-chrom-counts','chart-svlen','chart-support','chart-overlap-majority','chart-celltype']
       .forEach(id=>{const el=document.getElementById(id); if(el){el.textContent=msg;}});
     return;
@@ -1465,11 +1501,11 @@ function renderSummaries(filterState){
     Plotly.newPlot(
       'chart-genome-location',
       [{type:'scatter',mode:'markers',x:posRows.map(r=>String(r.sv_chr)),y:yMb,text:txt,hovertemplate:'%{text}<br>Position(Mb): %{y:.3f}<extra></extra>',marker:{size:8,color:'#1f77b4',opacity:0.75}}],
-      {title:'Genome-wide SV Locations (selected)'+titleSuffix,xaxis:{title:'Chromosome',categoryorder:'array',categoryarray:sortChromLabels(posRows.map(r=>String(r.sv_chr)))},yaxis:{title:'SV position (Mb)'}},
+      {title:'Genome-wide Variant Locations (selected)'+titleSuffix,xaxis:{title:'Chromosome',categoryorder:'array',categoryarray:sortChromLabels(posRows.map(r=>String(r.sv_chr)))},yaxis:{title:'Position (Mb)'}},
       {responsive:true,displaylogo:false}
     );
   } else {
-    document.getElementById('chart-genome-location').textContent='No sv_chr/sv_pos data.';
+    document.getElementById('chart-genome-location').textContent='No locus data.';
   }
 
   const chrCounts={};
@@ -1481,7 +1517,7 @@ function renderSummaries(filterState){
   Plotly.newPlot(
     'chart-chrom-counts',
     [{type:'bar',x:chrLabels,y:chrLabels.map(c=>chrCounts[c]),marker:{color:'#2ca02c'}}],
-    {title:'SV Count by Chromosome'+titleSuffix,xaxis:{title:'Chromosome'},yaxis:{title:'SV count'}},
+    {title:'Variant Count by Chromosome'+titleSuffix,xaxis:{title:'Chromosome'},yaxis:{title:'Variant count'}},
     {responsive:true,displaylogo:false}
   );
 
@@ -1490,7 +1526,7 @@ function renderSummaries(filterState){
     Plotly.newPlot(
       'chart-svlen',
       [{type:'histogram',x:lenVals,marker:{color:'#9467bd'}}],
-      {title:'SV Length Distribution'+titleSuffix,xaxis:{title:'log10(|sv_len| bp)'},yaxis:{title:'Count'}},
+      {title:'Variant Size Distribution'+titleSuffix,xaxis:{title:'log10(|sv_len| bp)'},yaxis:{title:'Count'}},
       {responsive:true,displaylogo:false}
     );
   } else {
@@ -1503,7 +1539,7 @@ function renderSummaries(filterState){
     Plotly.newPlot(
       'chart-support',
       [{type:'histogram',x:nSup,name:'n_supporting',opacity:0.65,marker:{color:'#ff7f0e'}},{type:'histogram',x:nOvl,name:'n_overlapped',opacity:0.65,marker:{color:'#17becf'}}],
-      {title:'Read Support Distribution'+titleSuffix,xaxis:{title:'Read count'},yaxis:{title:'SV count'},barmode:'overlay'},
+      {title:'Read Support Distribution'+titleSuffix,xaxis:{title:'Read count'},yaxis:{title:'Variant count'},barmode:'overlay'},
       {responsive:true,displaylogo:false}
     );
   } else {
@@ -1531,7 +1567,7 @@ function renderSummaries(filterState){
   Plotly.newPlot(
     'chart-celltype',
     [{type:'bar',orientation:'h',x:ctPairs.map(p=>p[1]).reverse(),y:ctPairs.map(p=>p[0]).reverse(),marker:{color:'#8c564b'}}],
-    {title:'Top Primary Cell Types'+titleSuffix,xaxis:{title:'SV count'},yaxis:{title:'Cell type'}},
+    {title:'Top Primary Cell Types'+titleSuffix,xaxis:{title:'Variant count'},yaxis:{title:'Cell type'}},
     {responsive:true,displaylogo:false}
   );
 }
@@ -1770,7 +1806,7 @@ function populateSvtypeFilterOptions(){
   sel.innerHTML='';
   const allOpt=document.createElement('option');
   allOpt.value='all';
-  allOpt.textContent='All SV types';
+  allOpt.textContent='All variant types';
   sel.appendChild(allOpt);
   Array.from(values).sort((a,b)=>a.localeCompare(b)).forEach(value=>{
     const opt=document.createElement('option');
@@ -1919,9 +1955,13 @@ def report_main(args) -> None:
             "sniffcell report needs an anno output folder generated by sniffcell anno."
         )
 
-    sv_assignment_path = anno_output / "sv_assignment.tsv"
-    if not sv_assignment_path.exists():
-        raise FileNotFoundError(f"Could not find sv_assignment.tsv: {sv_assignment_path}")
+    variant_assignment_path = anno_output / "variant_assignment.tsv"
+    if not variant_assignment_path.exists():
+        variant_assignment_path = anno_output / "sv_assignment.tsv"
+    if not variant_assignment_path.exists():
+        raise FileNotFoundError(
+            f"Could not find variant_assignment.tsv or sv_assignment.tsv under: {anno_output}"
+        )
 
     if int(args.max_reads) <= 0:
         raise ValueError("max_reads must be > 0")
@@ -1972,10 +2012,10 @@ def report_main(args) -> None:
     review_storage_key = f"sniffcell_report_review::{str(anno_output.resolve())}"
     manifest_payload = _load_json_dict(manifest_path)
 
-    sv_df = _load_sv_assignment(sv_assignment_path)
-    sv_df = _backfill_sv_fields_from_manifest_vcf(sv_df, manifest_payload, logger)
-    selected = _select_high_confidence_svs(
-        sv_df,
+    variant_df = _load_sv_assignment(variant_assignment_path)
+    variant_df = _backfill_sv_fields_from_manifest_vcf(variant_df, manifest_payload, logger)
+    selected = _select_high_confidence_variants(
+        variant_df,
         min_overlap_pct=float(args.min_overlap_pct),
         overlap_filter_mode=str(args.overlap_filter_mode),
         overlap_gradient_exponent=float(args.overlap_gradient_exponent),
@@ -1985,9 +2025,9 @@ def report_main(args) -> None:
         max_sv=int(args.max_sv),
     )
     logger.info(
-        "Selected %d/%d SVs for report (min_overlap_pct=%.3f overlap_filter_mode=%s overlap_gradient_exponent=%.3f min_majority_pct=%.3f include_unassigned=%s allow_hard_conflict=%s max_sv=%d)",
+        "Selected %d/%d variants for report (min_overlap_pct=%.3f overlap_filter_mode=%s overlap_gradient_exponent=%.3f min_majority_pct=%.3f include_unassigned=%s allow_hard_conflict=%s max_sv=%d)",
         len(selected),
-        len(sv_df),
+        len(variant_df),
         float(args.min_overlap_pct),
         str(args.overlap_filter_mode),
         float(args.overlap_gradient_exponent),
@@ -2039,14 +2079,14 @@ def report_main(args) -> None:
     )
     if bool(args.with_figures) and len(selected) >= 25:
         logger.warning(
-            "Report will render %d SV panels; this can take a long time. "
+            "Report will render %d variant panels; this can take a long time. "
             "Use --max_sv to limit candidates, --reuse_existing_viz to skip existing plots, "
             "or increase --figure_threads.",
             len(selected),
         )
     if with_igvviz and len(selected) >= 10:
         logger.warning(
-            "Report will run igvviz for %d SVs across %d BAM(s); this can take a long time. "
+            "Report will run igvviz for %d variants across %d BAM(s); this can take a long time. "
             "Use --max_sv to limit candidates or increase --figure_threads.",
             len(selected),
             max(1, len(igv_bams)),
@@ -2058,11 +2098,11 @@ def report_main(args) -> None:
         )
     if (not with_igvviz) and len(selected) > 0:
         logger.info(
-            "IGV rendering is disabled. Use --with_igvviz to generate igvviz screenshots per selected SV."
+            "IGV rendering is disabled. Use --with_igvviz to generate igvviz screenshots per selected variants."
         )
     if (not with_igvreport) and len(selected) > 0:
         logger.info(
-            "Alternate IGV.js report is disabled. Use --with_igvreport to generate an igv-reports HTML page for the selected SVs."
+            "Alternate IGV.js report is disabled. Use --with_igvreport to generate an igv-reports HTML page for the selected variants."
         )
 
     rows_for_report: list[dict[str, object]] = []
@@ -2079,37 +2119,41 @@ def report_main(args) -> None:
         igvviz_dir = igvviz_root / slug
         sv_slug_for_igv = _safe_slug(sv_id)
         igvviz_manifest_path = igvviz_dir / f"{sv_slug_for_igv}.igvviz.manifest.json"
-        viz_command = _build_viz_cli_command(
-            anno_output=anno_output,
-            sv_id=sv_id,
-            output_path=figure_path,
-            window=int(args.window),
-            max_reads=int(effective_max_reads),
-            fmt=str(args.format),
-            dpi=int(effective_dpi),
-            exact_window=True,
-            skip_methylation_overlay=bool(skip_methylation_overlay),
-        )
-        igvviz_command = _build_igvviz_cli_command(
-            anno_output=anno_output,
-            sv_id=sv_id,
-            output_dir=igvviz_dir,
-            window=int(args.window),
-            igv_bams=igv_bams,
-            igv_cmd=igv_cmd,
-            snapshot_format=igv_snapshot_format,
-            snapshot_width=igv_snapshot_width,
-            snapshot_height=igv_snapshot_height,
-        )
+        viz_supported = _viz_supported_for_row(row, manifest_payload)
+        viz_command = ""
+        igvviz_command = ""
+        if viz_supported:
+            viz_command = _build_viz_cli_command(
+                anno_output=anno_output,
+                sv_id=sv_id,
+                output_path=figure_path,
+                window=int(args.window),
+                max_reads=int(effective_max_reads),
+                fmt=str(args.format),
+                dpi=int(effective_dpi),
+                exact_window=True,
+                skip_methylation_overlay=bool(skip_methylation_overlay),
+            )
+            igvviz_command = _build_igvviz_cli_command(
+                anno_output=anno_output,
+                sv_id=sv_id,
+                output_dir=igvviz_dir,
+                window=int(args.window),
+                igv_bams=igv_bams,
+                igv_cmd=igv_cmd,
+                snapshot_format=igv_snapshot_format,
+                snapshot_width=igv_snapshot_width,
+                snapshot_height=igv_snapshot_height,
+            )
 
         report_row = dict(row)
         report_row["review_status"] = _normalize_review_status(report_row.get("review_status", "undecided"))
-        report_row["viz_status"] = "not_rendered"
+        report_row["viz_status"] = "not_rendered" if viz_supported else "unsupported"
         report_row["viz_error"] = ""
         report_row["viz_figure"] = str(figure_path)
         report_row["viz_figure_rel"] = ""
         report_row["viz_command"] = viz_command
-        report_row["igvviz_status"] = "not_rendered"
+        report_row["igvviz_status"] = "not_rendered" if viz_supported else "unsupported"
         report_row["igvviz_error"] = ""
         report_row["igvviz_dir"] = str(igvviz_dir)
         report_row["igvviz_dir_rel"] = ""
@@ -2120,8 +2164,9 @@ def report_main(args) -> None:
         report_row["_igvviz_snapshots"] = []
         report_row["igvviz_command"] = igvviz_command
         rows_for_report.append(report_row)
-        render_jobs.append((row_idx, sv_id, figure_path))
-        igvviz_jobs.append((row_idx, sv_id, igvviz_dir, igvviz_manifest_path))
+        if viz_supported:
+            render_jobs.append((row_idx, sv_id, figure_path))
+            igvviz_jobs.append((row_idx, sv_id, igvviz_dir, igvviz_manifest_path))
 
     if bool(args.with_figures) and render_jobs:
         n_threads = int(args.figure_threads)
@@ -2351,7 +2396,9 @@ def report_main(args) -> None:
             selected_report_df[col] = pd.Series(dtype="string")
 
     selected_tsv_path = report_dir / "high_confidence_sv.tsv"
+    selected_variants_tsv_path = report_dir / "high_confidence_variants.tsv"
     selected_report_df.to_csv(selected_tsv_path, sep="\t", index=False)
+    selected_report_df.to_csv(selected_variants_tsv_path, sep="\t", index=False)
 
     failed_tsv_path = report_dir / "failed_viz.tsv"
     failed_only = selected_report_df[selected_report_df["viz_status"].astype(str).str.startswith("failed")].copy()
@@ -2407,12 +2454,12 @@ def report_main(args) -> None:
     html_text = _build_report_html(
         generated_at=generated_at,
         anno_output=anno_output,
-        sv_assignment_path=sv_assignment_path,
+        variant_assignment_path=variant_assignment_path,
         review_storage_key=review_storage_key,
         filters=filters,
         viz=viz_cfg,
         igvreport=igvreport_result,
-        total_sv=int(len(sv_df)),
+        total_variants=int(len(variant_df)),
         selected_count=int(len(selected)),
         rendered_count=int(rendered_count),
         failed_count=int(failed_count),
@@ -2427,7 +2474,8 @@ def report_main(args) -> None:
         "generated_at": generated_at,
         "inputs": {
             "anno_output": str(anno_output.resolve()),
-            "sv_assignment": str(sv_assignment_path.resolve()),
+            "variant_assignment": str(variant_assignment_path.resolve()),
+            "sv_assignment": str(variant_assignment_path.resolve()),
         },
         "filters": filters,
         "viz": viz_cfg,
@@ -2439,7 +2487,9 @@ def report_main(args) -> None:
             "command": str(igvreport_result.get("command", "")),
         },
         "counts": {
-            "sv_total": int(len(sv_df)),
+            "variant_total": int(len(variant_df)),
+            "variant_selected": int(len(selected)),
+            "sv_total": int(len(variant_df)),
             "sv_selected": int(len(selected)),
             "viz_rendered_or_reused": int(rendered_count),
             "viz_failed": int(failed_count),
@@ -2456,7 +2506,9 @@ def report_main(args) -> None:
             "igvreport_dir": str(igvreport_root.resolve()),
             "igvreport_html": str(igvreport_html_path.resolve()),
             "igvreport_manifest": str(igvreport_manifest_path.resolve()),
+            "high_confidence_tsv": str(selected_variants_tsv_path.resolve()),
             "high_confidence_sv_tsv": str(selected_tsv_path.resolve()),
+            "high_confidence_variants_tsv": str(selected_variants_tsv_path.resolve()),
             "review_storage_key": review_storage_key,
             "failed_viz_tsv": str(failed_tsv_path.resolve()),
             "failed_igvviz_tsv": str(failed_igvviz_tsv_path.resolve()),
@@ -2471,7 +2523,7 @@ def report_main(args) -> None:
         archive_out = _write_report_archive(report_dir, archive_path)
 
     logger.info("Wrote HTML report: %s", html_path)
-    logger.info("Wrote selected SV table: %s", selected_tsv_path)
+    logger.info("Wrote selected variant tables: %s ; %s", selected_tsv_path, selected_variants_tsv_path)
     logger.info("Review state localStorage key: %s", review_storage_key)
     logger.info("Wrote failed viz table: %s", failed_tsv_path)
     logger.info("Wrote failed igvviz table: %s", failed_igvviz_tsv_path)

@@ -6,6 +6,7 @@ import threading
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
+from textwrap import shorten
 
 import numpy as np
 import pandas as pd
@@ -81,6 +82,13 @@ def _parse_support_read_names(value: object) -> list[str]:
         text = value.strip()
         if not text or text.upper() in null_tokens:
             return []
+        if text.startswith("[") and text.endswith("]"):
+            try:
+                parsed = json.loads(text)
+            except Exception:
+                parsed = None
+            if isinstance(parsed, list):
+                return [str(item).strip() for item in parsed if str(item).strip() and str(item).strip().upper() not in null_tokens]
         for delim in (",", "|", ";"):
             if delim in text:
                 return [t.strip() for t in text.split(delim) if t.strip() and t.strip().upper() not in null_tokens]
@@ -152,7 +160,29 @@ def _build_sv_payload(record: pysam.VariantRecord) -> dict:
         "start": sv_start,
         "end": sv_end,
         "svtype": svtype,
+        "variant_class": "SV",
         "svlen": _first_scalar(_safe_info_get(record.info, "SVLEN", pd.NA)),
+        "supporting_reads": support_names,
+    }
+
+
+def _build_variant_payload_from_table_row(row: pd.Series) -> dict:
+    start = int(pd.to_numeric(row.get("start"), errors="coerce"))
+    end = int(pd.to_numeric(row.get("end"), errors="coerce"))
+    if end <= start:
+        end = start + 1
+    group_a_reads = _parse_support_read_names(row.get("group_a_read_names", ""))
+    group_b_reads = _parse_support_read_names(row.get("group_b_read_names", ""))
+    support_names = set(group_a_reads) | set(group_b_reads)
+    svlen = pd.to_numeric(row.get("change_size_bp", pd.NA), errors="coerce")
+    return {
+        "id": str(row.get("variant_id", row.get("id", ""))),
+        "chrom": str(row.get("chrom", row.get("chr", ""))),
+        "start": start,
+        "end": end,
+        "svtype": str(row.get("variant_subtype", row.get("sv_type", "SV"))),
+        "variant_class": str(row.get("variant_class", "SV")),
+        "svlen": (_first_scalar(svlen) if pd.notna(svlen) else pd.NA),
         "supporting_reads": support_names,
     }
 
@@ -164,12 +194,29 @@ def _load_sv_payload_index(vcf_path: str) -> dict[str, dict]:
         raise ValueError("vcf_path is required")
 
     payloads: dict[str, dict] = {}
-    with pysam.VariantFile(key) as vf:
-        for record in vf.fetch():
-            rec_id = str(record.id)
-            if not rec_id:
-                continue
-            payloads[rec_id] = _build_sv_payload(record)
+    try:
+        with pysam.VariantFile(key) as vf:
+            for record in vf.fetch():
+                rec_id = str(record.id)
+                if not rec_id:
+                    continue
+                payloads[rec_id] = _build_sv_payload(record)
+        return payloads
+    except Exception:
+        pass
+
+    table = pd.read_csv(key, sep="\t")
+    required = {"chrom", "start", "end"}
+    if not required.issubset(set(table.columns)):
+        raise ValueError(f"Variant table is missing required columns: {sorted(required - set(table.columns))}")
+    if "variant_id" not in table.columns and "id" not in table.columns:
+        raise ValueError("Variant table is missing required column 'variant_id' or 'id'")
+    for _, row in table.iterrows():
+        payload = _build_variant_payload_from_table_row(row)
+        rec_id = str(payload["id"]).strip()
+        if not rec_id:
+            continue
+        payloads[rec_id] = payload
     return payloads
 
 
@@ -218,7 +265,7 @@ def _resolve_viz_runtime_inputs(args, logger: logging.Logger) -> dict:
     manifest_outputs = manifest.get("outputs", {}) if isinstance(manifest, dict) else {}
 
     bam_path = args.input or manifest_inputs.get("bam")
-    vcf_path = args.vcf or manifest_inputs.get("vcf")
+    vcf_path = args.vcf or manifest_inputs.get("vcf") or manifest_inputs.get("variants")
     reference_path = args.reference or manifest_inputs.get("reference")
     bed_path = args.bed or manifest_inputs.get("bed")
 
@@ -1497,11 +1544,11 @@ def _plot_sv_panel(
         constrained_layout=False,
         gridspec_kw={"height_ratios": [4.2, 1.8]},
     )
-    fig.subplots_adjust(left=0.080, right=0.995, top=0.82, bottom=0.08, hspace=0.08)
+    fig.subplots_adjust(left=0.080, right=0.995, top=0.76, bottom=0.08, hspace=0.08)
     ax_reads, ax_dmrs = axes
 
-    title_size = 20
-    subtitle_size = 13
+    title_size = 17
+    subtitle_size = 11
     axis_label_size = 16
     tick_label_size = 13
 
@@ -2074,31 +2121,38 @@ def _plot_sv_panel(
         dmr_preview += f", ... (+{len(dmr_coords_igv) - 8} more)"
     if not dmr_preview:
         dmr_preview = "none"
+    else:
+        dmr_preview = shorten(dmr_preview, width=150, placeholder=" ...")
     callout_preview = ", ".join(callout_coords_igv[:4])
     if len(callout_coords_igv) > 4:
         callout_preview += f", ... (+{len(callout_coords_igv) - 4} more)"
     if not callout_preview:
         callout_preview = "none"
+    else:
+        callout_preview = shorten(callout_preview, width=120, placeholder=" ...")
+
+    variant_class_label = str(sv.get("variant_class", "SV")).strip().upper() or "VARIANT"
+    variant_type_label = str(sv.get("svtype", "")).strip() or variant_class_label
 
     title = (
-        f"SV {sv['id']} ({sv['svtype']}) at {chrom}:{sv_start + 1}-{sv_end} "
-        f"| SVLEN {sv_len_text} | window +/-{window} bp"
+        f"{variant_class_label} {sv['id']} ({variant_type_label}) at {chrom}:{sv_start + 1}-{sv_end}"
     )
-    fig.suptitle(title, fontsize=title_size, y=0.985)
+    fig.suptitle(title, fontsize=title_size, y=0.992)
     subtitle = (
+        f"size: {sv_len_text} | window +/-{window} bp | "
         f"supporting reads in VCF: {n_support_listed} | in BAM window: {n_support_in_window} | shown: {n_support_shown} | "
         f"assigned: {n_assigned} | unassigned: {n_unassigned} | "
         f"display haplotypes: {'HP' + str(applied_support_haplotype) if applied_support_haplotype is not None else 'all'}"
     )
-    fig.text(0.01, 0.955, subtitle, fontsize=subtitle_size, ha="left", va="center")
-    fig.text(0.01, 0.935, f"SV (IGV): {sv_locus_igv} | Window (IGV): {window_locus_igv}", fontsize=11, ha="left", va="center")
-    fig.text(0.01, 0.916, f"ctDMRs in-window (IGV, {len(dmr_coords_igv)}): {dmr_preview}", fontsize=10, ha="left", va="center")
+    fig.text(0.01, 0.952, subtitle, fontsize=subtitle_size, ha="left", va="center")
+    fig.text(0.01, 0.930, f"Locus (IGV): {sv_locus_igv} | Window (IGV): {window_locus_igv}", fontsize=10, ha="left", va="center")
+    fig.text(0.01, 0.909, f"ctDMRs in-window (IGV, {len(dmr_coords_igv)}): {dmr_preview}", fontsize=9, ha="left", va="center")
     if callout_coords_igv:
         fig.text(
             0.01,
-            0.897,
+            0.888,
             f"winning linked ctDMR callouts outside window ({len(callout_coords_igv)}): {callout_preview}",
-            fontsize=10,
+            fontsize=9,
             ha="left",
             va="center",
         )
@@ -2115,7 +2169,7 @@ def _plot_sv_panel(
         Line2D([0], [0], linestyle="None", marker="o", markerfacecolor=low_methylation_color, markeredgecolor="#111111", markersize=7, label="Methylation 0.0"),
         Line2D([0], [0], linestyle="None", marker="o", markerfacecolor=mid_methylation_color, markeredgecolor="#111111", markersize=7, label="Methylation 0.5"),
         Line2D([0], [0], linestyle="None", marker="o", markerfacecolor=high_methylation_color, markeredgecolor="#111111", markersize=7, label="Methylation 1.0"),
-        Patch(facecolor="#3182bd", alpha=0.20, label="SV interval"),
+        Patch(facecolor="#3182bd", alpha=0.20, label="Variant interval"),
         Patch(facecolor="#f7f7f7", edgecolor="#2ca25f", alpha=0.95, label="ctDMR hyper (edge)"),
         Patch(facecolor="#f7f7f7", edgecolor="#756bb1", alpha=0.95, label="ctDMR hypo/other (edge)"),
     ]

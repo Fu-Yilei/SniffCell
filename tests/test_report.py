@@ -126,6 +126,35 @@ class TestReportSelection(unittest.TestCase):
 
         self.assertEqual(len(selected), 0)
 
+    def test_select_high_confidence_keeps_linked_tr_despite_hard_conflict(self):
+        sv_df = pd.DataFrame(
+            {
+                "id": ["tr_keep", "tr_drop"],
+                "variant_class": ["TR", "TR"],
+                "assigned_code": ["", ""],
+                "linked_celltypes": ["A|B", "A"],
+                "has_hard_conflict": [True, True],
+                "overlap_pct": [0.95, 0.0],
+                "majority_pct": [0.8, 0.0],
+                "n_supporting": [10, 5],
+                "n_overlapped": [8, 0],
+            }
+        )
+        sv_df["has_hard_conflict"] = sv_df["has_hard_conflict"].astype("boolean")
+
+        selected = _select_high_confidence_svs(
+            sv_df,
+            min_overlap_pct=0.8,
+            overlap_filter_mode="gradient",
+            overlap_gradient_exponent=0.5,
+            min_majority_pct=0.8,
+            include_unassigned=False,
+            allow_hard_conflict=False,
+            max_sv=0,
+        )
+
+        self.assertEqual(selected["id"].tolist(), ["tr_keep"])
+
 
 class TestReportMain(unittest.TestCase):
     def _base_args(self, anno_output: Path, output: str | None = None, reuse: bool = False):
@@ -292,7 +321,7 @@ class TestReportMain(unittest.TestCase):
             self.assertTrue(failed_path.exists())
 
             text = html_path.read_text(encoding="utf-8")
-            self.assertIn("No SVs passed the report filters", text)
+            self.assertIn("No variants passed the report filters", text)
             selected = pd.read_csv(selected_path, sep="\t")
             self.assertEqual(len(selected), 0)
 
@@ -371,7 +400,7 @@ class TestReportMain(unittest.TestCase):
             self.assertIn("Interactive Summaries", text)
             self.assertIn("chart-genome-location", text)
             self.assertIn("cdn.plot.ly", text)
-            self.assertIn("SV Review Controls", text)
+            self.assertIn("Variant Review Controls", text)
             self.assertIn("id=\"review-filter\"", text)
             self.assertIn("id=\"celltype-filter\"", text)
             self.assertIn("id=\"svtype-filter\"", text)

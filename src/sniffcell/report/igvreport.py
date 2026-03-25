@@ -20,7 +20,7 @@ from sniffcell.viz import igvviz as igvviz_module
 from sniffcell.viz import viz as viz_module
 
 _INFO_COLUMNS = [
-    "sv_locus",
+    "site_locus",
     "primary_celltype",
     "linked_celltypes",
     "assigned_code",
@@ -156,7 +156,9 @@ def _build_sites_table(selected_df: pd.DataFrame, vcf_path: str | None) -> pd.Da
                 "start": int(start_0),
                 "end": int(end_0),
                 "id": sv_id,
+                "site_locus": sv_locus,
                 "sv_locus": sv_locus,
+                "variant_class": _fmt_site_scalar(item.get("variant_class", "")),
                 "primary_celltype": _fmt_site_scalar(item.get("primary_celltype", "")),
                 "linked_celltypes": _fmt_site_scalar(item.get("linked_celltypes", "")),
                 "assigned_code": _fmt_site_scalar(item.get("assigned_code", "")),
@@ -186,13 +188,13 @@ def _write_header_html(
         "SniffCell Alternate IGV Report"
         "</div>"
         "<div style=\"font-size:14px;color:#44525f;line-height:1.5;\">"
-        f"Selected SVs: {selected_count} | Tracks: {track_count} | "
+        f"Selected variants: {selected_count} | Tracks: {track_count} | "
         f"anno_output: <code>{html.escape(str(anno_output))}</code> | "
         f"<a href=\"{html.escape(rel_native)}\">Open native SniffCell report</a>"
         "</div>"
         "<div style=\"font-size:13px;color:#5b6b77;line-height:1.5;margin-top:6px;\">"
         "Alignment tracks default to DNA methylation two-color mode; "
-        "SV-supporting reads are highlighted when read names are available."
+        "Variant-supporting reads are highlighted when read names are available."
         "</div>"
         "</div>"
         "</section>"
@@ -240,6 +242,10 @@ def _build_supporting_reads_by_session(selected_df: pd.DataFrame, vcf_path: str 
     support_map: dict[str, list[str]] = {}
     for idx, item in enumerate(selected_df.to_dict(orient="records")):
         support_names = _normalize_supporting_read_names(item.get("supporting_reads", ""))
+        group_a_names = _normalize_supporting_read_names(item.get("group_a_read_names", ""))
+        group_b_names = _normalize_supporting_read_names(item.get("group_b_read_names", ""))
+        if group_a_names or group_b_names:
+            support_names = _normalize_supporting_read_names([*support_names, *group_a_names, *group_b_names])
         sv_id = str(item.get("id", "")).strip()
         if (not support_names) and vcf_path and sv_id:
             try:
@@ -518,14 +524,15 @@ def render_igvreport_bundle(
     window: int,
 ) -> dict[str, object]:
     if selected_df.empty:
-        raise ValueError("igvreport needs at least one selected SV.")
+        raise ValueError("igvreport needs at least one selected variant.")
 
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     html_path = output_dir / "index.html"
     manifest_path = output_dir / "igvreport_manifest.json"
-    sites_path = output_dir / "selected_sv_sites.tsv"
+    sites_path = output_dir / "selected_sites.tsv"
+    legacy_sites_path = output_dir / "selected_sv_sites.tsv"
     header_path = output_dir / "sniffcell_igvreport_header.html"
 
     base_result: dict[str, object] = {
@@ -535,6 +542,7 @@ def render_igvreport_bundle(
         "html_path": str(html_path.resolve()),
         "manifest_path": str(manifest_path.resolve()),
         "sites_path": str(sites_path.resolve()),
+        "legacy_sites_path": str(legacy_sites_path.resolve()),
         "header_path": str(header_path.resolve()),
     }
 
@@ -588,6 +596,7 @@ def render_igvreport_bundle(
         command_text = " ".join(shlex.quote(part) for part in command)
 
         sites_df.to_csv(sites_path, sep="\t", index=False)
+        sites_df.to_csv(legacy_sites_path, sep="\t", index=False)
         proc = subprocess.run(command, check=False, capture_output=True, text=True)
         stdout_text = str(proc.stdout or "")
         stderr_text = str(proc.stderr or "")
@@ -642,6 +651,8 @@ def render_igvreport_bundle(
             "html": str(html_path.resolve()),
             "manifest": str(manifest_path.resolve()),
             "sites_tsv": str(sites_path.resolve()),
+            "selected_sites_tsv": str(sites_path.resolve()),
+            "selected_sv_sites_tsv": str(legacy_sites_path.resolve()),
             "header_html": str(header_path.resolve()),
         },
         "runtime": {

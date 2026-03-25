@@ -100,7 +100,7 @@ def _resolve_igvviz_runtime_inputs(args, logger: logging.Logger) -> dict:
         if manifest_bam:
             bam_paths = [str(manifest_bam)]
 
-    vcf_path = args.vcf or manifest_inputs.get("vcf")
+    vcf_path = args.vcf or manifest_inputs.get("vcf") or manifest_inputs.get("variants")
     reference_path = args.reference or manifest_inputs.get("reference")
     bed_path = args.bed or manifest_inputs.get("bed")
 

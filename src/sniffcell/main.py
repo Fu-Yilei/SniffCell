@@ -23,7 +23,7 @@ def main(argv=None):
         output_dir = os.path.dirname(os.path.abspath(args.output))
         if output_dir:
             os.makedirs(output_dir, exist_ok=True)
-        anno.sv_anno(args)
+        anno.svanno_main(args)
     elif args.command == "deconv":
         deconv.deconv_main(args)
     elif args.command == "dmsv":

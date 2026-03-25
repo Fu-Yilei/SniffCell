@@ -1,4 +1,5 @@
 import dataclasses
+import json
 import os
 import shlex
 import stat
@@ -6,6 +7,11 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
+
+import numpy as np
+import pandas as pd
 
 from sniffcell.parse_args import parse_args
 from sniffcell.discover.discover import (
@@ -14,6 +20,7 @@ from sniffcell.discover.discover import (
     RunContext,
     _build_context,
     _build_recursive_cli,
+    _clear_force_rerun_state,
     _parse_stages,
     _render_slurm,
     _render_submit_script,
@@ -423,6 +430,17 @@ class TestDiscoverParseArgs(unittest.TestCase):
         ])
         self.assertEqual(args.clair3_platform, "ont")
 
+    def test_medaka_phasing_accepts_abpoa(self):
+        args = parse_args([
+            "discover",
+            "--deconv-dir", "/tmp/d",
+            "--reference", "/tmp/r",
+            "--tr-bed", "/tmp/t",
+            "--sex", "male",
+            "--medaka-phasing", "abpoa",
+        ])
+        self.assertEqual(args.medaka_phasing, "abpoa")
+
 
 # ---------------------------------------------------------------------------
 # _parse_stages tests
@@ -663,6 +681,15 @@ class TestBuildContext(unittest.TestCase):
             ctx = _build_context(args)
             self.assertEqual(ctx.params["mods_mode"], "combined")
 
+    def test_build_context_medaka_phasing_propagated(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            deconv_dir, ref, tr_bed, tool_paths = _build_minimal_env(root)
+            argv = _base_slurm_argv(deconv_dir, ref, tr_bed, tool_paths) + ["--medaka-phasing", "abpoa"]
+            args = parse_args(argv)
+            ctx = _build_context(args)
+            self.assertEqual(ctx.params["medaka_phasing"], "abpoa")
+
 
 # ---------------------------------------------------------------------------
 # _build_recursive_cli tests
@@ -762,6 +789,20 @@ class TestBuildRecursiveCli(unittest.TestCase):
             idx = cli.index("--medaka-sample-name-template")
             self.assertEqual(cli[idx + 1], "{sample_id}_{group}")
 
+    def test_medaka_phasing_forwarded_when_set(self):
+        with tempfile.TemporaryDirectory() as td:
+            ctx = self._get_ctx(Path(td), ["--medaka-phasing", "abpoa"])
+            cli = _build_recursive_cli(ctx, "medaka")
+            self.assertIn("--medaka-phasing", cli)
+            idx = cli.index("--medaka-phasing")
+            self.assertEqual(cli[idx + 1], "abpoa")
+
+    def test_medaka_phasing_absent_when_not_set(self):
+        with tempfile.TemporaryDirectory() as td:
+            ctx = self._get_ctx(Path(td))
+            cli = _build_recursive_cli(ctx, "medaka")
+            self.assertNotIn("--medaka-phasing", cli)
+
     def test_tdb_create_force_forwarded_when_set(self):
         with tempfile.TemporaryDirectory() as td:
             ctx = self._get_ctx(Path(td), ["--tdb-create-force"])
@@ -800,6 +841,53 @@ class TestBuildRecursiveCli(unittest.TestCase):
             ctx = self._get_ctx(Path(td))
             cli = _build_recursive_cli(ctx, "sniffles")
             self.assertNotIn("--force", cli)
+
+    def test_force_rerun_clears_selected_task_state(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            deconv_dir, ref, tr_bed, tool_paths = _build_minimal_env(root)
+            args = parse_args(
+                _base_local_argv(deconv_dir, ref, tr_bed, tool_paths)
+                + ["--stages", "collapse,medaka", "--force"]
+            )
+            ctx = _build_context(args)
+            ctx.run_root.mkdir(parents=True, exist_ok=True)
+            ctx.status_dir.mkdir(parents=True, exist_ok=True)
+            (ctx.status_dir / "collapse.done.json").write_text("{}", encoding="utf-8")
+            (ctx.status_dir / "collapse_inputs.done.json").write_text("{}", encoding="utf-8")
+            (ctx.status_dir / "sv_post_processing.done.json").write_text("{}", encoding="utf-8")
+            (ctx.status_dir / "medaka.Neuron.done.json").write_text("{}", encoding="utf-8")
+            (ctx.status_dir / "medaka.Oligodendrocyte.failed.json").write_text("{}", encoding="utf-8")
+            (ctx.status_dir / "sniffles.Neuron.done.json").write_text("{}", encoding="utf-8")
+            (ctx.status_dir / "discover_status.json").write_text(
+                json.dumps(
+                    {
+                        "collapse": {"state": "completed"},
+                        "collapse_inputs": {"state": "completed"},
+                        "sv_post_processing": {"state": "completed"},
+                        "medaka.Neuron": {"state": "running"},
+                        "medaka.Oligodendrocyte": {"state": "failed"},
+                        "sniffles.Neuron": {"state": "completed"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            _clear_force_rerun_state(ctx)
+
+            status_payload = json.loads((ctx.status_dir / "discover_status.json").read_text(encoding="utf-8"))
+            self.assertNotIn("collapse", status_payload)
+            self.assertNotIn("collapse_inputs", status_payload)
+            self.assertNotIn("sv_post_processing", status_payload)
+            self.assertNotIn("medaka.Neuron", status_payload)
+            self.assertNotIn("medaka.Oligodendrocyte", status_payload)
+            self.assertIn("sniffles.Neuron", status_payload)
+            self.assertFalse((ctx.status_dir / "collapse.done.json").exists())
+            self.assertFalse((ctx.status_dir / "collapse_inputs.done.json").exists())
+            self.assertFalse((ctx.status_dir / "sv_post_processing.done.json").exists())
+            self.assertFalse((ctx.status_dir / "medaka.Neuron.done.json").exists())
+            self.assertFalse((ctx.status_dir / "medaka.Oligodendrocyte.failed.json").exists())
+            self.assertTrue((ctx.status_dir / "sniffles.Neuron.done.json").exists())
 
     def test_clair3_model_path_forwarded_when_set(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1002,8 +1090,8 @@ class TestPostprocessContextAndSlurm(unittest.TestCase):
             self.assertIn("Neuron", content)
             self.assertIn("Oligodendrocyte", content)
 
-    def test_sniffles_command_contains_sample_name(self):
-        """_run_sniffles must pass --sample-name <sampleid>_<group> to sniffles."""
+    def test_sniffles_command_omits_sample_name_when_unsupported(self):
+        """_run_sniffles should not pass --sample-name when the sniffles binary lacks that option."""
         from sniffcell.discover.discover import _run_sniffles
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -1033,8 +1121,75 @@ class TestPostprocessContextAndSlurm(unittest.TestCase):
             _run_sniffles(ctx, "Neuron")
             cmd_file = ctx.commands_dir / "sniffles.Neuron.command.txt"
             cmd_text = cmd_file.read_text()
+            self.assertNotIn("--sample-name", cmd_text)
+            self.assertNotIn("sample1_Neuron", cmd_text)
+
+    def test_sniffles_command_contains_sample_name_when_supported(self):
+        """_run_sniffles should pass --sample-name when the sniffles binary supports it."""
+        from sniffcell.discover.discover import _run_sniffles
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            deconv_dir, ref, tr_bed, tool_paths = _build_minimal_env(root)
+            argv = [
+                "discover",
+                "--deconv-dir", str(deconv_dir),
+                "--reference", str(ref),
+                "--tr-bed", str(tr_bed),
+                "--sex", "male",
+                "--scheduler", "local",
+                "--dry-run",
+                "--sniffles-bin", tool_paths["sniffles"],
+                "--bcftools-bin", tool_paths["bcftools"],
+                "--kanpig-bin", tool_paths["kanpig"],
+                "--truvari-bin", tool_paths["truvari"],
+                "--medaka-bin", tool_paths["medaka"],
+                "--tdb-bin", tool_paths["tdb"],
+                "--modkit-bin", tool_paths["modkit"],
+                "--tabix-bin", tool_paths["tabix"],
+                "--clair3-bin", tool_paths["run_clair3.sh"],
+                "--clairs-bin", tool_paths["run_clairs"],
+            ]
+            args = parse_args(argv)
+            ctx = _build_context(args)
+            with patch("sniffcell.discover.discover._sniffles_supports_sample_name", return_value=True):
+                _run_sniffles(ctx, "Neuron")
+            cmd_file = ctx.commands_dir / "sniffles.Neuron.command.txt"
+            cmd_text = cmd_file.read_text()
             self.assertIn("--sample-name", cmd_text)
             self.assertIn("sample1_Neuron", cmd_text)
+
+    def test_medaka_command_contains_phasing_when_requested(self):
+        from sniffcell.discover.discover import _run_medaka
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            deconv_dir, ref, tr_bed, tool_paths = _build_minimal_env(root)
+            argv = [
+                "discover",
+                "--deconv-dir", str(deconv_dir),
+                "--reference", str(ref),
+                "--tr-bed", str(tr_bed),
+                "--sex", "male",
+                "--scheduler", "local",
+                "--dry-run",
+                "--medaka-phasing", "abpoa",
+                "--sniffles-bin", tool_paths["sniffles"],
+                "--bcftools-bin", tool_paths["bcftools"],
+                "--kanpig-bin", tool_paths["kanpig"],
+                "--truvari-bin", tool_paths["truvari"],
+                "--medaka-bin", tool_paths["medaka"],
+                "--tdb-bin", tool_paths["tdb"],
+                "--modkit-bin", tool_paths["modkit"],
+                "--tabix-bin", tool_paths["tabix"],
+                "--clair3-bin", tool_paths["run_clair3.sh"],
+                "--clairs-bin", tool_paths["run_clairs"],
+            ]
+            args = parse_args(argv)
+            ctx = _build_context(args)
+            _run_medaka(ctx, "Neuron")
+            cmd_file = ctx.commands_dir / "medaka.Neuron.command.txt"
+            cmd_text = cmd_file.read_text()
+            self.assertIn("--phasing", cmd_text)
+            self.assertIn("abpoa", cmd_text)
 
     def test_sniffles_script_contains_threads_param(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1058,6 +1213,515 @@ class TestPostprocessContextAndSlurm(unittest.TestCase):
             _render_slurm(ctx)
             script_text = (ctx.slurm_dir / "modkit.array.sbatch.sh").read_text()
             self.assertIn("--mods-mode combined", script_text)
+
+
+class TestTrPostProcessingTiering(unittest.TestCase):
+
+    def _build_tr_row(
+        self,
+        *,
+        change_lengths,
+        baseline_lengths,
+        change_other_lengths,
+        baseline_other_lengths,
+        tdb_change_length,
+        tdb_baseline_length,
+        pairing_confidence=0.2,
+        hp_changed_n=0,
+        change_cross=False,
+        baseline_cross=False,
+        signal_class="tdb_delta",
+        tail_read_count=None,
+        tail_far_read_count=None,
+        tail_baseline_same_hap_max_bp=None,
+        tail_change_other_hap_upper_bp=None,
+        tail_anchor_bp=None,
+        tail_max_excess_bp=None,
+        sample_change_lower_bp=None,
+        sample_change_upper_bp=None,
+        sample_baseline_lower_bp=None,
+        sample_baseline_upper_bp=None,
+        sample_lower_delta_bp=None,
+        sample_upper_delta_bp=None,
+        sample_range_supports_tail=None,
+        tail_require_sample_range_support=True,
+    ):
+        from sniffcell.discover.tr_post_processing import _build_tr_bed_table
+
+        change_group = "sample.Neuron"
+        baseline_group = "sample.Oligodendrocyte"
+        changed_allele_table = pd.DataFrame(
+            [
+                {
+                    "chrom": "chr1",
+                    "start": 100,
+                    "end": 200,
+                    "LocusID": 1,
+                    "change_allele": "hap1",
+                    "change_celltype": change_group,
+                    "baseline_celltype": baseline_group,
+                    "tdb_change_length": tdb_change_length,
+                    "tdb_baseline_length": tdb_baseline_length,
+                    "change_length_bp": abs(tdb_change_length - tdb_baseline_length),
+                    "read_mean_change_length": float(np.mean(change_lengths)),
+                    "read_mean_baseline_length": float(np.mean(baseline_lengths)),
+                    "n_change_reads": len(change_lengths),
+                    "n_baseline_reads": len(baseline_lengths),
+                    "change_read_names": [f"chg{i}" for i in range(len(change_lengths))],
+                    "change_read_lengths": list(change_lengths),
+                    "baseline_read_names": [f"base{i}" for i in range(len(baseline_lengths))],
+                    "baseline_read_lengths": list(baseline_lengths),
+                    "pairing": "direct",
+                    "pairing_confidence": pairing_confidence,
+                    "max_abs_delta_bp": abs(tdb_change_length - tdb_baseline_length),
+                    "signal_class": signal_class,
+                    "tail_read_count": tail_read_count,
+                    "tail_far_read_count": tail_far_read_count,
+                    "tail_baseline_same_hap_max_bp": tail_baseline_same_hap_max_bp,
+                    "tail_change_other_hap_upper_bp": tail_change_other_hap_upper_bp,
+                    "tail_anchor_bp": tail_anchor_bp,
+                    "tail_max_excess_bp": tail_max_excess_bp,
+                    "sample_change_lower_bp": sample_change_lower_bp,
+                    "sample_change_upper_bp": sample_change_upper_bp,
+                    "sample_baseline_lower_bp": sample_baseline_lower_bp,
+                    "sample_baseline_upper_bp": sample_baseline_upper_bp,
+                    "sample_lower_delta_bp": sample_lower_delta_bp,
+                    "sample_upper_delta_bp": sample_upper_delta_bp,
+                    "sample_range_supports_tail": sample_range_supports_tail,
+                }
+            ]
+        )
+
+        clustered_summary = pd.DataFrame(
+            [
+                {"LocusID": 1, "cell_type": change_group, "hap": "hap1", "median_length": float(np.median(change_lengths)), "has_cross_hap_mixing": change_cross},
+                {"LocusID": 1, "cell_type": baseline_group, "hap": "hap1", "median_length": float(np.median(baseline_lengths)), "has_cross_hap_mixing": baseline_cross},
+                {"LocusID": 1, "cell_type": change_group, "hap": "hap2", "median_length": float(np.median(change_other_lengths)), "has_cross_hap_mixing": change_cross},
+                {"LocusID": 1, "cell_type": baseline_group, "hap": "hap2", "median_length": float(np.median(baseline_other_lengths)), "has_cross_hap_mixing": baseline_cross},
+            ]
+        )
+
+        rows = []
+        for label, hap, lengths, changed_count in (
+            (change_group, "hap1", change_lengths, hp_changed_n),
+            (change_group, "hap2", change_other_lengths, 0),
+            (baseline_group, "hap1", baseline_lengths, 0),
+            (baseline_group, "hap2", baseline_other_lengths, 0),
+        ):
+            for idx, length in enumerate(lengths):
+                rows.append(
+                    {
+                        "LocusID": 1,
+                        "cell_type": label,
+                        "hap": hap,
+                        "read_name": f"{label}.{hap}.{idx}",
+                        "read_length": int(length),
+                        "hp_changed": idx < changed_count,
+                    }
+                )
+        df_reads = pd.DataFrame(rows)
+        tr_bed = _build_tr_bed_table(
+            changed_allele_table,
+            clustered_summary,
+            df_reads,
+            pd=pd,
+            require_sample_range_support=tail_require_sample_range_support,
+        )
+        return tr_bed.iloc[0]
+
+    def test_broad_clean_expansion_is_strong(self):
+        row = self._build_tr_row(
+            change_lengths=[930, 940, 950, 960, 970, 980, 990, 1000, 1010, 1500],
+            baseline_lengths=[790, 795, 798, 800, 802, 804, 806, 808, 810, 812],
+            change_other_lengths=[600, 601, 602, 603, 600, 601, 602, 603, 600, 601],
+            baseline_other_lengths=[599, 600, 601, 602, 599, 600, 601, 602, 599, 600],
+            tdb_change_length=1150,
+            tdb_baseline_length=900,
+            pairing_confidence=0.5,
+        )
+        self.assertEqual(row["tr_tier"], "strong")
+        self.assertTrue(bool(row["tr_pass_for_harmonized"]))
+
+    def test_smaller_clean_expansion_is_supportive(self):
+        row = self._build_tr_row(
+            change_lengths=[1020, 1025, 1030, 1035, 1040, 1045, 1050, 1055],
+            baseline_lengths=[955, 958, 960, 962, 964, 966, 968, 970],
+            change_other_lengths=[620, 621, 622, 623, 624, 625, 626, 627],
+            baseline_other_lengths=[619, 620, 621, 622, 623, 624, 625, 626],
+            tdb_change_length=1100,
+            tdb_baseline_length=940,
+            pairing_confidence=0.0,
+        )
+        self.assertEqual(row["tr_tier"], "supportive")
+        self.assertTrue(bool(row["tr_pass_for_harmonized"]))
+
+    def test_high_hp_flip_fraction_is_weak(self):
+        row = self._build_tr_row(
+            change_lengths=[1020, 1025, 1030, 1035, 1040, 1045, 1050, 1055],
+            baseline_lengths=[955, 958, 960, 962, 964, 966, 968, 970],
+            change_other_lengths=[620, 621, 622, 623, 624, 625, 626, 627],
+            baseline_other_lengths=[619, 620, 621, 622, 623, 624, 625, 626],
+            tdb_change_length=1100,
+            tdb_baseline_length=940,
+            hp_changed_n=2,
+        )
+        self.assertEqual(row["tr_tier"], "weak")
+        self.assertFalse(bool(row["tr_pass_for_harmonized"]))
+
+    def test_cross_haplotype_mixing_is_weak(self):
+        row = self._build_tr_row(
+            change_lengths=[1020, 1025, 1030, 1035, 1040, 1045, 1050, 1055],
+            baseline_lengths=[955, 958, 960, 962, 964, 966, 968, 970],
+            change_other_lengths=[620, 621, 622, 623, 624, 625, 626, 627],
+            baseline_other_lengths=[619, 620, 621, 622, 623, 624, 625, 626],
+            tdb_change_length=1100,
+            tdb_baseline_length=940,
+            change_cross=True,
+        )
+        self.assertEqual(row["tr_tier"], "weak")
+
+    def test_large_tdb_delta_without_read_shift_is_weak(self):
+        row = self._build_tr_row(
+            change_lengths=[1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009],
+            baseline_lengths=[998, 999, 1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007],
+            change_other_lengths=[650, 651, 652, 653, 654, 655, 656, 657, 658, 659],
+            baseline_other_lengths=[650, 651, 652, 653, 654, 655, 656, 657, 658, 659],
+            tdb_change_length=1200,
+            tdb_baseline_length=1000,
+            pairing_confidence=0.6,
+        )
+        self.assertEqual(row["tr_tier"], "weak")
+        self.assertLess(float(row["median_shift_bp"]), 50.0)
+
+    def test_broad_distribution_alone_does_not_downgrade(self):
+        row = self._build_tr_row(
+            change_lengths=[900, 905, 910, 915, 920, 925, 930, 935, 940, 1700],
+            baseline_lengths=[760, 765, 770, 775, 780, 785, 790, 795, 800, 805],
+            change_other_lengths=[500, 501, 502, 503, 504, 505, 506, 507, 508, 509],
+            baseline_other_lengths=[501, 502, 503, 504, 505, 506, 507, 508, 509, 510],
+            tdb_change_length=1120,
+            tdb_baseline_length=860,
+            pairing_confidence=0.0,
+        )
+        self.assertEqual(row["tr_tier"], "strong")
+
+    def test_tail_expansion_signal_is_visible_but_not_passed_downstream(self):
+        row = self._build_tr_row(
+            change_lengths=[654, 661, 664, 664, 665, 665, 665, 665, 666, 666, 666, 667, 667, 669, 671, 672, 674, 677, 729, 925],
+            baseline_lengths=[657, 658, 662, 662, 662, 662, 663, 663, 664, 664, 664, 665, 665, 665, 665, 665, 665, 665, 665, 666, 666, 666, 667, 668, 669, 669, 670, 682, 709],
+            change_other_lengths=[637, 695, 695, 695, 696, 696, 697, 698, 698, 698, 701, 706, 721],
+            baseline_other_lengths=[685, 686, 689, 691, 693, 693, 693, 693, 693, 694, 695, 695, 695, 696, 696, 696, 696, 697, 697, 697, 697, 697, 697, 698, 698, 699, 700, 700, 701],
+            tdb_change_length=197,
+            tdb_baseline_length=197,
+            signal_class="tail_expansion",
+            tail_read_count=2,
+            tail_far_read_count=1,
+            tail_baseline_same_hap_max_bp=709,
+            tail_change_other_hap_upper_bp=712,
+            tail_anchor_bp=712,
+            tail_max_excess_bp=213,
+            sample_change_lower_bp=654,
+            sample_change_upper_bp=677,
+            sample_baseline_lower_bp=657,
+            sample_baseline_upper_bp=670,
+            sample_lower_delta_bp=-3,
+            sample_upper_delta_bp=7,
+            sample_range_supports_tail=True,
+        )
+        self.assertEqual(row["change_type"], "expansion")
+        self.assertEqual(row["tr_tier"], "supportive")
+        self.assertFalse(bool(row["tr_pass_for_harmonized"]))
+        self.assertEqual(row["signal_class"], "tail_expansion")
+
+    def test_tail_expansion_without_sample_range_support_is_weak(self):
+        row = self._build_tr_row(
+            change_lengths=[654, 661, 664, 664, 665, 665, 665, 665, 666, 666, 666, 667, 667, 669, 671, 672, 674, 677, 729, 925],
+            baseline_lengths=[657, 658, 662, 662, 662, 662, 663, 663, 664, 664, 664, 665, 665, 665, 665, 665, 665, 665, 665, 666, 666, 666, 667, 668, 669, 669, 670, 682, 709],
+            change_other_lengths=[637, 695, 695, 695, 696, 696, 697, 698, 698, 698, 701, 706, 721],
+            baseline_other_lengths=[685, 686, 689, 691, 693, 693, 693, 693, 693, 694, 695, 695, 695, 696, 696, 696, 696, 697, 697, 697, 697, 697, 697, 698, 698, 699, 700, 700, 701],
+            tdb_change_length=197,
+            tdb_baseline_length=197,
+            signal_class="tail_expansion",
+            tail_read_count=2,
+            tail_far_read_count=1,
+            tail_baseline_same_hap_max_bp=709,
+            tail_change_other_hap_upper_bp=712,
+            tail_anchor_bp=712,
+            tail_max_excess_bp=213,
+            sample_change_lower_bp=654,
+            sample_change_upper_bp=677,
+            sample_baseline_lower_bp=657,
+            sample_baseline_upper_bp=677,
+            sample_lower_delta_bp=-3,
+            sample_upper_delta_bp=0,
+            sample_range_supports_tail=False,
+        )
+        self.assertEqual(row["tr_tier"], "weak")
+        self.assertFalse(bool(row["tr_pass_for_harmonized"]))
+
+    def test_tail_expansion_without_sample_range_support_can_be_enabled_explicitly(self):
+        row = self._build_tr_row(
+            change_lengths=[654, 661, 664, 664, 665, 665, 665, 665, 666, 666, 666, 667, 667, 669, 671, 672, 674, 677, 729, 925],
+            baseline_lengths=[657, 658, 662, 662, 662, 662, 663, 663, 664, 664, 664, 665, 665, 665, 665, 665, 665, 665, 665, 666, 666, 666, 667, 668, 669, 669, 670, 682, 709],
+            change_other_lengths=[637, 695, 695, 695, 696, 696, 697, 698, 698, 698, 701, 706, 721],
+            baseline_other_lengths=[685, 686, 689, 691, 693, 693, 693, 693, 693, 694, 695, 695, 695, 696, 696, 696, 696, 697, 697, 697, 697, 697, 697, 698, 698, 699, 700, 700, 701],
+            tdb_change_length=197,
+            tdb_baseline_length=197,
+            signal_class="tail_expansion",
+            tail_read_count=2,
+            tail_far_read_count=1,
+            tail_baseline_same_hap_max_bp=709,
+            tail_change_other_hap_upper_bp=712,
+            tail_anchor_bp=712,
+            tail_max_excess_bp=213,
+            sample_change_lower_bp=654,
+            sample_change_upper_bp=677,
+            sample_baseline_lower_bp=657,
+            sample_baseline_upper_bp=677,
+            sample_lower_delta_bp=-3,
+            sample_upper_delta_bp=0,
+            sample_range_supports_tail=False,
+            tail_require_sample_range_support=False,
+        )
+        self.assertEqual(row["tr_tier"], "supportive")
+        self.assertFalse(bool(row["tr_pass_for_harmonized"]))
+
+
+class TestTrPostProcessingMain(unittest.TestCase):
+
+    def _write_fasta(self, path: Path, records: list[tuple[str, int]]) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("w", encoding="utf-8") as handle:
+            for header, length in records:
+                handle.write(f">{header}\n")
+                handle.write("A" * int(length) + "\n")
+
+    def _build_fake_tr_data(self):
+        sample_a = "sample1.Neuron"
+        sample_b = "sample1.Oligodendrocyte"
+        sample_tables = {
+            sample_a: pd.DataFrame(
+                [
+                    {"LocusID": 1, "allele_number": 1, "haplotype": 0, "length_range_lower": 930, "length_range_upper": 1010},
+                    {"LocusID": 1, "allele_number": 2, "haplotype": 1, "length_range_lower": 600, "length_range_upper": 603},
+                    {"LocusID": 2, "allele_number": 5, "haplotype": 0, "length_range_lower": 1020, "length_range_upper": 1055},
+                    {"LocusID": 2, "allele_number": 6, "haplotype": 1, "length_range_lower": 620, "length_range_upper": 627},
+                    {"LocusID": 3, "allele_number": 9, "haplotype": 0, "length_range_lower": 1000, "length_range_upper": 1009},
+                    {"LocusID": 3, "allele_number": 10, "haplotype": 1, "length_range_lower": 650, "length_range_upper": 659},
+                    {"LocusID": 4, "allele_number": 13, "haplotype": 0, "length_range_lower": 637, "length_range_upper": 721},
+                    {"LocusID": 4, "allele_number": 14, "haplotype": 1, "length_range_lower": 654, "length_range_upper": 677},
+                ]
+            ),
+            sample_b: pd.DataFrame(
+                [
+                    {"LocusID": 1, "allele_number": 3, "haplotype": 0, "length_range_lower": 790, "length_range_upper": 812},
+                    {"LocusID": 1, "allele_number": 4, "haplotype": 1, "length_range_lower": 599, "length_range_upper": 602},
+                    {"LocusID": 2, "allele_number": 7, "haplotype": 0, "length_range_lower": 955, "length_range_upper": 970},
+                    {"LocusID": 2, "allele_number": 8, "haplotype": 1, "length_range_lower": 619, "length_range_upper": 626},
+                    {"LocusID": 3, "allele_number": 11, "haplotype": 0, "length_range_lower": 998, "length_range_upper": 1007},
+                    {"LocusID": 3, "allele_number": 12, "haplotype": 1, "length_range_lower": 650, "length_range_upper": 659},
+                    {"LocusID": 4, "allele_number": 15, "haplotype": 0, "length_range_lower": 685, "length_range_upper": 701},
+                    {"LocusID": 4, "allele_number": 16, "haplotype": 1, "length_range_lower": 657, "length_range_upper": 670},
+                ]
+            ),
+        }
+        allele = pd.DataFrame(
+            [
+                {"LocusID": 1, "allele_number": 1, "allele_length": 1150},
+                {"LocusID": 1, "allele_number": 2, "allele_length": 600},
+                {"LocusID": 1, "allele_number": 3, "allele_length": 900},
+                {"LocusID": 1, "allele_number": 4, "allele_length": 600},
+                {"LocusID": 2, "allele_number": 5, "allele_length": 1100},
+                {"LocusID": 2, "allele_number": 6, "allele_length": 620},
+                {"LocusID": 2, "allele_number": 7, "allele_length": 940},
+                {"LocusID": 2, "allele_number": 8, "allele_length": 620},
+                {"LocusID": 3, "allele_number": 9, "allele_length": 1200},
+                {"LocusID": 3, "allele_number": 10, "allele_length": 650},
+                {"LocusID": 3, "allele_number": 11, "allele_length": 1000},
+                {"LocusID": 3, "allele_number": 12, "allele_length": 650},
+                {"LocusID": 4, "allele_number": 13, "allele_length": 165},
+                {"LocusID": 4, "allele_number": 14, "allele_length": 197},
+                {"LocusID": 4, "allele_number": 15, "allele_length": 165},
+                {"LocusID": 4, "allele_number": 16, "allele_length": 197},
+            ]
+        )
+        locus = pd.DataFrame(
+            [
+                {"LocusID": 1, "chrom": "chr1", "start": 100, "end": 200},
+                {"LocusID": 2, "chrom": "chr2", "start": 200, "end": 300},
+                {"LocusID": 3, "chrom": "chr3", "start": 300, "end": 400},
+                {"LocusID": 4, "chrom": "chr4", "start": 400, "end": 500},
+            ]
+        )
+        return {"sample": sample_tables, "allele": allele, "locus": locus}
+
+    def test_tr_post_processing_main_writes_tiered_tr_bed(self):
+        from sniffcell.discover.tr_post_processing import tr_post_processing_main
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            split_dir = root / "sample1" / "deconv" / "deconv_requested_group_splits"
+            medaka_dir = split_dir / "medaka_tandem"
+            merged_tdb = medaka_dir / "sample1.medaka.tdb"
+            merged_tdb.mkdir(parents=True)
+            group_a_fasta = medaka_dir / "Neuron.medaka" / "trimmed_reads.fasta"
+            group_b_fasta = medaka_dir / "Oligodendrocyte.medaka" / "trimmed_reads.fasta"
+
+            a_records = []
+            b_records = []
+            for idx, length in enumerate([930, 940, 950, 960, 970, 980, 990, 1000, 1010, 1500]):
+                a_records.append((f"a_strong_{idx}_chr1_100_200_pad_0_0_fwd_hap1_phased-set1_ploidy2", length))
+            for idx, length in enumerate([600, 601, 602, 603, 600, 601, 602, 603, 600, 601]):
+                a_records.append((f"a_ctrl_{idx}_chr1_100_200_pad_0_0_fwd_hap2_phased-set1_ploidy2", length))
+            for idx, length in enumerate([1020, 1025, 1030, 1035, 1040, 1045, 1050, 1055]):
+                a_records.append((f"a_support_{idx}_chr2_200_300_pad_0_0_fwd_hap1_phased-set2_ploidy2", length))
+            for idx, length in enumerate([620, 621, 622, 623, 624, 625, 626, 627]):
+                a_records.append((f"a_support_ctrl_{idx}_chr2_200_300_pad_0_0_fwd_hap2_phased-set2_ploidy2", length))
+            for idx, length in enumerate([1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009]):
+                a_records.append((f"a_weak_{idx}_chr3_300_400_pad_0_0_fwd_hap1_phased-set3_ploidy2", length))
+            for idx, length in enumerate([650, 651, 652, 653, 654, 655, 656, 657, 658, 659]):
+                a_records.append((f"a_weak_ctrl_{idx}_chr3_300_400_pad_0_0_fwd_hap2_phased-set3_ploidy2", length))
+            for idx, length in enumerate([637, 695, 695, 695, 696, 696, 697, 698, 698, 698, 701, 706, 721]):
+                a_records.append((f"a_tail_other_{idx}_chr4_400_500_pad_0_0_fwd_hap1_phased-set4_ploidy2", length))
+            for idx, length in enumerate([654, 661, 664, 664, 665, 665, 665, 665, 666, 666, 666, 667, 667, 669, 671, 672, 674, 677, 729, 925]):
+                a_records.append((f"a_tail_same_{idx}_chr4_400_500_pad_0_0_fwd_hap2_phased-set4_ploidy2", length))
+
+            for idx, length in enumerate([790, 795, 798, 800, 802, 804, 806, 808, 810, 812]):
+                b_records.append((f"b_strong_{idx}_chr1_100_200_pad_0_0_rev_hap1_phased-set1_ploidy2", length))
+            for idx, length in enumerate([599, 600, 601, 602, 599, 600, 601, 602, 599, 600]):
+                b_records.append((f"b_ctrl_{idx}_chr1_100_200_pad_0_0_rev_hap2_phased-set1_ploidy2", length))
+            for idx, length in enumerate([955, 958, 960, 962, 964, 966, 968, 970]):
+                b_records.append((f"b_support_{idx}_chr2_200_300_pad_0_0_rev_hap1_phased-set2_ploidy2", length))
+            for idx, length in enumerate([619, 620, 621, 622, 623, 624, 625, 626]):
+                b_records.append((f"b_support_ctrl_{idx}_chr2_200_300_pad_0_0_rev_hap2_phased-set2_ploidy2", length))
+            for idx, length in enumerate([998, 999, 1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007]):
+                b_records.append((f"b_weak_{idx}_chr3_300_400_pad_0_0_rev_hap1_phased-set3_ploidy2", length))
+            for idx, length in enumerate([650, 651, 652, 653, 654, 655, 656, 657, 658, 659]):
+                b_records.append((f"b_weak_ctrl_{idx}_chr3_300_400_pad_0_0_rev_hap2_phased-set3_ploidy2", length))
+            for idx, length in enumerate([685, 686, 689, 691, 693, 693, 693, 693, 693, 694, 695, 695, 695, 696, 696, 696, 696, 697, 697, 697, 697, 697, 697, 698, 698, 699, 700, 700, 701]):
+                b_records.append((f"b_tail_other_{idx}_chr4_400_500_pad_0_0_rev_hap1_phased-set4_ploidy2", length))
+            for idx, length in enumerate([657, 658, 662, 662, 662, 662, 663, 663, 664, 664, 664, 665, 665, 665, 665, 665, 665, 665, 665, 666, 666, 666, 667, 668, 669, 669, 670, 682, 709]):
+                b_records.append((f"b_tail_same_{idx}_chr4_400_500_pad_0_0_rev_hap2_phased-set4_ploidy2", length))
+
+            self._write_fasta(group_a_fasta, a_records)
+            self._write_fasta(group_b_fasta, b_records)
+            fake_tdb = SimpleNamespace(load_tdb=lambda _: self._build_fake_tr_data())
+            with patch(
+                "sniffcell.discover.tr_post_processing._import_analysis_modules",
+                return_value={
+                    "numpy": np,
+                    "pandas": pd,
+                    "tdb": fake_tdb,
+                    "matplotlib.pyplot": None,
+                    "seaborn": None,
+                },
+            ):
+                summary = tr_post_processing_main(
+                    [
+                        "--split-dir", str(split_dir),
+                        "--groups", "Neuron,Oligodendrocyte",
+                        "--output-dir", str(root / "out"),
+                        "--sample-id", "sample1",
+                        "--sample-a-label", "sample1.Neuron",
+                        "--sample-b-label", "sample1.Oligodendrocyte",
+                        "--merged-tdb", str(merged_tdb),
+                        "--group-a-fasta", str(group_a_fasta),
+                        "--group-b-fasta", str(group_b_fasta),
+                        "--skip-plots",
+                    ]
+                )
+
+            tr_bed = pd.read_csv(root / "out" / "tr_changes.bed.tsv", sep="\t")
+            self.assertEqual(summary["n_tr_strong_rows"], 1)
+            self.assertEqual(summary["n_tr_supportive_rows"], 1)
+            self.assertEqual(summary["n_tr_weak_rows"], 1)
+            for col in (
+                "tr_tier",
+                "tr_pass_for_harmonized",
+                "change_median_bp",
+                "baseline_median_bp",
+                "median_shift_bp",
+                "median_shift_ratio",
+                "other_hap_median_delta_bp",
+                "sample_upper_delta_bp",
+                "sample_range_supports_tail",
+                "n_hp_changed",
+                "hp_changed_fraction",
+                "change_cross_hap_mixing",
+                "baseline_cross_hap_mixing",
+            ):
+                self.assertIn(col, tr_bed.columns)
+            self.assertEqual(tr_bed["tr_tier"].tolist(), ["strong", "supportive", "weak"])
+
+    def test_tr_post_processing_main_rescues_tail_expansion_without_harmonizing_it(self):
+        from sniffcell.discover.tr_post_processing import tr_post_processing_main
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            split_dir = root / "sample1" / "deconv" / "deconv_requested_group_splits"
+            medaka_dir = split_dir / "medaka_tandem"
+            merged_tdb = medaka_dir / "sample1.medaka.tdb"
+            merged_tdb.mkdir(parents=True)
+            group_a_fasta = medaka_dir / "Neuron.medaka" / "trimmed_reads.fasta"
+            group_b_fasta = medaka_dir / "Oligodendrocyte.medaka" / "trimmed_reads.fasta"
+
+            a_records = [
+                (f"a_tail_other_{idx}_chr4_400_500_pad_0_0_fwd_hap1_phased-set4_ploidy2", length)
+                for idx, length in enumerate([637, 695, 695, 695, 696, 696, 697, 698, 698, 698, 701, 706, 721])
+            ]
+            a_records.extend(
+                (f"a_tail_same_{idx}_chr4_400_500_pad_0_0_fwd_hap2_phased-set4_ploidy2", length)
+                for idx, length in enumerate([654, 661, 664, 664, 665, 665, 665, 665, 666, 666, 666, 667, 667, 669, 671, 672, 674, 677, 729, 925])
+            )
+            b_records = [
+                (f"b_tail_other_{idx}_chr4_400_500_pad_0_0_rev_hap1_phased-set4_ploidy2", length)
+                for idx, length in enumerate([685, 686, 689, 691, 693, 693, 693, 693, 693, 694, 695, 695, 695, 696, 696, 696, 696, 697, 697, 697, 697, 697, 697, 698, 698, 699, 700, 700, 701])
+            ]
+            b_records.extend(
+                (f"b_tail_same_{idx}_chr4_400_500_pad_0_0_rev_hap2_phased-set4_ploidy2", length)
+                for idx, length in enumerate([657, 658, 662, 662, 662, 662, 663, 663, 664, 664, 664, 665, 665, 665, 665, 665, 665, 665, 665, 666, 666, 666, 667, 668, 669, 669, 670, 682, 709])
+            )
+
+            self._write_fasta(group_a_fasta, a_records)
+            self._write_fasta(group_b_fasta, b_records)
+            fake_tdb = SimpleNamespace(load_tdb=lambda _: self._build_fake_tr_data())
+            with patch(
+                "sniffcell.discover.tr_post_processing._import_analysis_modules",
+                return_value={
+                    "numpy": np,
+                    "pandas": pd,
+                    "tdb": fake_tdb,
+                    "matplotlib.pyplot": None,
+                    "seaborn": None,
+                },
+            ):
+                summary = tr_post_processing_main(
+                    [
+                        "--split-dir", str(split_dir),
+                        "--groups", "Neuron,Oligodendrocyte",
+                        "--output-dir", str(root / "tail_out"),
+                        "--sample-id", "sample1",
+                        "--sample-a-label", "sample1.Neuron",
+                        "--sample-b-label", "sample1.Oligodendrocyte",
+                        "--merged-tdb", str(merged_tdb),
+                        "--group-a-fasta", str(group_a_fasta),
+                        "--group-b-fasta", str(group_b_fasta),
+                        "--tail-expansion-rescue",
+                        "--skip-plots",
+                    ]
+                )
+
+            tr_bed = pd.read_csv(root / "tail_out" / "tr_changes.bed.tsv", sep="\t")
+            self.assertEqual(summary["n_tail_rescue_rows"], 1)
+            self.assertEqual(int((tr_bed["signal_class"] == "tail_expansion").sum()), 1)
+            row = tr_bed.loc[tr_bed["signal_class"] == "tail_expansion"].iloc[0]
+            self.assertEqual(row["signal_class"], "tail_expansion")
+            self.assertEqual(row["change_group"], "sample1.Neuron")
+            self.assertEqual(row["change_allele"], "hap2")
+            self.assertEqual(row["tr_tier"], "supportive")
+            self.assertFalse(bool(row["tr_pass_for_harmonized"]))
+            self.assertEqual(int(row["sample_upper_delta_bp"]), 7)
+            self.assertTrue(bool(row["sample_range_supports_tail"]))
 
 
 class TestPostprocessLocalIntegration(unittest.TestCase):
@@ -1096,14 +1760,33 @@ class TestPostprocessLocalIntegration(unittest.TestCase):
             self.assertTrue(
                 (run_root / "medaka_tandem" / "tr_post_processing" / "Neuron_vs_Oligodendrocyte" / "summary.json").exists()
             )
+            tr_bed = pd.read_csv(
+                run_root / "medaka_tandem" / "tr_post_processing" / "Neuron_vs_Oligodendrocyte" / "tr_changes.bed.tsv",
+                sep="\t",
+            )
+            self.assertIn("tr_pass_for_harmonized", tr_bed.columns)
             self.assertTrue((run_root / "snv" / "clairs" / "Neuron_vs_Oligodendrocyte" / "output.vcf.gz").exists())
             self.assertTrue((run_root / "snv" / "clairs" / "Oligodendrocyte_vs_Neuron" / "output.vcf.gz").exists())
             self.assertTrue(
                 (run_root / "sv" / "sv_post_processing" / "Neuron_vs_Oligodendrocyte" / "summary.json").exists()
             )
+            sv_summary = json.loads(
+                (
+                    run_root
+                    / "sv"
+                    / "sv_post_processing"
+                    / "Neuron_vs_Oligodendrocyte"
+                    / "summary.json"
+                ).read_text(encoding="utf-8")
+            )
+            self.assertTrue(sv_summary["params"]["apply_mosaic_filter"])
+            self.assertTrue((run_root / "harmonized_variants.tsv").exists())
+            self.assertTrue((run_root / "harmonized_variants_manifest.json").exists())
 
             status_text = (run_root / "status" / "discover_status.json").read_text(encoding="utf-8")
             self.assertIn('"state": "completed"', status_text)
+            run_summary = json.loads((run_root / "run_summary.json").read_text(encoding="utf-8"))
+            self.assertEqual(run_summary["harmonized_variants_tsv"], str(run_root / "harmonized_variants.tsv"))
 
     def test_discover_main_local_second_run_skips_completed_stage(self):
         from sniffcell.discover.discover import discover_main

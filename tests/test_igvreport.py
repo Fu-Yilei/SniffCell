@@ -209,12 +209,13 @@ class TestIgvReportHelpers(unittest.TestCase):
             self.assertIn("create_report", str(result["command"]))
             self.assertEqual(mock_run.call_count, 1)
 
-            sites_tsv = output_dir / "selected_sv_sites.tsv"
+            sites_tsv = output_dir / "selected_sites.tsv"
             self.assertTrue(sites_tsv.exists())
             sites_df = pd.read_csv(sites_tsv, sep="\t")
             self.assertEqual(sites_df["chrom"].tolist(), ["chr1"])
             self.assertEqual(sites_df["start"].tolist(), [100])
             self.assertEqual(sites_df["end"].tolist(), [350])
+            self.assertEqual(sites_df["site_locus"].tolist(), ["chr1:101-350"])
             self.assertEqual(sites_df["sv_locus"].tolist(), ["chr1:101-350"])
 
             manifest_payload = json.loads((output_dir / "igvreport_manifest.json").read_text(encoding="utf-8"))
@@ -224,13 +225,14 @@ class TestIgvReportHelpers(unittest.TestCase):
                 manifest_payload["tracks"],
                 ["/tmp/a.bam", "/tmp/b.bam", "/tmp/input.vcf.gz"],
             )
-            self.assertIn("sv_locus", manifest_payload["info_columns"])
+            self.assertIn("site_locus", manifest_payload["info_columns"])
             self.assertEqual(manifest_payload["session_customization"]["alignment_color_by"], "basemod2")
             self.assertEqual(manifest_payload["session_customization"]["status"], "applied")
             self.assertEqual(manifest_payload["session_customization"]["supporting_reads_available_sessions"], 1)
 
             header_text = (output_dir / "sniffcell_igvreport_header.html").read_text(encoding="utf-8")
             self.assertIn("Open native SniffCell report", header_text)
+            self.assertIn("Selected variants: 1", header_text)
             self.assertIn("DNA methylation two-color mode", header_text)
             html_text = (output_dir / "index.html").read_text(encoding="utf-8")
             self.assertIn("sniffcellSupportingReadsBySession", html_text)

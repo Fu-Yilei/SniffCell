@@ -9,11 +9,138 @@ SniffCell annotates structural variants (SVs) using long-read methylation eviden
 ## Installation
 
 ```bash
-pip install sniffcell          # from PyPI
-pip install -e .               # local development
+pip install sniffcell
 ```
 
 Requires Python `>=3.10`.
+
+For a local checkout:
+
+```bash
+python -m pip install -e .
+```
+
+Optional Python extras:
+
+```bash
+python -m pip install ".[discover,igvreport]"
+```
+
+- `discover` installs the Python-side `tdb` package plus `seaborn` for TR summary plots in `sniffcell discover`.
+- `igvreport` installs `igv-reports` for the alternate IGV.js HTML page in `sniffcell report`.
+
+For a full `discover` environment with the conda-available tools preinstalled:
+
+```bash
+micromamba env create -f environment.yml
+micromamba activate sniffcell
+python -m pip install -e .
+```
+
+`environment.yml` covers the Python package plus conda/bioconda tools such as `sniffles`, `bcftools`, `samtools`, `truvari`, `severus`, and the Python `tdb` package. Some `discover` dependencies still require separate installation or dedicated envs: `kanpig`, `modkit`, `medaka`, `clair3`, and `ClairS`.
+
+Before launching `sniffcell discover`, run a preflight:
+
+```bash
+sniffcell-check-discover --stages all
+```
+
+Examples:
+
+```bash
+sniffcell-check-discover --stages sv,mods
+sniffcell-check-discover --stages clair3 --clair3-model-path /path/to/clair3_model
+sniffcell-check-discover --stages medaka,tdb --medaka-bin /path/to/medaka --tdb-bin /path/to/tdb
+```
+
+The checker validates stage-specific binaries such as `sniffles`, `bcftools`, `bgzip`, `tabix`, `kanpig`, `truvari`, `medaka`, `tdb`, `modkit`, `run_clair3.sh`, and `run_clairs`. It also verifies the Python `tdb` package for TR postprocessing, warns when `seaborn` is missing for optional TR plots, and enforces `--clair3-model-path` when the `clair3` stage is requested.
+
+Fresh-install smoke test helpers:
+
+```bash
+scripts/check_fresh_install.sh wheel
+scripts/check_fresh_install.sh editable
+```
+
+## Docker
+
+The repo now includes one unified `Dockerfile` for both the core `sniffcell` commands and the `discover` pipeline.
+
+Build the base image:
+
+```bash
+docker build -t sniffcell:latest .
+```
+
+That image includes the Python package, `sniffles`, `bcftools`, `bgzip`, `tabix`, `samtools`, `truvari`, `severus`, the Python `tdb` package, and by default separate conda envs for `medaka` and `clair3`.
+
+Optional build args for tools that are not reliably available from conda:
+
+```bash
+docker build -t sniffcell:latest \
+  --build-arg KANPIG_URL=https://.../kanpig.tar.gz \
+  --build-arg MODKIT_URL=https://.../modkit \
+  --build-arg CLAIRS_URL=https://.../clairs.tar.gz \
+  .
+```
+
+Optional archive layouts can be adjusted with:
+
+```bash
+--build-arg KANPIG_BIN_SUBPATH=kanpig
+--build-arg MODKIT_BIN_SUBPATH=modkit
+--build-arg CLAIRS_BIN_SUBPATH=run_clairs
+```
+
+For a true end-to-end `discover` image with no additional software installs at runtime, use the tracked builder helper:
+
+```bash
+KANPIG_URL=https://... \
+MODKIT_URL=https://... \
+CLAIRS_URL=https://... \
+CLAIR3_MODEL_URL=https://... \
+docker/build_full_image.sh sniffcell:full
+```
+
+That build runs in strict mode:
+- it fails unless `kanpig`, `modkit`, `ClairS`, and a Clair3 model archive are supplied
+- it keeps `medaka` and `clair3` installed in dedicated conda envs
+- it runs `sniffcell-check-discover --stages all --clair3-model-path /opt/models/clair3` during the image build
+
+If the full build succeeds, the container is self-contained for `sniffcell discover --stages all`.
+
+Before trying the full build on a new machine, you can check whether the local OCI runtime is usable:
+
+```bash
+docker/check_builder_host.sh
+```
+
+Example container preflight:
+
+```bash
+docker run --rm sniffcell:latest sniffcell-check-discover --stages all
+docker run --rm sniffcell:latest sniffcell-check-discover --stages clair3 --clair3-model-path /models/clair3
+```
+
+Example runtime:
+
+```bash
+docker run --rm -it \
+  -v /path/to/data:/data \
+  sniffcell:full \
+  discover \
+  --deconv-dir /data/sample/deconv \
+  --reference /data/ref.fa \
+  --tr-bed /data/tr.bed \
+  --sex female \
+  --clair3-model-path /opt/models/clair3
+```
+
+Notes:
+- `sniffcell:latest` is still the flexible base image.
+- `sniffcell:full` is the strict end-to-end discover image produced by `docker/build_full_image.sh`.
+- The full image only becomes self-contained if the external build URLs stay valid.
+- The container entrypoint accepts either full commands like `sniffcell anno ...` or short forms like `anno ...`.
 
 ## Commands
 
