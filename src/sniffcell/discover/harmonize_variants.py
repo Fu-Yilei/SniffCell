@@ -41,6 +41,8 @@ def _load_tr_rows(
     tr_bed: Path | None,
     group_a_label: str,
     group_b_label: str,
+    *,
+    include_all_tr_candidates: bool,
 ) -> list[dict[str, Any]]:
     """Convert tr_changes.bed.tsv rows to the harmonized schema.
 
@@ -54,24 +56,26 @@ def _load_tr_rows(
         return rows
     for r in _read_tsv(tr_bed):
         pass_flag = _truthy_or_none(r.get("tr_pass_for_harmonized"))
-        if pass_flag is False:
+        if not include_all_tr_candidates and pass_flag is False:
             continue
+        change_names = r.get("change_support_read_names", r.get("change_read_names", "[]"))
+        change_alt = r.get("n_change_support_reads", r.get("n_change_reads", "."))
         change_group = r.get("change_group", "")
         if change_group == group_a_label:
             category = "group_a_only"
-            a_alt = r.get("n_change_reads", ".")
-            b_alt = r.get("n_baseline_reads", ".")
-            a_names = r.get("change_read_names", "[]")
-            b_names = r.get("baseline_read_names", "[]")
+            a_alt = change_alt
+            b_alt = 0
+            a_names = change_names
+            b_names = "[]"
         elif change_group == group_b_label:
             category = "group_b_only"
-            a_alt = r.get("n_baseline_reads", ".")
-            b_alt = r.get("n_change_reads", ".")
-            a_names = r.get("baseline_read_names", "[]")
-            b_names = r.get("change_read_names", "[]")
+            a_alt = 0
+            b_alt = change_alt
+            a_names = "[]"
+            b_names = change_names
         else:
             category = "unknown"
-            a_alt = b_alt = "."
+            a_alt = b_alt = 0
             a_names = b_names = "[]"
 
         change_type = r.get("change_type", ".")
@@ -143,8 +147,14 @@ def write_harmonized_variants(
     group_b_label: str,
     tr_bed: Path | None = None,
     sv_bed: Path | None = None,
+    include_all_tr_candidates: bool = True,
 ) -> dict[str, int]:
-    tr_rows = _load_tr_rows(tr_bed, group_a_label, group_b_label)
+    tr_rows = _load_tr_rows(
+        tr_bed,
+        group_a_label,
+        group_b_label,
+        include_all_tr_candidates=include_all_tr_candidates,
+    )
     sv_rows = _load_sv_rows(sv_bed) if sv_bed is not None else []
 
     all_rows = tr_rows + sv_rows
@@ -164,14 +174,18 @@ def write_harmonized_variants(
     }
 
 
-def harmonize_main(cli_args=None) -> None:
-    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s %(message)s")
+def _build_arg_parser(
+    *,
+    prog: str = "python -m sniffcell.discover.harmonize_variants",
+    add_help: bool = True,
+) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m sniffcell.discover.harmonize_variants",
+        prog=prog,
         description=(
             "Combine TR (tr_changes.bed.tsv) and SV (sv_changes.bed.tsv) findings "
             "into a single unified BED-like TSV sorted by genomic position."
         ),
+        add_help=add_help,
     )
     parser.add_argument("--tr-bed", required=True, help="tr_changes.bed.tsv from tr_post_processing")
     parser.add_argument("--sv-bed", required=True, help="sv_changes.bed.tsv from sv_post_processing")
@@ -184,6 +198,17 @@ def harmonize_main(cli_args=None) -> None:
         help="Sample label used for group B in the TR bed",
     )
     parser.add_argument("--output", required=True, help="Output harmonized TSV path")
+    parser.add_argument(
+        "--passing-tr-only",
+        action="store_true",
+        help="Keep only TR rows marked tr_pass_for_harmonized=true. Default keeps all TR candidates.",
+    )
+    return parser
+
+
+def harmonize_main(cli_args=None) -> None:
+    logging.basicConfig(level=logging.INFO, format="[%(asctime)s] %(levelname)s %(message)s")
+    parser = _build_arg_parser()
     args = parser.parse_args(cli_args)
 
     tr_bed = Path(args.tr_bed)
@@ -195,6 +220,7 @@ def harmonize_main(cli_args=None) -> None:
         group_b_label=args.group_b_label,
         tr_bed=tr_bed,
         sv_bed=sv_bed,
+        include_all_tr_candidates=not args.passing_tr_only,
     )
 
     logging.info(
@@ -203,8 +229,8 @@ def harmonize_main(cli_args=None) -> None:
     )
 
 
-def main() -> int:
-    harmonize_main()
+def main(argv: list[str] | None = None) -> int:
+    harmonize_main(argv)
     return 0
 
 

@@ -128,13 +128,19 @@ Example runtime:
 docker run --rm -it \
   -v /path/to/data:/data \
   sniffcell:full \
-  discover \
+  discover tools run \
   --deconv-dir /data/sample/deconv \
   --reference /data/ref.fa \
   --tr-bed /data/tr.bed \
   --sex female \
   --clair3-model-path /opt/models/clair3
 ```
+
+Discover command layout:
+- `sniffcell discover tools run ...` runs the main discover pipeline. Legacy `sniffcell discover ...` still works.
+- `sniffcell discover tools sv ...` runs the standalone pre-discovery Sniffles wrapper that was previously exposed as `sniffcell-discover-sv`.
+- `sniffcell discover tools check ...` runs the discover dependency preflight.
+- `sniffcell discover ctprocessing {sv,tr,harmonize} ...` runs the post-processing helper CLIs directly.
 
 Notes:
 - `sniffcell:latest` is still the flexible base image.

@@ -556,10 +556,15 @@ def _write_sv_bed_tsv(
             writer.writerow(row)
 
 
-def _build_arg_parser() -> argparse.ArgumentParser:
+def _build_arg_parser(
+    *,
+    prog: str = "python -m sniffcell.discover.sv_post_processing",
+    add_help: bool = True,
+) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m sniffcell.discover.sv_post_processing",
+        prog=prog,
         description="Compare two per-BAM Sniffles VCFs, genotype merged sites with Kanpig, and emit AD-based sample-specific SV sets.",
+        add_help=add_help,
     )
     parser.add_argument("--split-dir", required=True, help="deconv_requested_group_splits directory")
     parser.add_argument("--reference", required=True, help="Reference FASTA")
@@ -753,8 +758,8 @@ def sv_post_processing_main(cli_args=None) -> dict[str, str]:
     return summary
 
 
-def main() -> int:
-    sv_post_processing_main()
+def main(argv: list[str] | None = None) -> int:
+    sv_post_processing_main(argv)
     return 0
 
 

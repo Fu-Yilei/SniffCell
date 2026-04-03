@@ -30,10 +30,11 @@ TOOL_DEFAULTS = {
 }
 
 
-def _build_parser() -> argparse.ArgumentParser:
+def _build_parser(*, prog: str = "sniffcell-check-discover", add_help: bool = True) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="sniffcell-check-discover",
+        prog=prog,
         description="Preflight check for external binaries and Python modules used by sniffcell discover.",
+        add_help=add_help,
     )
     parser.add_argument(
         "--stages",

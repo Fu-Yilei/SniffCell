@@ -45,8 +45,11 @@ _CHANGED_ALLELE_COLS: list[str] = [
     "tdb_change_length", "tdb_baseline_length", "change_length_bp",
     "read_mean_change_length", "read_mean_baseline_length",
     "n_change_reads", "n_baseline_reads",
+    "n_change_support_reads", "n_baseline_support_reads",
     "change_read_names", "change_read_lengths",
     "baseline_read_names", "baseline_read_lengths",
+    "change_support_read_names", "change_support_read_lengths",
+    "baseline_support_read_names", "baseline_support_read_lengths",
     "pairing", "pairing_confidence", "max_abs_delta_bp",
     "signal_class",
     "tail_read_count", "tail_far_read_count",
@@ -63,10 +66,12 @@ _TR_BED_COLS: list[str] = [
     "change_allele", "change_type",
     "change_group", "baseline_group",
     "n_change_reads", "n_baseline_reads",
+    "n_change_support_reads", "n_baseline_support_reads",
     "tdb_change_length", "tdb_baseline_length", "change_length_bp",
     "change_read_mean", "baseline_read_mean",
     "change_read_range", "baseline_read_range",
     "change_read_names", "baseline_read_names",
+    "change_support_read_names", "baseline_support_read_names",
     "pairing", "pairing_confidence",
     "signal_class",
     "tail_read_count", "tail_far_read_count",
@@ -131,13 +136,18 @@ class TrPostOutputs:
     summary_json: Path
 
 
-def _build_arg_parser() -> argparse.ArgumentParser:
+def _build_arg_parser(
+    *,
+    prog: str = "python -m sniffcell.discover.tr_post_processing",
+    add_help: bool = True,
+) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m sniffcell.discover.tr_post_processing",
+        prog=prog,
         description=(
             "Summarize pairwise tandem-repeat length differences between two split groups "
             "using merged TDB output and Medaka trimmed reads."
         ),
+        add_help=add_help,
     )
     parser.add_argument("--split-dir", required=True, help="deconv_requested_group_splits directory")
     parser.add_argument("--groups", required=True, help="Exactly two group names, comma-separated")
@@ -1085,6 +1095,65 @@ def _build_changed_allele_table(
             )
         return lookup
 
+    def _select_support_reads(
+        *,
+        change_names: list[str],
+        change_lengths: list[int],
+        baseline_names: list[str],
+        baseline_lengths: list[int],
+        change_tdb: int,
+        baseline_tdb: int,
+        signal_class: str,
+        tail_metrics: dict[str, Any] | None,
+    ) -> tuple[list[str], list[int], list[str], list[int]]:
+        if not change_lengths:
+            return [], [], [], []
+
+        signal = str(signal_class).strip().lower()
+        change_pairs = list(zip(change_names, change_lengths, strict=False))
+        baseline_pairs = list(zip(baseline_names, baseline_lengths, strict=False))
+        is_expansion = signal == _TAIL_SIGNAL_CLASS or int(change_tdb) >= int(baseline_tdb)
+        delta_bp = abs(float(change_tdb) - float(baseline_tdb))
+        min_shift = max(25.0, delta_bp * 0.25)
+
+        if signal == _TAIL_SIGNAL_CLASS:
+            anchor = tail_metrics.get("tail_anchor_bp") if tail_metrics else None
+            if anchor is None:
+                threshold = (
+                    min(float(change_tdb), float(baseline_tdb) + min_shift)
+                    if is_expansion
+                    else max(float(change_tdb), float(baseline_tdb) - min_shift)
+                )
+            else:
+                threshold = float(anchor)
+        else:
+            threshold = (
+                min(float(change_tdb), float(baseline_tdb) + min_shift)
+                if is_expansion
+                else max(float(change_tdb), float(baseline_tdb) - min_shift)
+            )
+
+        if is_expansion:
+            change_support = [(name, length) for name, length in change_pairs if float(length) >= threshold]
+            baseline_support = [(name, length) for name, length in baseline_pairs if float(length) <= threshold]
+        else:
+            change_support = [(name, length) for name, length in change_pairs if float(length) <= threshold]
+            baseline_support = [(name, length) for name, length in baseline_pairs if float(length) >= threshold]
+
+        if not change_support and change_pairs:
+            if is_expansion:
+                best_name, best_length = max(change_pairs, key=lambda item: float(item[1]))
+            else:
+                best_name, best_length = min(change_pairs, key=lambda item: float(item[1]))
+            change_support = [(best_name, best_length)]
+
+        return (
+            [name for name, _ in change_support],
+            [int(length) for _, length in change_support],
+            [name for name, _ in baseline_support],
+            [int(length) for _, length in baseline_support],
+        )
+
     # Cleaned hap assignments are the default support table. Tail rescues keep
     # their raw-haplotype support reads so the evidence is not erased by hp-fix.
     read_lookup = _build_read_lookup(df_reads)
@@ -1118,6 +1187,21 @@ def _build_changed_allele_table(
         change_names, change_lengths = active_lookup.get((tgt["LocusID"], change_ct, allele_key), ([], []))
         baseline_names, baseline_lengths = active_lookup.get((tgt["LocusID"], baseline_ct, allele_key), ([], []))
         metrics = tail_metrics or _empty_tail_metrics()
+        (
+            change_support_names,
+            change_support_lengths,
+            baseline_support_names,
+            baseline_support_lengths,
+        ) = _select_support_reads(
+            change_names=change_names,
+            change_lengths=change_lengths,
+            baseline_names=baseline_names,
+            baseline_lengths=baseline_lengths,
+            change_tdb=change_tdb,
+            baseline_tdb=baseline_tdb,
+            signal_class=signal_class,
+            tail_metrics=metrics,
+        )
         rows.append({
             "chrom": tgt["chrom"],
             "start": int(tgt["start"]),
@@ -1133,10 +1217,16 @@ def _build_changed_allele_table(
             "read_mean_baseline_length": float(np.mean(baseline_lengths)) if baseline_lengths else None,
             "n_change_reads": len(change_names),
             "n_baseline_reads": len(baseline_names),
+            "n_change_support_reads": len(change_support_names),
+            "n_baseline_support_reads": len(baseline_support_names),
             "change_read_names": change_names,
             "change_read_lengths": change_lengths,
             "baseline_read_names": baseline_names,
             "baseline_read_lengths": baseline_lengths,
+            "change_support_read_names": change_support_names,
+            "change_support_read_lengths": change_support_lengths,
+            "baseline_support_read_names": baseline_support_names,
+            "baseline_support_read_lengths": baseline_support_lengths,
             "pairing": tgt.get("pairing"),
             "pairing_confidence": tgt.get("pairing_confidence"),
             "max_abs_delta_bp": int(tgt["max_abs_delta_bp"]),
@@ -1616,6 +1706,11 @@ def _build_tr_bed_table(changed_allele_table, clustered_summary, df_reads, *, pd
     if changed_allele_table.empty:
         return pd.DataFrame(columns=_TR_BED_COLS)
 
+    n_change_support_reads = changed_allele_table.get("n_change_support_reads", changed_allele_table["n_change_reads"])
+    n_baseline_support_reads = changed_allele_table.get("n_baseline_support_reads", changed_allele_table["n_baseline_reads"])
+    change_support_read_names = changed_allele_table.get("change_support_read_names", changed_allele_table["change_read_names"])
+    baseline_support_read_names = changed_allele_table.get("baseline_support_read_names", changed_allele_table["baseline_read_names"])
+
     hap_qc = _build_haplotype_qc_table(clustered_summary, df_reads, pd=pd)
     changed_metrics = hap_qc.rename(
         columns={
@@ -1666,6 +1761,8 @@ def _build_tr_bed_table(changed_allele_table, clustered_summary, df_reads, *, pd
             "baseline_group": changed_allele_table["baseline_celltype"],
             "n_change_reads": changed_allele_table["n_change_reads"].astype(int),
             "n_baseline_reads": changed_allele_table["n_baseline_reads"].astype(int),
+            "n_change_support_reads": pd.to_numeric(n_change_support_reads, errors="coerce").fillna(0).astype(int),
+            "n_baseline_support_reads": pd.to_numeric(n_baseline_support_reads, errors="coerce").fillna(0).astype(int),
             "tdb_change_length": changed_allele_table["tdb_change_length"].astype(int),
             "tdb_baseline_length": changed_allele_table["tdb_baseline_length"].astype(int),
             "change_length_bp": changed_allele_table["change_length_bp"].astype(int),
@@ -1687,6 +1784,8 @@ def _build_tr_bed_table(changed_allele_table, clustered_summary, df_reads, *, pd
             ],
             "change_read_names": [value or [] for value in changed_allele_table["change_read_names"]],
             "baseline_read_names": [value or [] for value in changed_allele_table["baseline_read_names"]],
+            "change_support_read_names": [value or [] for value in change_support_read_names],
+            "baseline_support_read_names": [value or [] for value in baseline_support_read_names],
             "pairing": changed_allele_table["pairing"],
             "pairing_confidence": changed_allele_table["pairing_confidence"],
             "signal_class": changed_allele_table["signal_class"].fillna(_TDB_SIGNAL_CLASS),
@@ -1797,7 +1896,12 @@ def _write_tr_bed_tsv(tr_bed_table, path: Path) -> None:
     _write_dataframe_tsv(
         tr_bed_table,
         path,
-        json_cols={"change_read_names", "baseline_read_names"},
+        json_cols={
+            "change_read_names",
+            "baseline_read_names",
+            "change_support_read_names",
+            "baseline_support_read_names",
+        },
     )
 
 
@@ -1971,8 +2075,8 @@ def tr_post_processing_main(cli_args=None) -> dict[str, Any]:
     return summary
 
 
-def main() -> int:
-    tr_post_processing_main()
+def main(argv: list[str] | None = None) -> int:
+    tr_post_processing_main(argv)
     return 0
 
 

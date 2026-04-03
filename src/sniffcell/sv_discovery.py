@@ -342,14 +342,19 @@ def _merge_vcfs(
         tmp_index.unlink(missing_ok=True)
 
 
-def parse_args(argv: Sequence[str]) -> argparse.Namespace:
+def build_parser(
+    *,
+    prog: str = "sniffcell-discover-sv",
+    add_help: bool = True,
+) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="sniffcell-discover-sv",
+        prog=prog,
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         description=(
             "Push-button dual-pass Sniffles SV discovery before SniffCell: "
             "TR-focused pass + non-TR pass + optional Q100 confidence filter."
         ),
+        add_help=add_help,
     )
     parser.add_argument("-i", "--input", required=True, help="Input BAM/CRAM.")
     parser.add_argument("-r", "--reference", required=True, help="Reference FASTA used for mapping.")
@@ -491,7 +496,11 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
 
     parser.add_argument("--dry-run", action="store_true", help="Print commands without executing.")
     parser.add_argument("--log-level", default="INFO", help="DEBUG/INFO/WARNING/ERROR")
-    return parser.parse_args(argv)
+    return parser
+
+
+def parse_args(argv: Sequence[str]) -> argparse.Namespace:
+    return build_parser().parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

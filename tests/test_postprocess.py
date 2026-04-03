@@ -441,6 +441,93 @@ class TestDiscoverParseArgs(unittest.TestCase):
         ])
         self.assertEqual(args.medaka_phasing, "abpoa")
 
+    def test_discover_tools_run_accepts_discover_arguments(self):
+        args = parse_args([
+            "discover",
+            "tools",
+            "run",
+            "--deconv-dir", "/tmp/d",
+            "--reference", "/tmp/r",
+            "--tr-bed", "/tmp/t",
+            "--sex", "female",
+            "--threads", "32",
+        ])
+        self.assertEqual(args.command, "discover")
+        self.assertEqual(args.discover_section, "tools")
+        self.assertEqual(args.discover_tools_command, "run")
+        self.assertEqual(args.threads, 32)
+
+    def test_discover_tools_check_parses_envcheck_arguments(self):
+        args = parse_args([
+            "discover",
+            "tools",
+            "check",
+            "--stages", "sv,mods",
+            "--json",
+        ])
+        self.assertEqual(args.command, "discover")
+        self.assertEqual(args.discover_section, "tools")
+        self.assertEqual(args.discover_tools_command, "check")
+        self.assertEqual(args.stages, "sv,mods")
+        self.assertTrue(args.json)
+
+    def test_discover_tools_sv_parses(self):
+        args = parse_args([
+            "discover",
+            "tools",
+            "sv",
+            "-i", "/tmp/in.bam",
+            "-r", "/tmp/ref.fa",
+            "-o", "/tmp/out",
+        ])
+        self.assertEqual(args.command, "discover")
+        self.assertEqual(args.discover_section, "tools")
+        self.assertEqual(args.discover_tools_command, "sv")
+        self.assertEqual(args.input, "/tmp/in.bam")
+
+    def test_discover_ctprocessing_sv_parses(self):
+        args = parse_args([
+            "discover",
+            "ctprocessing",
+            "sv",
+            "--split-dir", "/tmp/splits",
+            "--reference", "/tmp/ref.fa",
+            "--groups", "A,B",
+        ])
+        self.assertEqual(args.command, "discover")
+        self.assertEqual(args.discover_section, "ctprocessing")
+        self.assertEqual(args.discover_ctprocessing_command, "sv")
+        self.assertEqual(args.groups, "A,B")
+
+    def test_discover_ctprocessing_tr_parses(self):
+        args = parse_args([
+            "discover",
+            "ctprocessing",
+            "tr",
+            "--split-dir", "/tmp/splits",
+            "--groups", "A,B",
+        ])
+        self.assertEqual(args.command, "discover")
+        self.assertEqual(args.discover_section, "ctprocessing")
+        self.assertEqual(args.discover_ctprocessing_command, "tr")
+        self.assertEqual(args.groups, "A,B")
+
+    def test_discover_ctprocessing_harmonize_parses(self):
+        args = parse_args([
+            "discover",
+            "ctprocessing",
+            "harmonize",
+            "--tr-bed", "/tmp/tr.tsv",
+            "--sv-bed", "/tmp/sv.tsv",
+            "--group-a-label", "sample.A",
+            "--group-b-label", "sample.B",
+            "--output", "/tmp/harmonized.tsv",
+        ])
+        self.assertEqual(args.command, "discover")
+        self.assertEqual(args.discover_section, "ctprocessing")
+        self.assertEqual(args.discover_ctprocessing_command, "harmonize")
+        self.assertEqual(args.output, "/tmp/harmonized.tsv")
+
 
 # ---------------------------------------------------------------------------
 # _parse_stages tests
@@ -897,6 +984,38 @@ class TestBuildRecursiveCli(unittest.TestCase):
             idx = cli.index("--clair3-model-path")
             self.assertEqual(cli[idx + 1], "/tmp/clair3_model")
 
+    def test_clair3_command_enables_gvcf_by_default(self):
+        from sniffcell.discover.discover import _run_clair3
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            deconv_dir, ref, tr_bed, tool_paths = _build_minimal_env(root)
+            argv = [
+                "discover",
+                "--deconv-dir", str(deconv_dir),
+                "--reference", str(ref),
+                "--tr-bed", str(tr_bed),
+                "--sex", "male",
+                "--scheduler", "local",
+                "--dry-run",
+                "--sniffles-bin", tool_paths["sniffles"],
+                "--bcftools-bin", tool_paths["bcftools"],
+                "--kanpig-bin", tool_paths["kanpig"],
+                "--truvari-bin", tool_paths["truvari"],
+                "--medaka-bin", tool_paths["medaka"],
+                "--tdb-bin", tool_paths["tdb"],
+                "--modkit-bin", tool_paths["modkit"],
+                "--tabix-bin", tool_paths["tabix"],
+                "--clair3-bin", tool_paths["run_clair3.sh"],
+                "--clair3-model-path", "/tmp/clair3_model",
+                "--clairs-bin", tool_paths["run_clairs"],
+            ]
+            args = parse_args(argv)
+            ctx = _build_context(args)
+            _run_clair3(ctx, "Neuron")
+            cmd_text = (ctx.commands_dir / "clair3.Neuron.command.txt").read_text()
+            self.assertIn("--gvcf", cmd_text)
+
 
 # ---------------------------------------------------------------------------
 # SLURM script generation tests
@@ -1341,6 +1460,60 @@ class TestTrPostProcessingTiering(unittest.TestCase):
         )
         self.assertEqual(row["tr_tier"], "strong")
         self.assertTrue(bool(row["tr_pass_for_harmonized"]))
+
+    def test_tdb_changed_allele_table_keeps_expansion_support_subset(self):
+        from sniffcell.discover.tr_post_processing import _build_changed_allele_table
+
+        targets = pd.DataFrame(
+            [
+                {
+                    "LocusID": 1,
+                    "chrom": "chr1",
+                    "start": 100,
+                    "end": 200,
+                    "pairing": "direct",
+                    "pairing_confidence": 0.4,
+                    "max_abs_delta_bp": 200,
+                    "hap1_delta_bp": -200,
+                    "hap2_delta_bp": 0,
+                    "group_a_hap1_length": 1100,
+                    "group_a_hap2_length": 600,
+                    "group_b_hap1_length": 900,
+                    "group_b_hap2_length": 600,
+                }
+            ]
+        )
+        df_reads = pd.DataFrame(
+            [
+                {"LocusID": 1, "cell_type": "sample.Neuron", "hap": "hap1", "read_name": "chg0", "read_length": 875},
+                {"LocusID": 1, "cell_type": "sample.Neuron", "hap": "hap1", "read_name": "chg1", "read_length": 905},
+                {"LocusID": 1, "cell_type": "sample.Neuron", "hap": "hap1", "read_name": "chg2", "read_length": 980},
+                {"LocusID": 1, "cell_type": "sample.Neuron", "hap": "hap1", "read_name": "chg3", "read_length": 1110},
+                {"LocusID": 1, "cell_type": "sample.Oligodendrocyte", "hap": "hap1", "read_name": "base0", "read_length": 860},
+                {"LocusID": 1, "cell_type": "sample.Oligodendrocyte", "hap": "hap1", "read_name": "base1", "read_length": 890},
+                {"LocusID": 1, "cell_type": "sample.Oligodendrocyte", "hap": "hap1", "read_name": "base2", "read_length": 910},
+                {"LocusID": 1, "cell_type": "sample.Oligodendrocyte", "hap": "hap1", "read_name": "base3", "read_length": 930},
+            ]
+        )
+
+        changed = _build_changed_allele_table(
+            targets,
+            df_reads,
+            sample_a_label="sample.Neuron",
+            sample_b_label="sample.Oligodendrocyte",
+            min_expansion_bp=10,
+            tail_rescue_specs=None,
+            tail_rescue_reads=None,
+            np=np,
+            pd=pd,
+        )
+
+        row = changed.iloc[0]
+        self.assertEqual(row["n_change_reads"], 4)
+        self.assertEqual(row["n_change_support_reads"], 2)
+        self.assertEqual(row["change_support_read_names"], ["chg3", "chg2"])
+        self.assertEqual(row["n_baseline_support_reads"], 4)
+        self.assertEqual(row["baseline_support_read_names"], ["base3", "base2", "base1", "base0"])
 
     def test_smaller_clean_expansion_is_supportive(self):
         row = self._build_tr_row(

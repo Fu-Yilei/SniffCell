@@ -4,7 +4,131 @@ import sys, os
 from sniffcell.__init__ import __version__ as version
 
 
+def _build_discover_run_parent_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--deconv-dir", required=True, help="Path to the sample deconv directory.")
+    parser.add_argument("--reference", required=True, help="Reference FASTA used by downstream tools.")
+    parser.add_argument("--tr-bed", required=True, help="Tandem repeat BED for medaka tandem.")
+    parser.add_argument("--sex", required=True, choices=["female", "male"], help="Sample sex for medaka tandem.")
+    parser.add_argument(
+        "--scheduler",
+        default="local",
+        choices=["local", "slurm"],
+        help="Execution mode. local runs sequentially; slurm renders or submits HPC scripts.",
+    )
+    parser.add_argument("--slurm-account", default=None, help="Slurm account written into the generated submit_pipeline.sh. Optional.")
+    parser.add_argument("--split-dir", default=None, help="Optional override for the deconv_requested_group_splits directory.")
+    parser.add_argument("--sample-id", default=None, help="Optional sample ID override.")
+    parser.add_argument("--groups", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--stages", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--run-id", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--dry-run", action="store_true", default=False, help="Write manifests and commands without executing.")
+    parser.add_argument("--force", action="store_true", default=False, help="Rerun stages even if done markers already exist.")
+    parser.add_argument("--rerun-failed", action="store_true", default=False, help="Allow rerunning tasks that previously failed.")
+    parser.add_argument("--sniffles-bin", default=None, help="Optional Sniffles executable path.")
+    parser.add_argument("--bcftools-bin", default=None, help="Optional bcftools executable path.")
+    parser.add_argument("--bgzip-bin", default=None, help="Optional bgzip executable path.")
+    parser.add_argument("--kanpig-bin", default=None, help="Optional Kanpig executable path.")
+    parser.add_argument("--truvari-bin", default=None, help="Optional Truvari executable path.")
+    parser.add_argument("--medaka-bin", default=None, help="Optional Medaka executable path.")
+    parser.add_argument("--tdb-bin", default=None, help="Optional tdb executable path.")
+    parser.add_argument("--modkit-bin", default=None, help="Optional modkit executable path.")
+    parser.add_argument("--tabix-bin", default=None, help="Optional tabix executable path.")
+    parser.add_argument("--threads", type=int, default=16, help="Threads used by all tools (sniffles, kanpig, medaka, modkit, clair3, clairS, tdb merge). Default=16.")
+    parser.add_argument(
+        "--sniffles-mosaic-filter-expression",
+        default="INFO/MOSAIC=1",
+        help="bcftools expression used with -f PASS to derive the Kanpig handoff VCF. Default=INFO/MOSAIC=1.",
+    )
+    parser.add_argument("--sniffles-cluster-merge-len", type=float, default=0.2, help="Sniffles --cluster-merge-len. Default=0.2.")
+    parser.add_argument("--kanpig-seqsim", type=float, default=0.8, help="Kanpig seqsim. Default=0.8.")
+    parser.add_argument("--kanpig-sizesim", type=float, default=0.85, help="Kanpig sizesim. Default=0.85.")
+    parser.add_argument("--kanpig-passonly", action="store_true", default=True, help="Use --passonly for Kanpig.")
+    parser.add_argument(
+        "--kanpig-sample-name-template",
+        default="{sample_id}_{group}",
+        help="Sample naming template for Kanpig. Default={sample_id}_{group}.",
+    )
+    parser.add_argument("--collapse-use", choices=["kanpig", "sniffles"], default="kanpig", help="Which callset to collapse. Default=kanpig.")
+    parser.add_argument("--truvari-refdist", type=int, default=500, help="Truvari refdist. Default=500.")
+    parser.add_argument("--truvari-pctseq", type=float, default=0.95, help="Truvari pctseq. Default=0.95.")
+    parser.add_argument("--truvari-pctsize", type=float, default=0.95, help="Truvari pctsize. Default=0.95.")
+    parser.add_argument("--truvari-passonly", action="store_true", default=True, help="Use --passonly for truvari collapse.")
+    parser.add_argument(
+        "--medaka-model",
+        default="dna_r10.4.1_e8.2_400bps_sup@v4.3.0:consensus",
+        help="Model for medaka tandem.",
+    )
+    parser.add_argument("--medaka-padding", type=int, default=250, help="Padding for medaka tandem. Default=250.")
+    parser.add_argument(
+        "--medaka-phasing",
+        choices=["hybrid", "abpoa", "unphased", "prephased"],
+        default=None,
+        help="Optional medaka tandem phasing mode. When unset, medaka uses its own default.",
+    )
+    parser.add_argument(
+        "--medaka-sample-name-template",
+        default="{sample_id}.{group}",
+        help="Sample naming template for medaka tandem. Default={sample_id}.{group}.",
+    )
+    parser.add_argument(
+        "--tail-expansion-rescue",
+        action="store_true",
+        default=False,
+        help=(
+            "Experimental: let tr_post_processing rescue loci with little/no TDB hap delta when one group "
+            "shows a hap-specific expansion tail in the trimmed reads."
+        ),
+    )
+    parser.add_argument(
+        "--tail-expansion-require-sample-range-support",
+        dest="tail_require_sample_range_support",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "When tail-expansion rescue is enabled, require the rescued haplotype to also show same-haplotype "
+            "TDB sample-range support. Use --no-tail-expansion-require-sample-range-support to allow "
+            "trimmed-read-only tail rescue."
+        ),
+    )
+    parser.add_argument("--tdb-create-mem", type=int, default=4, help="Memory in GB for tdb create. Default=4.")
+    parser.add_argument("--tdb-create-force", action="store_true", default=False, help="Pass --force to tdb create.")
+    parser.add_argument(
+        "--mods-mode",
+        choices=["combined", "separate"],
+        default="separate",
+        help="Output mode label for modkit-derived methylation summaries. Default=separate.",
+    )
+    parser.add_argument("--clair3-bin", default=None, help="Optional run_clair3.sh executable path.")
+    parser.add_argument("--clair3-platform", default="ont", help="Sequencing platform for Clair3 (e.g. ont, hifi). Default=ont.")
+    parser.add_argument("--clair3-model-path", default=None, help="Path to Clair3 model directory. Required when running the clair3 stage.")
+    parser.add_argument("--clairs-bin", default=None, help="Optional run_clairs executable path.")
+    parser.add_argument(
+        "--clairs-platform",
+        default="ont_r10_dorado_sup_5khz",
+        help="Sequencing platform for ClairS. Default=ont_r10_dorado_sup_5khz.",
+    )
+    parser.add_argument("--clairs-tumor-group", default=None, help=argparse.SUPPRESS)
+    return parser
+
+
+def _normalize_discover_argv(argv: list[str]) -> list[str]:
+    if not argv or argv[0] != "discover":
+        return argv
+    if len(argv) == 1:
+        return argv
+    if argv[1] in {"tools", "ctprocessing", "-h", "--help"}:
+        return argv
+    return ["discover", "tools", "run", *argv[1:]]
+
+
 def parse_args(argv):
+    from sniffcell.discover.envcheck import _build_parser as _build_discover_envcheck_parser
+    from sniffcell.discover.harmonize_variants import _build_arg_parser as _build_discover_harmonize_parser
+    from sniffcell.discover.sv_post_processing import _build_arg_parser as _build_discover_sv_post_parser
+    from sniffcell.discover.tr_post_processing import _build_arg_parser as _build_discover_tr_post_parser
+    from sniffcell.sv_discovery import build_parser as _build_discover_sv_discovery_parser
+
     parser = argparse.ArgumentParser(
         prog="sniffcell",
         description="Annotating mosaic structural variants (SVs) with cell type-specific methylation information.",
@@ -670,109 +794,49 @@ def parse_args(argv):
         "discover",
         help="Postprocess deconv split BAM outputs with SV, TR, and methylation workflows.",
     )
-    discover_parser.add_argument("--deconv-dir", required=True, help="Path to the sample deconv directory.")
-    discover_parser.add_argument("--reference", required=True, help="Reference FASTA used by downstream tools.")
-    discover_parser.add_argument("--tr-bed", required=True, help="Tandem repeat BED for medaka tandem.")
-    discover_parser.add_argument("--sex", required=True, choices=["female", "male"], help="Sample sex for medaka tandem.")
-    discover_parser.add_argument(
-        "--scheduler",
-        default="local",
-        choices=["local", "slurm"],
-        help="Execution mode. local runs sequentially; slurm renders or submits HPC scripts.",
+    discover_subparsers = discover_parser.add_subparsers(dest="discover_section")
+
+    discover_tools_parser = discover_subparsers.add_parser(
+        "tools",
+        help="Run discover tool-facing commands.",
     )
-    discover_parser.add_argument("--slurm-account", default=None, help="Slurm account written into the generated submit_pipeline.sh. Optional.")
-    discover_parser.add_argument("--split-dir", default=None, help="Optional override for the deconv_requested_group_splits directory.")
-    discover_parser.add_argument("--sample-id", default=None, help="Optional sample ID override.")
-    discover_parser.add_argument("--groups", default=None, help=argparse.SUPPRESS)
-    discover_parser.add_argument("--stages", default=None, help=argparse.SUPPRESS)
-    discover_parser.add_argument("--run-id", default=None, help=argparse.SUPPRESS)
-    discover_parser.add_argument("--dry-run", action="store_true", default=False, help="Write manifests and commands without executing.")
-    discover_parser.add_argument("--force", action="store_true", default=False, help="Rerun stages even if done markers already exist.")
-    discover_parser.add_argument("--rerun-failed", action="store_true", default=False, help="Allow rerunning tasks that previously failed.")
-    discover_parser.add_argument("--sniffles-bin", default=None, help="Optional Sniffles executable path.")
-    discover_parser.add_argument("--bcftools-bin", default=None, help="Optional bcftools executable path.")
-    discover_parser.add_argument("--bgzip-bin", default=None, help="Optional bgzip executable path.")
-    discover_parser.add_argument("--kanpig-bin", default=None, help="Optional Kanpig executable path.")
-    discover_parser.add_argument("--truvari-bin", default=None, help="Optional Truvari executable path.")
-    discover_parser.add_argument("--medaka-bin", default=None, help="Optional Medaka executable path.")
-    discover_parser.add_argument("--tdb-bin", default=None, help="Optional tdb executable path.")
-    discover_parser.add_argument("--modkit-bin", default=None, help="Optional modkit executable path.")
-    discover_parser.add_argument("--tabix-bin", default=None, help="Optional tabix executable path.")
-    discover_parser.add_argument("--threads", type=int, default=16, help="Threads used by all tools (sniffles, kanpig, medaka, modkit, clair3, clairS, tdb merge). Default=16.")
-    discover_parser.add_argument(
-        "--sniffles-mosaic-filter-expression",
-        default="INFO/MOSAIC=1",
-        help="bcftools expression used with -f PASS to derive the Kanpig handoff VCF. Default=INFO/MOSAIC=1.",
+    discover_tools_subparsers = discover_tools_parser.add_subparsers(dest="discover_tools_command")
+    discover_tools_run_parser = discover_tools_subparsers.add_parser(
+        "run",
+        help="Run the main discover external-tool pipeline.",
+        parents=[_build_discover_run_parent_parser()],
     )
-    discover_parser.add_argument("--sniffles-cluster-merge-len", type=float, default=0.2, help="Sniffles --cluster-merge-len. Default=0.2.")
-    discover_parser.add_argument("--kanpig-seqsim", type=float, default=0.8, help="Kanpig seqsim. Default=0.8.")
-    discover_parser.add_argument("--kanpig-sizesim", type=float, default=0.85, help="Kanpig sizesim. Default=0.85.")
-    discover_parser.add_argument("--kanpig-passonly", action="store_true", default=True, help="Use --passonly for Kanpig.")
-    discover_parser.add_argument(
-        "--kanpig-sample-name-template",
-        default="{sample_id}_{group}",
-        help="Sample naming template for Kanpig. Default={sample_id}_{group}.",
+    discover_tools_sv_parser = discover_tools_subparsers.add_parser(
+        "sv",
+        help="Run standalone SV discovery before discover/anno.",
+        parents=[_build_discover_sv_discovery_parser(prog="sniffcell discover tools sv", add_help=False)],
     )
-    discover_parser.add_argument("--collapse-use", choices=["kanpig", "sniffles"], default="kanpig", help="Which callset to collapse. Default=kanpig.")
-    discover_parser.add_argument("--truvari-refdist", type=int, default=500, help="Truvari refdist. Default=500.")
-    discover_parser.add_argument("--truvari-pctseq", type=float, default=0.95, help="Truvari pctseq. Default=0.95.")
-    discover_parser.add_argument("--truvari-pctsize", type=float, default=0.95, help="Truvari pctsize. Default=0.95.")
-    discover_parser.add_argument("--truvari-passonly", action="store_true", default=True, help="Use --passonly for truvari collapse.")
-    discover_parser.add_argument(
-        "--medaka-model",
-        default="dna_r10.4.1_e8.2_400bps_sup@v4.3.0:consensus",
-        help="Model for medaka tandem.",
+    discover_tools_check_parser = discover_tools_subparsers.add_parser(
+        "check",
+        help="Preflight-check discover external dependencies.",
+        parents=[_build_discover_envcheck_parser(prog="sniffcell discover tools check", add_help=False)],
     )
-    discover_parser.add_argument("--medaka-padding", type=int, default=250, help="Padding for medaka tandem. Default=250.")
-    discover_parser.add_argument(
-        "--medaka-phasing",
-        choices=["hybrid", "abpoa", "unphased", "prephased"],
-        default=None,
-        help="Optional medaka tandem phasing mode. When unset, medaka uses its own default.",
+
+    discover_ctprocessing_parser = discover_subparsers.add_parser(
+        "ctprocessing",
+        help="Run discover cell-type post-processing utilities.",
     )
-    discover_parser.add_argument(
-        "--medaka-sample-name-template",
-        default="{sample_id}.{group}",
-        help="Sample naming template for medaka tandem. Default={sample_id}.{group}.",
+    discover_ctprocessing_subparsers = discover_ctprocessing_parser.add_subparsers(dest="discover_ctprocessing_command")
+    discover_ctprocessing_sv_parser = discover_ctprocessing_subparsers.add_parser(
+        "sv",
+        help="Run SV post-processing on two split groups.",
+        parents=[_build_discover_sv_post_parser(prog="sniffcell discover ctprocessing sv", add_help=False)],
     )
-    discover_parser.add_argument(
-        "--tail-expansion-rescue",
-        action="store_true",
-        default=False,
-        help=(
-            "Experimental: let tr_post_processing rescue loci with little/no TDB hap delta when one group "
-            "shows a hap-specific expansion tail in the trimmed reads."
-        ),
+    discover_ctprocessing_tr_parser = discover_ctprocessing_subparsers.add_parser(
+        "tr",
+        help="Run tandem-repeat post-processing on two split groups.",
+        parents=[_build_discover_tr_post_parser(prog="sniffcell discover ctprocessing tr", add_help=False)],
     )
-    discover_parser.add_argument(
-        "--tail-expansion-require-sample-range-support",
-        dest="tail_require_sample_range_support",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help=(
-            "When tail-expansion rescue is enabled, require the rescued haplotype to also show same-haplotype "
-            "TDB sample-range support. Use --no-tail-expansion-require-sample-range-support to allow "
-            "trimmed-read-only tail rescue."
-        ),
+    discover_ctprocessing_harmonize_parser = discover_ctprocessing_subparsers.add_parser(
+        "harmonize",
+        help="Merge TR and SV post-processing outputs into a harmonized variant TSV.",
+        parents=[_build_discover_harmonize_parser(prog="sniffcell discover ctprocessing harmonize", add_help=False)],
     )
-    discover_parser.add_argument("--tdb-create-mem", type=int, default=4, help="Memory in GB for tdb create. Default=4.")
-    discover_parser.add_argument("--tdb-create-force", action="store_true", default=False, help="Pass --force to tdb create.")
-    discover_parser.add_argument(
-        "--mods-mode",
-        choices=["combined", "separate"],
-        default="separate",
-        help="Output mode label for modkit-derived methylation summaries. Default=separate.",
-    )
-    discover_parser.add_argument("--clair3-bin", default=None, help="Optional run_clair3.sh executable path.")
-    discover_parser.add_argument("--clair3-platform", default="ont", help="Sequencing platform for Clair3 (e.g. ont, hifi). Default=ont.")
-    discover_parser.add_argument("--clair3-model-path", default=None, help="Path to Clair3 model directory. Required when running the clair3 stage.")
-    discover_parser.add_argument("--clairs-bin", default=None, help="Optional run_clairs executable path.")
-    discover_parser.add_argument(
-        "--clairs-platform",
-        default="ont_r10_dorado_sup_5khz",
-        help="Sequencing platform for ClairS. Default=ont_r10_dorado_sup_5khz.",
-    )
-    discover_parser.add_argument("--clairs-tumor-group", default=None, help=argparse.SUPPRESS)
 
 
     top_level_passthrough = {"-h", "--help", "-v", "--version"}
@@ -812,5 +876,29 @@ def parse_args(argv):
     elif len(argv) == 1 and argv[0] == "discover":
         discover_parser.print_help(sys.stderr)
         sys.exit(1)
-    args = parser.parse_args(argv)
+    elif len(argv) == 2 and argv[0] == "discover" and argv[1] == "tools":
+        discover_tools_parser.print_help(sys.stderr)
+        sys.exit(1)
+    elif len(argv) == 2 and argv[0] == "discover" and argv[1] == "ctprocessing":
+        discover_ctprocessing_parser.print_help(sys.stderr)
+        sys.exit(1)
+    elif len(argv) == 3 and argv[:3] == ["discover", "tools", "run"]:
+        discover_tools_run_parser.print_help(sys.stderr)
+        sys.exit(1)
+    elif len(argv) == 3 and argv[:3] == ["discover", "tools", "sv"]:
+        discover_tools_sv_parser.print_help(sys.stderr)
+        sys.exit(1)
+    elif len(argv) == 3 and argv[:3] == ["discover", "tools", "check"]:
+        discover_tools_check_parser.print_help(sys.stderr)
+        sys.exit(1)
+    elif len(argv) == 3 and argv[:3] == ["discover", "ctprocessing", "sv"]:
+        discover_ctprocessing_sv_parser.print_help(sys.stderr)
+        sys.exit(1)
+    elif len(argv) == 3 and argv[:3] == ["discover", "ctprocessing", "tr"]:
+        discover_ctprocessing_tr_parser.print_help(sys.stderr)
+        sys.exit(1)
+    elif len(argv) == 3 and argv[:3] == ["discover", "ctprocessing", "harmonize"]:
+        discover_ctprocessing_harmonize_parser.print_help(sys.stderr)
+        sys.exit(1)
+    args = parser.parse_args(_normalize_discover_argv(list(argv)))
     return args
