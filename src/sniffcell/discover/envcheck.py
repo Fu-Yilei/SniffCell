@@ -26,7 +26,6 @@ TOOL_DEFAULTS = {
     "tdb": "tdb",
     "truvari": "truvari",
     "clair3": "run_clair3.sh",
-    "clairs": "run_clairs",
 }
 
 
@@ -56,7 +55,6 @@ def _build_parser(*, prog: str = "sniffcell-check-discover", add_help: bool = Tr
     parser.add_argument("--tabix-bin", default=None)
     parser.add_argument("--clair3-bin", default=None)
     parser.add_argument("--clair3-model-path", default=None)
-    parser.add_argument("--clairs-bin", default=None)
     parser.add_argument("--json", action="store_true", default=False, help="Emit machine-readable JSON.")
     return parser
 
@@ -92,7 +90,6 @@ def main(argv: list[str] | None = None) -> int:
         "modkit": args.modkit_bin,
         "tabix": args.tabix_bin,
         "clair3": args.clair3_bin,
-        "clairs": args.clairs_bin,
     }
 
     checks: list[dict[str, object]] = []

@@ -8,8 +8,6 @@ ARG KANPIG_URL=""
 ARG KANPIG_BIN_SUBPATH="kanpig"
 ARG MODKIT_URL=""
 ARG MODKIT_BIN_SUBPATH="modkit"
-ARG CLAIRS_URL=""
-ARG CLAIRS_BIN_SUBPATH="run_clairs"
 ARG CLAIR3_MODEL_URL=""
 ARG CLAIR3_MODEL_SUBDIR=""
 
@@ -43,14 +41,12 @@ COPY docker/install_optional_tool.sh /usr/local/bin/install_optional_tool.sh
 COPY docker/install_archive_dir.sh /usr/local/bin/install_archive_dir.sh
 COPY docker/medaka-wrapper.sh /usr/local/bin/medaka
 COPY docker/clair3-wrapper.sh /usr/local/bin/run_clair3.sh
-COPY docker/clairs-wrapper.sh /usr/local/bin/run_clairs
 COPY docker/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
 RUN chmod +x /usr/local/bin/install_optional_tool.sh \
     /usr/local/bin/install_archive_dir.sh \
     /usr/local/bin/medaka \
     /usr/local/bin/run_clair3.sh \
-    /usr/local/bin/run_clairs \
     /usr/local/bin/docker-entrypoint.sh
 
 RUN if [[ "${FULL_DISCOVER}" == "1" ]]; then \
@@ -58,7 +54,6 @@ RUN if [[ "${FULL_DISCOVER}" == "1" ]]; then \
       [[ "${INSTALL_CLAIR3}" == "1" ]] || { echo "FULL_DISCOVER=1 requires INSTALL_CLAIR3=1" >&2; exit 1; }; \
       [[ -n "${KANPIG_URL}" ]] || { echo "FULL_DISCOVER=1 requires KANPIG_URL" >&2; exit 1; }; \
       [[ -n "${MODKIT_URL}" ]] || { echo "FULL_DISCOVER=1 requires MODKIT_URL" >&2; exit 1; }; \
-      [[ -n "${CLAIRS_URL}" ]] || { echo "FULL_DISCOVER=1 requires CLAIRS_URL" >&2; exit 1; }; \
       [[ -n "${CLAIR3_MODEL_URL}" ]] || { echo "FULL_DISCOVER=1 requires CLAIR3_MODEL_URL" >&2; exit 1; }; \
     fi
 
@@ -72,7 +67,6 @@ RUN if [[ "${INSTALL_MEDAKA}" == "1" ]]; then \
 
 RUN install_optional_tool.sh "${KANPIG_URL}" /opt/sniffcell-tools/kanpig kanpig "${KANPIG_BIN_SUBPATH}" \
  && install_optional_tool.sh "${MODKIT_URL}" /opt/sniffcell-tools/modkit modkit "${MODKIT_BIN_SUBPATH}" \
- && install_optional_tool.sh "${CLAIRS_URL}" /opt/sniffcell-tools/clairs run_clairs.real "${CLAIRS_BIN_SUBPATH}" \
  && install_archive_dir.sh "${CLAIR3_MODEL_URL}" /opt/models/clair3 "${CLAIR3_MODEL_SUBDIR}"
 
 WORKDIR /opt/sniffcell

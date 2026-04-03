@@ -207,18 +207,6 @@ output.write_text("##fileformat=VCFv4.2\\n", encoding="utf-8")
 """,
     )
 
-    _make_python_exec(
-        tool_dir / "run_clairs",
-        """
-import sys
-from pathlib import Path
-args = sys.argv[1:]
-output_dir = Path(args[args.index("-o") + 1])
-output = output_dir / "output.vcf.gz"
-output.parent.mkdir(parents=True, exist_ok=True)
-output.write_text("##fileformat=VCFv4.2\\n", encoding="utf-8")
-""",
-    )
     return deconv_dir, ref, tr_bed, tool_paths
 
 
@@ -249,7 +237,7 @@ def _build_minimal_env(root: Path) -> tuple[Path, Path, Path, dict[str, str]]:
     tool_paths: dict[str, str] = {}
     for tool_name in (
         "sniffles", "bcftools", "kanpig", "truvari", "medaka",
-        "tdb", "modkit", "tabix", "run_clair3.sh", "run_clairs",
+        "tdb", "modkit", "tabix", "run_clair3.sh",
     ):
         p = tool_dir / tool_name
         _make_exec(p)
@@ -276,7 +264,6 @@ def _base_slurm_argv(deconv_dir, ref, tr_bed, tool_paths) -> list[str]:
         "--tabix-bin", tool_paths["tabix"],
         "--clair3-bin", tool_paths["run_clair3.sh"],
         "--clair3-model-path", "/tmp/clair3_model",
-        "--clairs-bin", tool_paths["run_clairs"],
     ]
 
 
@@ -352,7 +339,7 @@ class TestDiscoverParseArgs(unittest.TestCase):
         self.assertEqual(args.slurm_account, "mylab")
 
     def test_hidden_args_still_parseable(self):
-        """--run-id, --stages, --groups, --clairs-tumor-group are suppressed but functional."""
+        """--run-id, --stages, and --groups are suppressed but functional."""
         args = parse_args([
             "discover",
             "--deconv-dir", "/tmp/d",
@@ -362,12 +349,10 @@ class TestDiscoverParseArgs(unittest.TestCase):
             "--run-id", "myrun",
             "--stages", "sv",
             "--groups", "A,B",
-            "--clairs-tumor-group", "A",
         ])
         self.assertEqual(args.run_id, "myrun")
         self.assertEqual(args.stages, "sv")
         self.assertEqual(args.groups, "A,B")
-        self.assertEqual(args.clairs_tumor_group, "A")
 
     def test_removed_args_are_absent(self):
         """Removed arguments should not be attributes on args."""
@@ -386,7 +371,7 @@ class TestDiscoverParseArgs(unittest.TestCase):
         # Per-tool thread args should not exist
         for attr in (
             "sniffles_threads", "kanpig_threads", "medaka_workers",
-            "tdb_merge_threads", "modkit_threads", "clair3_threads", "clairs_threads",
+            "tdb_merge_threads", "modkit_threads", "clair3_threads",
         ):
             self.assertFalse(hasattr(args, attr), f"unexpected attr: {attr}")
 
@@ -409,16 +394,6 @@ class TestDiscoverParseArgs(unittest.TestCase):
             "--sex", "male",
         ])
         self.assertEqual(args.mods_mode, "separate")
-
-    def test_clairs_platform_default(self):
-        args = parse_args([
-            "discover",
-            "--deconv-dir", "/tmp/d",
-            "--reference", "/tmp/r",
-            "--tr-bed", "/tmp/t",
-            "--sex", "male",
-        ])
-        self.assertEqual(args.clairs_platform, "ont_r10_dorado_sup_5khz")
 
     def test_clair3_platform_default(self):
         args = parse_args([
@@ -551,7 +526,7 @@ class TestParseStages(unittest.TestCase):
 
     def test_snv_alias(self):
         stages = _parse_stages("snv")
-        self.assertEqual(stages, ("clair3", "clairs"))
+        self.assertEqual(stages, ("clair3",))
 
     def test_mods_alias(self):
         stages = _parse_stages("mods")
@@ -579,7 +554,7 @@ class TestParseStages(unittest.TestCase):
     def test_individual_stage(self):
         self.assertEqual(_parse_stages("sniffles"), ("sniffles",))
         self.assertEqual(_parse_stages("modkit"), ("modkit",))
-        self.assertEqual(_parse_stages("clairs"), ("clairs",))
+        self.assertEqual(_parse_stages("clair3"), ("clair3",))
 
     def test_deduplication(self):
         stages = _parse_stages("sniffles,sniffles")
@@ -746,19 +721,6 @@ class TestBuildContext(unittest.TestCase):
             ctx = _build_context(args)
             self.assertEqual(ctx.params["slurm_account"], "labacct")
 
-    def test_build_context_clairs_tumor_group_in_params(self):
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            deconv_dir, ref, tr_bed, tool_paths = _build_minimal_env(root)
-            argv = _base_slurm_argv(deconv_dir, ref, tr_bed, tool_paths) + [
-                "--clairs-tumor-group", "Neuron",
-                "--groups", "Neuron,Oligodendrocyte",
-                "--scheduler", "local",
-            ]
-            args = parse_args(argv)
-            ctx = _build_context(args)
-            self.assertEqual(ctx.params["clairs_tumor_group"], "Neuron")
-
     def test_build_context_mods_mode_propagated(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
@@ -825,20 +787,6 @@ class TestBuildRecursiveCli(unittest.TestCase):
             self.assertIn("--run-id", cli)
             idx = cli.index("--run-id")
             self.assertEqual(cli[idx + 1], ctx.run_id)
-
-    def test_clairs_tumor_group_included_when_specified(self):
-        with tempfile.TemporaryDirectory() as td:
-            ctx = self._get_ctx(Path(td))
-            cli = _build_recursive_cli(ctx, "clairs", clairs_tumor_group="Neuron")
-            self.assertIn("--clairs-tumor-group", cli)
-            idx = cli.index("--clairs-tumor-group")
-            self.assertEqual(cli[idx + 1], "Neuron")
-
-    def test_clairs_tumor_group_absent_when_not_specified(self):
-        with tempfile.TemporaryDirectory() as td:
-            ctx = self._get_ctx(Path(td))
-            cli = _build_recursive_cli(ctx, "clairs")
-            self.assertNotIn("--clairs-tumor-group", cli)
 
     def test_groups_included_when_provided(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1008,7 +956,6 @@ class TestBuildRecursiveCli(unittest.TestCase):
                 "--tabix-bin", tool_paths["tabix"],
                 "--clair3-bin", tool_paths["run_clair3.sh"],
                 "--clair3-model-path", "/tmp/clair3_model",
-                "--clairs-bin", tool_paths["run_clairs"],
             ]
             args = parse_args(argv)
             ctx = _build_context(args)
@@ -1071,57 +1018,6 @@ class TestPostprocessContextAndSlurm(unittest.TestCase):
                     (ctx.slurm_dir / script_name).exists(),
                     f"Missing SLURM script: {script_name}",
                 )
-
-    def test_clairs_both_direction_scripts_generated(self):
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            deconv_dir, ref, tr_bed, tool_paths = _build_minimal_env(root)
-            args = parse_args(_base_slurm_argv(deconv_dir, ref, tr_bed, tool_paths))
-            ctx = _build_context(args)
-            _render_slurm(ctx)
-            # Both directions must exist
-            fwd = ctx.slurm_dir / "clairs_Neuron_vs_Oligodendrocyte.sbatch.sh"
-            rev = ctx.slurm_dir / "clairs_Oligodendrocyte_vs_Neuron.sbatch.sh"
-            self.assertTrue(fwd.exists(), "Missing forward ClairS SLURM script")
-            self.assertTrue(rev.exists(), "Missing reverse ClairS SLURM script")
-
-    def test_clairs_scripts_contain_clairs_tumor_group(self):
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            deconv_dir, ref, tr_bed, tool_paths = _build_minimal_env(root)
-            args = parse_args(_base_slurm_argv(deconv_dir, ref, tr_bed, tool_paths))
-            ctx = _build_context(args)
-            _render_slurm(ctx)
-            fwd = (ctx.slurm_dir / "clairs_Neuron_vs_Oligodendrocyte.sbatch.sh").read_text()
-            rev = (ctx.slurm_dir / "clairs_Oligodendrocyte_vs_Neuron.sbatch.sh").read_text()
-            self.assertIn("--clairs-tumor-group Neuron", fwd)
-            self.assertIn("--clairs-tumor-group Oligodendrocyte", rev)
-
-    def test_clairs_scripts_have_no_partition_or_account(self):
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            deconv_dir, ref, tr_bed, tool_paths = _build_minimal_env(root)
-            args = parse_args(_base_slurm_argv(deconv_dir, ref, tr_bed, tool_paths))
-            ctx = _build_context(args)
-            _render_slurm(ctx)
-            for script in (
-                "clairs_Neuron_vs_Oligodendrocyte.sbatch.sh",
-                "clairs_Oligodendrocyte_vs_Neuron.sbatch.sh",
-            ):
-                text = (ctx.slurm_dir / script).read_text()
-                self.assertNotIn("#SBATCH --partition=", text)
-                self.assertNotIn("#SBATCH --account=", text)
-
-    def test_submit_script_has_both_clairs_jids(self):
-        with tempfile.TemporaryDirectory() as td:
-            root = Path(td)
-            deconv_dir, ref, tr_bed, tool_paths = _build_minimal_env(root)
-            args = parse_args(_base_slurm_argv(deconv_dir, ref, tr_bed, tool_paths))
-            ctx = _build_context(args)
-            _render_slurm(ctx)
-            submit_text = (ctx.slurm_dir / "submit_pipeline.sh").read_text()
-            self.assertIn("CLAIRS_NEURON_VS_OLIGODENDROCYTE_JID", submit_text)
-            self.assertIn("CLAIRS_OLIGODENDROCYTE_VS_NEURON_JID", submit_text)
 
     def test_submit_script_has_concurrent_first_tier(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1233,7 +1129,6 @@ class TestPostprocessContextAndSlurm(unittest.TestCase):
                 "--modkit-bin", tool_paths["modkit"],
                 "--tabix-bin", tool_paths["tabix"],
                 "--clair3-bin", tool_paths["run_clair3.sh"],
-                "--clairs-bin", tool_paths["run_clairs"],
             ]
             args = parse_args(argv)
             ctx = _build_context(args)
@@ -1266,7 +1161,6 @@ class TestPostprocessContextAndSlurm(unittest.TestCase):
                 "--modkit-bin", tool_paths["modkit"],
                 "--tabix-bin", tool_paths["tabix"],
                 "--clair3-bin", tool_paths["run_clair3.sh"],
-                "--clairs-bin", tool_paths["run_clairs"],
             ]
             args = parse_args(argv)
             ctx = _build_context(args)
@@ -1300,7 +1194,6 @@ class TestPostprocessContextAndSlurm(unittest.TestCase):
                 "--modkit-bin", tool_paths["modkit"],
                 "--tabix-bin", tool_paths["tabix"],
                 "--clair3-bin", tool_paths["run_clair3.sh"],
-                "--clairs-bin", tool_paths["run_clairs"],
             ]
             args = parse_args(argv)
             ctx = _build_context(args)
@@ -1907,7 +1800,7 @@ class TestPostprocessLocalIntegration(unittest.TestCase):
             deconv_dir, ref, tr_bed, tool_paths = _build_fake_runtime_env(root)
             argv = _base_local_argv(deconv_dir, ref, tr_bed, tool_paths) + [
                 "--stages",
-                "sniffles,sniffles_filter,kanpig,collapse,medaka,tdb_create,tdb_merge,clair3,clairs,modkit",
+                "sniffles,sniffles_filter,kanpig,collapse,medaka,tdb_create,tdb_merge,clair3,modkit",
             ]
             args = parse_args(argv)
             discover_main(args)
@@ -1938,8 +1831,6 @@ class TestPostprocessLocalIntegration(unittest.TestCase):
                 sep="\t",
             )
             self.assertIn("tr_pass_for_harmonized", tr_bed.columns)
-            self.assertTrue((run_root / "snv" / "clairs" / "Neuron_vs_Oligodendrocyte" / "output.vcf.gz").exists())
-            self.assertTrue((run_root / "snv" / "clairs" / "Oligodendrocyte_vs_Neuron" / "output.vcf.gz").exists())
             self.assertTrue(
                 (run_root / "sv" / "sv_post_processing" / "Neuron_vs_Oligodendrocyte" / "summary.json").exists()
             )

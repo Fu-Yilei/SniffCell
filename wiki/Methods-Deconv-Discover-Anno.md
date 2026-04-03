@@ -31,7 +31,7 @@ micromamba activate sniffcell
 python -m pip install -e .
 ```
 
-`environment.yml` covers the Python package plus conda/bioconda tools such as `sniffles`, `bcftools`, `samtools`, `truvari`, and the Python `tdb` package. Some `discover` dependencies still require separate installation or dedicated envs: `kanpig`, `modkit`, `medaka`, `clair3`, and `ClairS`.
+`environment.yml` covers the Python package plus conda/bioconda tools such as `sniffles`, `bcftools`, `samtools`, `truvari`, and the Python `tdb` package. Some `discover` dependencies still require separate installation or dedicated envs: `kanpig`, `modkit`, `medaka`, and `clair3`.
 
 Before launching `sniffcell discover`, run a preflight:
 
@@ -113,7 +113,7 @@ Nested discover layout:
 
 **Key options:**
 - `--scheduler {local,slurm}` — run sequentially or render/submit HPC scripts (default: `local`)
-- `--stages` — comma-separated stage subset, e.g. `sv`, `sv,tdb`, `tdb,mods`, `clair3`, `clairs`
+- `--stages` — comma-separated stage subset, e.g. `sv`, `sv,tdb`, `tdb,mods`, `clair3`
 - `--threads` — threads used by all tools (default: `16`)
 - `--clair3-model-path` — path to Clair3 model directory; required when running the `clair3` stage
 - `--dry-run` — write manifests and commands without executing
@@ -124,7 +124,7 @@ Nested discover layout:
 
 SniffCell discovery is a two-group post-processing workflow that operates on split BAMs produced from `sniffcell deconv`. The command reads the group-split manifest, resolves the selected deconvolution groups, and runs a staged comparison of their structural-variant, tandem-repeat, and methylation profiles. In the structural-variant branch, Sniffles is run independently on each split BAM in mosaic mode with read-name reporting enabled. PASS-filtered callsets are optionally further restricted with a mosaic-expression filter, then converted to sample-agnostic site sets and merged across groups. The merged site list is collapsed with Truvari to define a nonredundant set of candidate loci, which are then re-genotyped jointly against both BAMs using Kanpig. Final structural-variant calls are classified as group A-specific, group B-specific, or shared using allele-depth logic with configurable minimum depth and alternate-read thresholds, and supporting read names are retained for each group.
 
-In parallel, SniffCell can process tandem-repeat variation between the same two split groups. Medaka tandem is run separately on each group-specific BAM, per-group TDB databases are created, and the group databases are merged for comparative post-processing. The tandem-repeat post-processing step combines merged TDB summaries with Medaka trimmed-read sequences to identify haplotype-resolved repeat-length differences between the two groups and to label the changed and baseline groups at each locus. Optional branches can additionally produce CpG pileup summaries with Modkit and small-variant callsets with Clair3 and ClairS.
+In parallel, SniffCell can process tandem-repeat variation between the same two split groups. Medaka tandem is run separately on each group-specific BAM, per-group TDB databases are created, and the group databases are merged for comparative post-processing. The tandem-repeat post-processing step combines merged TDB summaries with Medaka trimmed-read sequences to identify haplotype-resolved repeat-length differences between the two groups and to label the changed and baseline groups at each locus. Optional branches can additionally produce CpG pileup summaries with Modkit and small-variant callsets with Clair3.
 
 At the end of the workflow, SniffCell harmonizes the structural-variant and tandem-repeat outputs into a single tab-delimited variant table. This harmonized table records genomic coordinates, variant class, subtype, group-specific alternate-read counts, and group-specific supporting read names, and is designed to serve directly as input to downstream `sniffcell anno` runs. The workflow can be executed locally or rendered as SLURM submission scripts, but the analytical logic and output schema are identical across execution modes.
 

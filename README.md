@@ -37,7 +37,7 @@ micromamba activate sniffcell
 python -m pip install -e .
 ```
 
-`environment.yml` covers the Python package plus conda/bioconda tools such as `sniffles`, `bcftools`, `samtools`, `truvari`, `severus`, and the Python `tdb` package. Some `discover` dependencies still require separate installation or dedicated envs: `kanpig`, `modkit`, `medaka`, `clair3`, and `ClairS`.
+`environment.yml` covers the Python package plus conda/bioconda tools such as `sniffles`, `bcftools`, `samtools`, `truvari`, `severus`, and the Python `tdb` package. Some `discover` dependencies still require separate installation or dedicated envs: `kanpig`, `modkit`, `medaka`, and `clair3`.
 
 Before launching `sniffcell discover`, run a preflight:
 
@@ -53,7 +53,7 @@ sniffcell-check-discover --stages clair3 --clair3-model-path /path/to/clair3_mod
 sniffcell-check-discover --stages medaka,tdb --medaka-bin /path/to/medaka --tdb-bin /path/to/tdb
 ```
 
-The checker validates stage-specific binaries such as `sniffles`, `bcftools`, `bgzip`, `tabix`, `kanpig`, `truvari`, `medaka`, `tdb`, `modkit`, `run_clair3.sh`, and `run_clairs`. It also verifies the Python `tdb` package for TR postprocessing, warns when `seaborn` is missing for optional TR plots, and enforces `--clair3-model-path` when the `clair3` stage is requested.
+The checker validates stage-specific binaries such as `sniffles`, `bcftools`, `bgzip`, `tabix`, `kanpig`, `truvari`, `medaka`, `tdb`, `modkit`, and `run_clair3.sh`. It also verifies the Python `tdb` package for TR postprocessing, warns when `seaborn` is missing for optional TR plots, and enforces `--clair3-model-path` when the `clair3` stage is requested.
 
 Fresh-install smoke test helpers:
 
@@ -80,7 +80,6 @@ Optional build args for tools that are not reliably available from conda:
 docker build -t sniffcell:latest \
   --build-arg KANPIG_URL=https://.../kanpig.tar.gz \
   --build-arg MODKIT_URL=https://.../modkit \
-  --build-arg CLAIRS_URL=https://.../clairs.tar.gz \
   .
 ```
 
@@ -89,7 +88,6 @@ Optional archive layouts can be adjusted with:
 ```bash
 --build-arg KANPIG_BIN_SUBPATH=kanpig
 --build-arg MODKIT_BIN_SUBPATH=modkit
---build-arg CLAIRS_BIN_SUBPATH=run_clairs
 ```
 
 For a true end-to-end `discover` image with no additional software installs at runtime, use the tracked builder helper:
@@ -97,13 +95,12 @@ For a true end-to-end `discover` image with no additional software installs at r
 ```bash
 KANPIG_URL=https://... \
 MODKIT_URL=https://... \
-CLAIRS_URL=https://... \
 CLAIR3_MODEL_URL=https://... \
 docker/build_full_image.sh sniffcell:full
 ```
 
 That build runs in strict mode:
-- it fails unless `kanpig`, `modkit`, `ClairS`, and a Clair3 model archive are supplied
+- it fails unless `kanpig`, `modkit`, and a Clair3 model archive are supplied
 - it keeps `medaka` and `clair3` installed in dedicated conda envs
 - it runs `sniffcell-check-discover --stages all --clair3-model-path /opt/models/clair3` during the image build
 

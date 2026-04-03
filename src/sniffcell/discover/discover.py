@@ -33,14 +33,13 @@ DEFAULT_STAGE_ORDER = (
     "tdb_create",
     "tdb_merge",
     "clair3",
-    "clairs",
     "modkit",
 )
 STAGE_ALIASES = {
     "all": set(DEFAULT_STAGE_ORDER),
     "sv": {"sniffles", "sniffles_filter", "kanpig", "collapse"},
     "tdb": {"tdb_create", "tdb_merge"},
-    "snv": {"clair3", "clairs"},
+    "snv": {"clair3"},
     "mods": {"modkit"},
 }
 GROUP_SCOPED_STAGES = {
@@ -61,7 +60,6 @@ STAGE_RUNTIME_TOOLS = {
     "tdb_create": {"tdb"},
     "tdb_merge": {"tdb"},
     "clair3": {"clair3"},
-    "clairs": {"clairs"},
     "modkit": {"modkit", "tabix"},
 }
 
@@ -323,7 +321,6 @@ def _build_context(args) -> RunContext:
         "tdb": _resolve_tool_optional("tdb", args.tdb_bin, required="tdb" in required_tools),
         "truvari": _resolve_tool_optional("truvari", args.truvari_bin, required="truvari" in required_tools),
         "clair3": _resolve_tool_optional("run_clair3.sh", args.clair3_bin, required="clair3" in required_tools),
-        "clairs": _resolve_tool_optional("run_clairs", args.clairs_bin, required="clairs" in required_tools),
     }
     reference = _expand_path(args.reference)
     tr_bed = _expand_path(args.tr_bed)
@@ -356,8 +353,6 @@ def _build_context(args) -> RunContext:
         "truvari_refdist": args.truvari_refdist,
         "clair3_platform": args.clair3_platform,
         "clair3_model_path": args.clair3_model_path,
-        "clairs_platform": args.clairs_platform,
-        "clairs_tumor_group": args.clairs_tumor_group,
     }
     return RunContext(
         sample_id=sample_id,
@@ -533,10 +528,6 @@ def _clair3_stage_dir(ctx: RunContext, group_name: str) -> Path:
     return ctx.run_root / "snv" / "clair3" / _sanitize_token(group_name)
 
 
-def _clairs_stage_dir(ctx: RunContext, tumor: str, normal: str) -> Path:
-    return ctx.run_root / "snv" / "clairs" / f"{_sanitize_token(tumor)}_vs_{_sanitize_token(normal)}"
-
-
 def _existing_split_sniffles_vcf(ctx: RunContext, group_name: str) -> Path:
     return ctx.split_dir / f"{group_name}.sniffles.vcf.gz"
 
@@ -666,22 +657,6 @@ def _selected_task_specs(ctx: RunContext) -> list[tuple[str, str | None]]:
             continue
         if stage == "tdb_merge":
             specs.append(("tdb_merge", None))
-            continue
-        if stage == "clairs":
-            if len(ctx.selected_groups) != 2:
-                raise ValueError("clairs requires exactly two selected groups")
-            tumor_override = ctx.params.get("clairs_tumor_group")
-            if tumor_override:
-                normal = next(group for group in ctx.selected_groups if group != tumor_override)
-                specs.append(("clairs", f"{_sanitize_token(tumor_override)}_vs_{_sanitize_token(normal)}"))
-            else:
-                group_a, group_b = ctx.selected_groups
-                specs.extend(
-                    [
-                        ("clairs", f"{_sanitize_token(group_a)}_vs_{_sanitize_token(group_b)}"),
-                        ("clairs", f"{_sanitize_token(group_b)}_vs_{_sanitize_token(group_a)}"),
-                    ]
-                )
             continue
         raise ValueError(f"Unsupported stage: {stage}")
     return specs
@@ -1316,31 +1291,11 @@ def _run_clair3(ctx: RunContext, group_name: str) -> None:
         f"--threads={ctx.params['threads']}",
         f"--platform={ctx.params['clair3_platform']}",
         f"--model_path={model_path or 'PLACEHOLDER'}",
-        "--include_all_ctgs",
-        "--remove_intermediate_dir",
+        "--gvcf",
+        # "--include_all_ctgs",
+        # "--remove_intermediate_dir",
     ]
     _run_task(ctx=ctx, stage="clair3", group_name=group_name, command=cmd, outputs=[output_vcf])
-
-
-def _run_clairs(ctx: RunContext, tumor_group: str, normal_group: str) -> None:
-    tumor_bam = _group_lookup(ctx, tumor_group).bam_path
-    normal_bam = _group_lookup(ctx, normal_group).bam_path
-    stage_dir = _clairs_stage_dir(ctx, tumor_group, normal_group)
-    stage_dir.mkdir(parents=True, exist_ok=True)
-    output_vcf = stage_dir / "output.vcf.gz"
-    direction = f"{_sanitize_token(tumor_group)}_vs_{_sanitize_token(normal_group)}"
-    cmd = [
-        ctx.tool_paths["clairs"],
-        "-T", tumor_bam,
-        "-N", normal_bam,
-        "-R", str(ctx.reference),
-        "-o", str(stage_dir),
-        "-t", str(ctx.params["threads"]),
-        "-p", ctx.params["clairs_platform"],
-        "--remove_intermediate_dir",
-        "--include_all_ctgs",
-    ]
-    _run_task(ctx=ctx, stage="clairs", group_name=direction, command=cmd, outputs=[output_vcf])
 
 
 def _write_harmonized_variant_summary(ctx: RunContext) -> Path | None:
@@ -1364,6 +1319,7 @@ def _write_harmonized_variant_summary(ctx: RunContext) -> Path | None:
     group_a, group_b = ctx.selected_groups
     group_a_label = _sample_name(str(ctx.params["medaka_sample_name_template"]), ctx.sample_id, group_a)
     group_b_label = _sample_name(str(ctx.params["medaka_sample_name_template"]), ctx.sample_id, group_b)
+    include_all_tr_candidates = True
     output_path = ctx.run_root / "harmonized_variants.tsv"
     stats = write_harmonized_variants(
         output=output_path,
@@ -1371,6 +1327,7 @@ def _write_harmonized_variant_summary(ctx: RunContext) -> Path | None:
         group_b_label=group_b_label,
         tr_bed=tr_bed,
         sv_bed=sv_bed,
+        include_all_tr_candidates=include_all_tr_candidates,
     )
     _write_json(
         ctx.run_root / "harmonized_variants_manifest.json",
@@ -1381,6 +1338,7 @@ def _write_harmonized_variant_summary(ctx: RunContext) -> Path | None:
             "group_b_label": group_b_label,
             "tr_bed_tsv": (str(tr_bed) if tr_bed is not None and tr_bed.exists() else ""),
             "sv_bed_tsv": (str(sv_bed) if sv_bed is not None and sv_bed.exists() else ""),
+            "include_all_tr_candidates": include_all_tr_candidates,
             "counts": stats,
         },
     )
@@ -1440,19 +1398,6 @@ def _execute_local(ctx: RunContext) -> None:
             if len(ctx.selected_groups) != 2:
                 raise ValueError("tdb_merge requires exactly two selected groups")
             _run_tdb_merge(ctx)
-        elif stage == "clairs":
-            # Run both directions: each group serves as tumor once
-            if len(ctx.selected_groups) != 2:
-                raise ValueError("clairs requires exactly two selected groups")
-            tumor_override = ctx.params.get("clairs_tumor_group")
-            if tumor_override:
-                # Called from a SLURM re-entry script specifying one direction
-                normal = next(g for g in ctx.selected_groups if g != tumor_override)
-                _run_clairs(ctx, tumor_override, normal)
-            else:
-                g0, g1 = ctx.selected_groups[0], ctx.selected_groups[1]
-                _run_clairs(ctx, g0, g1)
-                _run_clairs(ctx, g1, g0)
         else:
             raise ValueError(f"Unsupported stage: {stage}")
     _write_finalize_summary(ctx)
@@ -1466,7 +1411,6 @@ def _build_recursive_cli(
     ctx: RunContext,
     stage_list: str,
     groups: str | None = None,
-    clairs_tumor_group: str | None = None,
 ) -> list[str]:
     cmd = _python_entrypoint() + [
         "--deconv-dir",
@@ -1533,10 +1477,6 @@ def _build_recursive_cli(
         ctx.tool_paths["clair3"],
         "--clair3-platform",
         str(ctx.params["clair3_platform"]),
-        "--clairs-bin",
-        ctx.tool_paths["clairs"],
-        "--clairs-platform",
-        str(ctx.params["clairs_platform"]),
     ]
     if ctx.params.get("medaka_phasing"):
         cmd.extend(["--medaka-phasing", str(ctx.params["medaka_phasing"])])
@@ -1546,8 +1486,6 @@ def _build_recursive_cli(
         cmd.append("--tdb-create-force")
     if ctx.params.get("clair3_model_path"):
         cmd.extend(["--clair3-model-path", str(ctx.params["clair3_model_path"])])
-    if clairs_tumor_group:
-        cmd.extend(["--clairs-tumor-group", clairs_tumor_group])
     if groups:
         cmd.extend(["--groups", groups])
     if ctx.force:
@@ -1612,7 +1550,6 @@ def _render_slurm(ctx: RunContext) -> None:
         "modkit": ("pp_modkit", "12:00:00"),
         "collapse": ("pp_collapse", "02:00:00"),
         "tdb_merge": ("pp_tdbmerge", "04:00:00"),
-        "clairs": ("pp_clairs", "24:00:00"),
     }
 
     for stage in ctx.stages:
@@ -1654,26 +1591,6 @@ def _render_slurm(ctx: RunContext) -> None:
                 script_path=script_path, job_name=job_name, cpus=threads,
                 time_limit=time_limit, body_lines=body, array=None,
             )
-        elif stage == "clairs" and len(groups) == 2:
-            # Generate two scripts — one per direction
-            for tumor, normal in [(groups[0], groups[1]), (groups[1], groups[0])]:
-                t_tok = _sanitize_token(tumor)
-                n_tok = _sanitize_token(normal)
-                script_path = ctx.slurm_dir / f"clairs_{t_tok}_vs_{n_tok}.sbatch.sh"
-                body = [
-                    f"export PYTHONPATH={shlex.quote(str(REPO_ROOT / 'src'))}:${{PYTHONPATH:-}}",
-                    shlex.join(_build_recursive_cli(
-                        ctx, "clairs", ",".join(groups), clairs_tumor_group=tumor
-                    )),
-                ]
-                _write_slurm_script(
-                    script_path=script_path,
-                    job_name=f"pp_clairs_{t_tok}",
-                    cpus=threads,
-                    time_limit=time_limit,
-                    body_lines=body,
-                    array=None,
-                )
 
     _render_submit_script(ctx)
 
@@ -1713,8 +1630,7 @@ def _render_submit_script(ctx: RunContext) -> Path:
 
     # First-tier: independent jobs (only need BAMs)
     first_tier_stages = [s for s in ["sniffles", "clair3", "medaka", "modkit"] if s in stages_set]
-    # clairs runs twice (both directions), handled separately below
-    has_first_tier = bool(first_tier_stages) or "clairs" in stages_set
+    has_first_tier = bool(first_tier_stages)
     if has_first_tier:
         lines.append("# ---- Concurrent first-tier jobs (submit together, no upstream dependency) ---")
     for stage in first_tier_stages:
@@ -1723,15 +1639,6 @@ def _render_submit_script(ctx: RunContext) -> Path:
         script_name = f"{stage}.array.sbatch.sh" if stage in GROUP_SCOPED_STAGES else f"{stage}.sbatch.sh"
         lines.append(f'{var}=$(sbatch --parsable --partition="$PARTITION" $(_acct) "$D/{script_name}")')
         lines.append(f'echo "  Submitted {stage}: ${{{var}}}"')
-    if "clairs" in stages_set and len(groups) == 2:
-        for tumor, normal in [(groups[0], groups[1]), (groups[1], groups[0])]:
-            t_tok = _sanitize_token(tumor)
-            n_tok = _sanitize_token(normal)
-            var = f"CLAIRS_{t_tok.upper()}_VS_{n_tok.upper()}_JID"
-            jid_vars[f"clairs_{t_tok}_vs_{n_tok}"] = var
-            script_name = f"clairs_{t_tok}_vs_{n_tok}.sbatch.sh"
-            lines.append(f'{var}=$(sbatch --parsable --partition="$PARTITION" $(_acct) "$D/{script_name}")')
-            lines.append(f'echo "  Submitted clairs {tumor} vs {normal}: ${{{var}}}"')
     if has_first_tier:
         lines.append("")
 

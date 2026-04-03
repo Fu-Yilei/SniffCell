@@ -59,8 +59,3 @@ dependencies:
 #    https://github.com/HKU-BAL/Clair3#pre-trained-models
 #    Example: r1041_e82_400bps_sup_v500 for ONT R10.4.1 sup chemistry.
 #
-# 6. ClairS (somatic SNV caller - requires its own conda env)
-#    Follow installation at: https://github.com/HKU-BAL/ClairS
-#    Then pass via --clairs-bin /path/to/clairs_env/bin/run_clairs
-#    Platform strings: ont_r10_dorado_sup_5khz, ont_r10_dorado_sup_4khz,
-#                      hifi_revio, ilmn, etc.

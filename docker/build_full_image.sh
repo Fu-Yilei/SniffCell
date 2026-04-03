@@ -6,7 +6,6 @@ image_name="${1:-sniffcell:full}"
 required_vars=(
   KANPIG_URL
   MODKIT_URL
-  CLAIRS_URL
   CLAIR3_MODEL_URL
 )
 
@@ -26,8 +25,6 @@ exec docker build \
   --build-arg KANPIG_BIN_SUBPATH="${KANPIG_BIN_SUBPATH:-kanpig}" \
   --build-arg MODKIT_URL="${MODKIT_URL}" \
   --build-arg MODKIT_BIN_SUBPATH="${MODKIT_BIN_SUBPATH:-modkit}" \
-  --build-arg CLAIRS_URL="${CLAIRS_URL}" \
-  --build-arg CLAIRS_BIN_SUBPATH="${CLAIRS_BIN_SUBPATH:-run_clairs}" \
   --build-arg CLAIR3_MODEL_URL="${CLAIR3_MODEL_URL}" \
   --build-arg CLAIR3_MODEL_SUBDIR="${CLAIR3_MODEL_SUBDIR:-}" \
   .

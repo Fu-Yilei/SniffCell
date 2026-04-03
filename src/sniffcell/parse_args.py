@@ -102,13 +102,6 @@ def _build_discover_run_parent_parser() -> argparse.ArgumentParser:
     parser.add_argument("--clair3-bin", default=None, help="Optional run_clair3.sh executable path.")
     parser.add_argument("--clair3-platform", default="ont", help="Sequencing platform for Clair3 (e.g. ont, hifi). Default=ont.")
     parser.add_argument("--clair3-model-path", default=None, help="Path to Clair3 model directory. Required when running the clair3 stage.")
-    parser.add_argument("--clairs-bin", default=None, help="Optional run_clairs executable path.")
-    parser.add_argument(
-        "--clairs-platform",
-        default="ont_r10_dorado_sup_5khz",
-        help="Sequencing platform for ClairS. Default=ont_r10_dorado_sup_5khz.",
-    )
-    parser.add_argument("--clairs-tumor-group", default=None, help=argparse.SUPPRESS)
     return parser
 
 
