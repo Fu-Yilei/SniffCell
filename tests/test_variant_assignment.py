@@ -943,7 +943,7 @@ class TestParseArgs(unittest.TestCase):
             self.assertEqual(variant_df["group_b_read_names"].tolist(), [["uuidB"]])
             self.assertEqual(variant_df["supporting_reads"].tolist(), [["uuidA", "uuidB"]])
 
-    def test_write_harmonized_variants_filters_tr_rows_by_pass_flag(self):
+    def test_write_harmonized_variants_keeps_all_tr_candidates_by_default(self):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             tr_bed = root / "tr_changes.bed.tsv"
@@ -996,6 +996,61 @@ class TestParseArgs(unittest.TestCase):
             )
 
             out = pd.read_csv(output, sep="\t")
+            self.assertEqual(stats["tr_rows"], 2)
+            self.assertEqual(out["variant_id"].tolist(), ["tr_keep", "tr_drop"])
+
+    def test_write_harmonized_variants_can_filter_tr_rows_by_pass_flag(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            tr_bed = root / "tr_changes.bed.tsv"
+            output = root / "harmonized.tsv"
+            pd.DataFrame(
+                [
+                    {
+                        "chrom": "chr1",
+                        "start": 10,
+                        "end": 20,
+                        "trid": "tr_keep",
+                        "change_allele": "hap1",
+                        "change_type": "expansion",
+                        "change_group": "sample.A",
+                        "baseline_group": "sample.B",
+                        "n_change_reads": 3,
+                        "n_baseline_reads": 2,
+                        "change_length_bp": 30,
+                        "change_read_names": "[]",
+                        "baseline_read_names": "[]",
+                        "tr_pass_for_harmonized": True,
+                    },
+                    {
+                        "chrom": "chr1",
+                        "start": 30,
+                        "end": 40,
+                        "trid": "tr_drop",
+                        "change_allele": "hap1",
+                        "change_type": "expansion",
+                        "change_group": "sample.A",
+                        "baseline_group": "sample.B",
+                        "n_change_reads": 3,
+                        "n_baseline_reads": 2,
+                        "change_length_bp": 30,
+                        "change_read_names": "[]",
+                        "baseline_read_names": "[]",
+                        "tr_pass_for_harmonized": False,
+                    },
+                ]
+            ).to_csv(tr_bed, sep="\t", index=False)
+
+            stats = write_harmonized_variants(
+                output=output,
+                group_a_label="sample.A",
+                group_b_label="sample.B",
+                tr_bed=tr_bed,
+                sv_bed=None,
+                include_all_tr_candidates=False,
+            )
+
+            out = pd.read_csv(output, sep="\t")
             self.assertEqual(stats["tr_rows"], 1)
             self.assertEqual(out["variant_id"].tolist(), ["tr_keep"])
 
@@ -1035,6 +1090,49 @@ class TestParseArgs(unittest.TestCase):
             out = pd.read_csv(output, sep="\t")
             self.assertEqual(stats["tr_rows"], 1)
             self.assertEqual(out["variant_id"].tolist(), ["tr_legacy"])
+
+    def test_write_harmonized_variants_uses_tr_support_reads_only(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            tr_bed = root / "tr_changes.bed.tsv"
+            output = root / "harmonized.tsv"
+            pd.DataFrame(
+                [
+                    {
+                        "chrom": "chr2",
+                        "start": 50,
+                        "end": 70,
+                        "trid": "tr_support",
+                        "change_allele": "hap2",
+                        "change_type": "expansion",
+                        "change_group": "sample.A",
+                        "baseline_group": "sample.B",
+                        "n_change_reads": 5,
+                        "n_baseline_reads": 4,
+                        "n_change_support_reads": 2,
+                        "n_baseline_support_reads": 0,
+                        "change_length_bp": 44,
+                        "change_read_names": '["chg0","chg1","chg2","chg3","chg4"]',
+                        "baseline_read_names": '["base0","base1","base2","base3"]',
+                        "change_support_read_names": '["chg3","chg4"]',
+                        "baseline_support_read_names": "[]",
+                    }
+                ]
+            ).to_csv(tr_bed, sep="\t", index=False)
+
+            write_harmonized_variants(
+                output=output,
+                group_a_label="sample.A",
+                group_b_label="sample.B",
+                tr_bed=tr_bed,
+                sv_bed=None,
+            )
+
+            out = pd.read_csv(output, sep="\t")
+            self.assertEqual(int(out.loc[0, "group_a_alt_reads"]), 2)
+            self.assertEqual(int(out.loc[0, "group_b_alt_reads"]), 0)
+            self.assertEqual(out.loc[0, "group_a_read_names"], '["chg3","chg4"]')
+            self.assertEqual(out.loc[0, "group_b_read_names"], "[]")
 
     def test_svanno_main_uses_full_pipeline_when_reference_and_bed_are_present(self):
         args = SimpleNamespace(
@@ -1081,7 +1179,7 @@ class TestParseArgs(unittest.TestCase):
         self.assertAlmostEqual(args.min_overlap_pct, 0.8)
         self.assertEqual(args.overlap_filter_mode, "gradient")
         self.assertAlmostEqual(args.overlap_gradient_exponent, 0.5)
-        self.assertAlmostEqual(args.min_majority_pct, 1.0)
+        self.assertAlmostEqual(args.min_majority_pct, 0.8)
         self.assertFalse(args.include_unassigned)
         self.assertFalse(args.allow_hard_conflict)
         self.assertEqual(args.max_sv, 0)

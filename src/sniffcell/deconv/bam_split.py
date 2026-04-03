@@ -90,7 +90,7 @@ def _build_label_leaf_map(read_assignment_df: pd.DataFrame, *, _prepared: bool =
     if read_assignment_df.empty:
         return {}
 
-    assignment = read_assignment_df.copy() if _prepared else _prepare_read_assignment_df(read_assignment_df)
+    assignment = read_assignment_df if _prepared else _prepare_read_assignment_df(read_assignment_df)
     assignment_reset = _assignment_reset_index(assignment, read_col="readname")
     label_leaf_map = _build_group_leaf_sets(assignment_reset)
 
@@ -158,7 +158,7 @@ def _plan_requested_split_group_outputs(
     if "readname" not in read_summary_df.columns:
         raise ValueError("read_summary_df must contain a 'readname' column")
 
-    summary = read_summary_df.copy()
+    summary = read_summary_df.loc[:, [c for c in read_summary_df.columns if c in {"readname", "linked_leaf_celltypes", "linked_celltypes"}]].copy()
     if "linked_leaf_celltypes" not in summary.columns:
         summary["linked_leaf_celltypes"] = summary.get("linked_celltypes", "")
     summary["readname"] = summary["readname"].astype(str)
@@ -175,11 +175,16 @@ def _plan_requested_split_group_outputs(
     planned: list[dict[str, object]] = []
     for spec in split_specs:
         target_leaves = set(str(x) for x in spec["target_leaves"])
-        subset = summary.loc[
+        subset_index = summary.loc[
             summary["_linked_leaf_set"].map(lambda leaf_set: bool(leaf_set.intersection(target_leaves)))
             & summary["_matching_requested_group_count"].eq(1)
             & summary["_matching_requested_groups"].map(lambda groups: bool(groups) and groups[0] == str(spec["name"]))
-        ].copy()
+        , "readname"].astype(str)
+        subset = read_summary_df.loc[read_summary_df["readname"].astype(str).isin(set(subset_index))].copy()
+        linked_leaf_sets = summary.set_index("readname")["_linked_leaf_set"]
+        matching_groups = summary.set_index("readname")["_matching_requested_groups"]
+        subset["_linked_leaf_set"] = subset["readname"].astype(str).map(linked_leaf_sets)
+        subset["_matching_requested_groups"] = subset["readname"].astype(str).map(matching_groups)
         subset["requested_group"] = spec["name"]
         subset["requested_group_members"] = ",".join(str(x) for x in spec["members"])
         subset["requested_group_target_leaves"] = "|".join(sorted(target_leaves))
@@ -190,6 +195,7 @@ def _plan_requested_split_group_outputs(
         subset.drop(
             columns=["_linked_leaf_set", "_matching_requested_groups", "_matching_requested_group_count"],
             inplace=True,
+            errors="ignore",
         )
 
         updated = dict(spec)

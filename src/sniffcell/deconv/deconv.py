@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import json
 import logging
 import multiprocessing as mp
@@ -250,8 +251,8 @@ def _stream_ctdmr_classification(
     )
 
 
-def _prepare_read_assignment_df(read_assignment_df: pd.DataFrame) -> pd.DataFrame:
-    assignment = read_assignment_df.copy()
+def _prepare_read_assignment_df(read_assignment_df: pd.DataFrame, *, copy_df: bool = True) -> pd.DataFrame:
+    assignment = read_assignment_df.copy() if copy_df else read_assignment_df
     assignment.index = assignment.index.astype(str)
 
     if "code" not in assignment.columns:
@@ -342,13 +343,25 @@ def _build_read_summary(
     if read_assignment_df.empty:
         return pd.DataFrame(columns=cols)
 
-    assignment = read_assignment_df.copy() if _prepared else _prepare_read_assignment_df(read_assignment_df)
+    assignment = read_assignment_df if _prepared else _prepare_read_assignment_df(read_assignment_df)
     assignment_reset = _assignment_reset_index(assignment, read_col="readname")
-    group_leaf_sets = _build_group_leaf_sets(assignment_reset)
-
-    ar = assignment_reset.assign(code_token_str=assignment_reset["code_token"].astype(str))
-    # Capture original readname order so we can restore it at the end.
-    readname_order = ar["readname"].drop_duplicates().tolist()
+    minimal_cols = [
+        c for c in (
+            "readname",
+            "code_token",
+            "code_order",
+            "code",
+            "best_group",
+            "best_group_leaves",
+            "is_best_group",
+            "other_group",
+            "other_group_leaves",
+        )
+        if c in assignment_reset.columns
+    ]
+    ar = assignment_reset[minimal_cols].copy()
+    ar["code_token_str"] = ar["code_token"].astype(str)
+    group_leaf_sets = _build_group_leaf_sets(ar)
 
     # 1. code_counts string per readname (from raw ctDMR codes, for auditability)
     token_counts = (
@@ -372,6 +385,7 @@ def _build_read_summary(
     decode_key_cols = [c for c in ("code_order", "code", "code_token_str", "best_group",
                                     "best_group_leaves", "is_best_group") if c in ar.columns]
     rep_rows = ar.drop_duplicates(subset=["readname"], keep="first")[["readname"] + decode_key_cols].copy()
+    rep_rows["_read_order"] = range(len(rep_rows))
 
     # 4. Override code / code_token_str in rep_rows with the consensus code for non-mixed reads
     consensus_map = per_read.set_index("readname")[
@@ -444,7 +458,13 @@ def _build_read_summary(
     result.loc[mixed_mask, "linked_celltype_count"] = 0
     result.loc[mixed_mask, "linked_leaf_celltype_count"] = 0
 
-    result = result.set_index("readname").loc[readname_order].reset_index()
+    order_map = rep_rows[["readname", "_read_order"]]
+    result = (
+        result.merge(order_map, on="readname", how="left")
+        .sort_values("_read_order", kind="stable")
+        .drop(columns="_read_order")
+        .reset_index(drop=True)
+    )
     return result[cols]
 
 
@@ -497,7 +517,7 @@ def _build_deconv_summary(
             columns=cols,
         )
 
-    assignment = read_assignment_df.copy() if _prepared else _prepare_read_assignment_df(read_assignment_df)
+    assignment = read_assignment_df if _prepared else _prepare_read_assignment_df(read_assignment_df)
     evidence = _assignment_reset_index(assignment, read_col="read")
     evidence["sample_id"] = "sample"
 
@@ -577,8 +597,7 @@ def _write_group_split_reads(read_assignment_df: pd.DataFrame, output_dir: str) 
     if read_assignment_df.empty:
         return []
 
-    assignment = read_assignment_df.copy()
-    assignment_reset = _assignment_reset_index(assignment, read_col="readname")
+    assignment_reset = _assignment_reset_index(read_assignment_df, read_col="readname")
 
     written_paths: list[str] = []
     used_names: dict[str, str] = {}
@@ -668,7 +687,9 @@ def deconv_main(args):
             len(read_assign_df),
             int(read_assign_df.index.astype(str).nunique()),
         )
-        prepared_df = _prepare_read_assignment_df(read_assign_df)
+        prepared_df = _prepare_read_assignment_df(read_assign_df, copy_df=False)
+        del read_assign_df
+        gc.collect()
         # Always recompute the read summary so that parameter changes (e.g. per_read_min_agreement)
         # take effect without re-running the slow ctDMR scan phase.
         logger.info("Building per-read summary (recomputed from cached classification)...")
@@ -701,7 +722,9 @@ def deconv_main(args):
             len(read_assign_df),
             int(read_assign_df.index.astype(str).nunique()),
         )
-        prepared_df = _prepare_read_assignment_df(read_assign_df)
+        prepared_df = _prepare_read_assignment_df(read_assign_df, copy_df=False)
+        del read_assign_df
+        gc.collect()
 
         logger.info("Building per-read summary...")
         read_summary_df = _build_read_summary(
