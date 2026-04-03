@@ -3,6 +3,7 @@ import sys
 from sniffcell.anno import anno
 from sniffcell.discover import envcheck as discover_envcheck
 from sniffcell.discover import harmonize_variants as discover_harmonize_variants
+from sniffcell.discover import snv_post_processing as discover_snv_post_processing
 from sniffcell.discover import sv_post_processing as discover_sv_post_processing
 from sniffcell.discover import tr_post_processing as discover_tr_post_processing
 from sniffcell.find import find
@@ -56,6 +57,8 @@ def main(argv=None):
                 raise ValueError(f"Unsupported discover tools command: {discover_tools_command}")
         elif discover_section == "ctprocessing":
             discover_ct_command = getattr(args, "discover_ctprocessing_command", None)
+            if discover_ct_command == "snv":
+                return discover_snv_post_processing.main(argv[3:])
             if discover_ct_command == "sv":
                 return discover_sv_post_processing.main(argv[3:])
             if discover_ct_command == "tr":

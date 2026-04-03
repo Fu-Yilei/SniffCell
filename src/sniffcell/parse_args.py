@@ -118,6 +118,7 @@ def _normalize_discover_argv(argv: list[str]) -> list[str]:
 def parse_args(argv):
     from sniffcell.discover.envcheck import _build_parser as _build_discover_envcheck_parser
     from sniffcell.discover.harmonize_variants import _build_arg_parser as _build_discover_harmonize_parser
+    from sniffcell.discover.snv_post_processing import _build_arg_parser as _build_discover_snv_post_parser
     from sniffcell.discover.sv_post_processing import _build_arg_parser as _build_discover_sv_post_parser
     from sniffcell.discover.tr_post_processing import _build_arg_parser as _build_discover_tr_post_parser
     from sniffcell.sv_discovery import build_parser as _build_discover_sv_discovery_parser
@@ -815,6 +816,11 @@ def parse_args(argv):
         help="Run discover cell-type post-processing utilities.",
     )
     discover_ctprocessing_subparsers = discover_ctprocessing_parser.add_subparsers(dest="discover_ctprocessing_command")
+    discover_ctprocessing_snv_parser = discover_ctprocessing_subparsers.add_parser(
+        "snv",
+        help="Run SNP post-processing on two Clair3 gVCF groups.",
+        parents=[_build_discover_snv_post_parser(prog="sniffcell discover ctprocessing snv", add_help=False)],
+    )
     discover_ctprocessing_sv_parser = discover_ctprocessing_subparsers.add_parser(
         "sv",
         help="Run SV post-processing on two split groups.",
@@ -886,6 +892,9 @@ def parse_args(argv):
         sys.exit(1)
     elif len(argv) == 3 and argv[:3] == ["discover", "ctprocessing", "sv"]:
         discover_ctprocessing_sv_parser.print_help(sys.stderr)
+        sys.exit(1)
+    elif len(argv) == 3 and argv[:3] == ["discover", "ctprocessing", "snv"]:
+        discover_ctprocessing_snv_parser.print_help(sys.stderr)
         sys.exit(1)
     elif len(argv) == 3 and argv[:3] == ["discover", "ctprocessing", "tr"]:
         discover_ctprocessing_tr_parser.print_help(sys.stderr)

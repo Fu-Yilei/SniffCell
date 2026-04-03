@@ -192,6 +192,7 @@ Path(str(target) + ".tbi").write_text("tbi\\n", encoding="utf-8")
         tool_dir / "run_clair3.sh",
         """
 import sys
+import gzip
 from pathlib import Path
 args = sys.argv[1:]
 output_dir = None
@@ -201,9 +202,32 @@ for arg in args:
         break
 if output_dir is None:
     raise SystemExit("missing --output")
-output = output_dir / "merge_output.vcf.gz"
-output.parent.mkdir(parents=True, exist_ok=True)
-output.write_text("##fileformat=VCFv4.2\\n", encoding="utf-8")
+output_dir.mkdir(parents=True, exist_ok=True)
+merge_output = output_dir / "merge_output.vcf.gz"
+pileup_output = output_dir / "pileup.vcf.gz"
+group_name = output_dir.name
+
+if group_name == "Neuron":
+    records = [
+        "chr1\\t10\\t.\\tA\\tG\\t60\\tPASS\\tP\\tGT:GQ:DP:AF\\t0/1:30:8:0.5",
+        "chr1\\t20\\t.\\tC\\t.\\t20\\tRefCall\\tP\\tGT:GQ:DP:AF\\t0/0:20:8:0",
+    ]
+else:
+    records = [
+        "chr1\\t10\\t.\\tA\\t.\\t20\\tRefCall\\tP\\tGT:GQ:DP:AF\\t0/0:20:9:0",
+        "chr1\\t20\\t.\\tC\\tT\\t60\\tPASS\\tP\\tGT:GQ:DP:AF\\t0/1:30:9:0.5",
+    ]
+
+for path in (merge_output, pileup_output):
+    with gzip.open(path, "wt", encoding="utf-8") as handle:
+        handle.write("##fileformat=VCFv4.2\\n")
+        handle.write("##FORMAT=<ID=GT,Number=1,Type=String,Description=\\"GT\\">\\n")
+        handle.write("##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\\"GQ\\">\\n")
+        handle.write("##FORMAT=<ID=DP,Number=1,Type=Integer,Description=\\"DP\\">\\n")
+        handle.write("##FORMAT=<ID=AF,Number=1,Type=Float,Description=\\"AF\\">\\n")
+        handle.write("#CHROM\\tPOS\\tID\\tREF\\tALT\\tQUAL\\tFILTER\\tINFO\\tFORMAT\\tSAMPLE\\n")
+        for record in records:
+            handle.write(record + "\\n")
 """,
     )
 
@@ -430,7 +454,21 @@ class TestDiscoverParseArgs(unittest.TestCase):
         self.assertEqual(args.command, "discover")
         self.assertEqual(args.discover_section, "tools")
         self.assertEqual(args.discover_tools_command, "run")
-        self.assertEqual(args.threads, 32)
+
+    def test_discover_ctprocessing_snv_accepts_arguments(self):
+        args = parse_args([
+            "discover",
+            "ctprocessing",
+            "snv",
+            "--split-dir", "/tmp/split",
+            "--groups", "A,B",
+            "--group-a-gvcf", "/tmp/a.vcf.gz",
+            "--group-b-gvcf", "/tmp/b.vcf.gz",
+        ])
+        self.assertEqual(args.command, "discover")
+        self.assertEqual(args.discover_section, "ctprocessing")
+        self.assertEqual(args.discover_ctprocessing_command, "snv")
+        self.assertEqual(args.min_dp, 5)
 
     def test_discover_tools_check_parses_envcheck_arguments(self):
         args = parse_args([
@@ -963,6 +1001,41 @@ class TestBuildRecursiveCli(unittest.TestCase):
             cmd_text = (ctx.commands_dir / "clair3.Neuron.command.txt").read_text()
             self.assertIn("--gvcf", cmd_text)
 
+    def test_force_rerun_clears_snv_post_processing_when_clair3_selected(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            deconv_dir, ref, tr_bed, tool_paths = _build_minimal_env(root)
+            args = parse_args(
+                _base_local_argv(deconv_dir, ref, tr_bed, tool_paths)
+                + ["--stages", "clair3", "--force"]
+            )
+            ctx = _build_context(args)
+            ctx.run_root.mkdir(parents=True, exist_ok=True)
+            ctx.status_dir.mkdir(parents=True, exist_ok=True)
+            (ctx.status_dir / "clair3.Neuron.done.json").write_text("{}", encoding="utf-8")
+            (ctx.status_dir / "clair3.Oligodendrocyte.done.json").write_text("{}", encoding="utf-8")
+            (ctx.status_dir / "snv_post_processing.done.json").write_text("{}", encoding="utf-8")
+            (ctx.status_dir / "discover_status.json").write_text(
+                json.dumps(
+                    {
+                        "clair3.Neuron": {"state": "completed"},
+                        "clair3.Oligodendrocyte": {"state": "completed"},
+                        "snv_post_processing": {"state": "completed"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            _clear_force_rerun_state(ctx)
+
+            status_payload = json.loads((ctx.status_dir / "discover_status.json").read_text(encoding="utf-8"))
+            self.assertNotIn("clair3.Neuron", status_payload)
+            self.assertNotIn("clair3.Oligodendrocyte", status_payload)
+            self.assertNotIn("snv_post_processing", status_payload)
+            self.assertFalse((ctx.status_dir / "clair3.Neuron.done.json").exists())
+            self.assertFalse((ctx.status_dir / "clair3.Oligodendrocyte.done.json").exists())
+            self.assertFalse((ctx.status_dir / "snv_post_processing.done.json").exists())
+
 
 # ---------------------------------------------------------------------------
 # SLURM script generation tests
@@ -1013,7 +1086,7 @@ class TestPostprocessContextAndSlurm(unittest.TestCase):
             args = parse_args(_base_slurm_argv(deconv_dir, ref, tr_bed, tool_paths))
             ctx = _build_context(args)
             _render_slurm(ctx)
-            for script_name in ("collapse.sbatch.sh", "tdb_merge.sbatch.sh"):
+            for script_name in ("collapse.sbatch.sh", "tdb_merge.sbatch.sh", "snv_post_processing.sbatch.sh"):
                 self.assertTrue(
                     (ctx.slurm_dir / script_name).exists(),
                     f"Missing SLURM script: {script_name}",
@@ -1030,6 +1103,7 @@ class TestPostprocessContextAndSlurm(unittest.TestCase):
             # First-tier independent jobs
             self.assertIn("SNIFFLES_JID", submit_text)
             self.assertIn("CLAIR3_JID", submit_text)
+            self.assertIn("SNV_POST_PROCESSING_JID", submit_text)
             self.assertIn("MEDAKA_JID", submit_text)
             self.assertIn("MODKIT_JID", submit_text)
 
@@ -1818,6 +1892,7 @@ class TestPostprocessLocalIntegration(unittest.TestCase):
                 self.assertTrue((run_root / "medaka_tandem" / "tdb" / f"{group}.tdb").exists())
                 self.assertTrue((run_root / "modkit" / group / f"{group}.cpg.bedmethyl.gz").exists())
                 self.assertTrue((run_root / "snv" / "clair3" / group / "merge_output.vcf.gz").exists())
+                self.assertTrue((run_root / "snv" / "clair3" / group / "pileup.vcf.gz").exists())
 
             self.assertTrue(
                 (run_root / "sv" / "truvari_collapse" / "Neuron_vs_Oligodendrocyte" / "collapsed.sorted.vcf.gz").exists()
@@ -1834,6 +1909,9 @@ class TestPostprocessLocalIntegration(unittest.TestCase):
             self.assertTrue(
                 (run_root / "sv" / "sv_post_processing" / "Neuron_vs_Oligodendrocyte" / "summary.json").exists()
             )
+            self.assertTrue(
+                (run_root / "snv" / "snv_post_processing" / "Neuron_vs_Oligodendrocyte" / "summary.json").exists()
+            )
             sv_summary = json.loads(
                 (
                     run_root
@@ -1844,6 +1922,17 @@ class TestPostprocessLocalIntegration(unittest.TestCase):
                 ).read_text(encoding="utf-8")
             )
             self.assertTrue(sv_summary["params"]["apply_mosaic_filter"])
+            snv_summary = json.loads(
+                (
+                    run_root
+                    / "snv"
+                    / "snv_post_processing"
+                    / "Neuron_vs_Oligodendrocyte"
+                    / "summary.json"
+                ).read_text(encoding="utf-8")
+            )
+            self.assertEqual(snv_summary["group_a_only_count"], 1)
+            self.assertEqual(snv_summary["group_b_only_count"], 1)
             self.assertTrue((run_root / "harmonized_variants.tsv").exists())
             self.assertTrue((run_root / "harmonized_variants_manifest.json").exists())
 

@@ -24,6 +24,8 @@ DEFAULT_MOSAIC_FILTER_EXPR = "INFO/MOSAIC=1"
 DEFAULT_SV_POST_MIN_DP = 5
 DEFAULT_SV_POST_MIN_TARGET_ALT_AD = 2
 DEFAULT_SV_POST_OTHER_MAX_ALT_AD = 0
+DEFAULT_SNV_POST_MIN_DP = 5
+DEFAULT_SNV_POST_MIN_GQ = 0
 DEFAULT_STAGE_ORDER = (
     "sniffles",
     "sniffles_filter",
@@ -520,6 +522,12 @@ def _tr_post_stage_dir(ctx: RunContext) -> Path:
     )
 
 
+def _snv_post_stage_dir(ctx: RunContext) -> Path:
+    return ctx.run_root / "snv" / "snv_post_processing" / (
+        f"{_sanitize_token(ctx.selected_groups[0])}_vs_{_sanitize_token(ctx.selected_groups[1])}"
+    )
+
+
 def _modkit_stage_dir(ctx: RunContext, group_name: str) -> Path:
     return ctx.run_root / "modkit" / _sanitize_token(group_name)
 
@@ -534,6 +542,14 @@ def _existing_split_sniffles_vcf(ctx: RunContext, group_name: str) -> Path:
 
 def _existing_split_medaka_vcf(ctx: RunContext, group_name: str) -> Path:
     return ctx.split_dir / "medaka_tandem" / f"{group_name}.medaka" / "medaka_to_ref.TR.vcf"
+
+
+def _clair3_merge_output_path(ctx: RunContext, group_name: str) -> Path:
+    return _clair3_stage_dir(ctx, group_name) / "merge_output.vcf.gz"
+
+
+def _clair3_pileup_output_path(ctx: RunContext, group_name: str) -> Path:
+    return _clair3_stage_dir(ctx, group_name) / "pileup.vcf.gz"
 
 
 def _sniffles_output_paths(ctx: RunContext, group_name: str) -> tuple[Path, Path]:
@@ -645,6 +661,8 @@ def _selected_task_specs(ctx: RunContext) -> list[tuple[str, str | None]]:
     for stage in ctx.stages:
         if stage in GROUP_SCOPED_STAGES:
             specs.extend((stage, group_name) for group_name in ctx.selected_groups)
+            if stage == "clair3" and len(ctx.selected_groups) == 2:
+                specs.append(("snv_post_processing", None))
             continue
         if stage == "collapse":
             specs.extend(
@@ -1242,6 +1260,45 @@ def _run_tr_post_processing(ctx: RunContext) -> None:
     )
 
 
+def _run_snv_post_processing(ctx: RunContext) -> None:
+    if len(ctx.selected_groups) != 2:
+        raise ValueError("snv_post_processing requires exactly two selected groups")
+    group_a, group_b = ctx.selected_groups
+    group_a_gvcf = _clair3_pileup_output_path(ctx, group_a)
+    group_b_gvcf = _clair3_pileup_output_path(ctx, group_b)
+    if not ctx.dry_run:
+        _require_paths([group_a_gvcf, group_b_gvcf])
+    output_dir = _snv_post_stage_dir(ctx)
+    summary_path = output_dir / "summary.json"
+    cmd = [
+        sys.executable,
+        "-m",
+        "sniffcell.discover.snv_post_processing",
+        "--split-dir",
+        str(ctx.split_dir),
+        "--groups",
+        ",".join(ctx.selected_groups),
+        "--group-a-gvcf",
+        str(group_a_gvcf),
+        "--group-b-gvcf",
+        str(group_b_gvcf),
+        "--output-dir",
+        str(output_dir),
+        "--sample-id",
+        ctx.sample_id,
+        "--min-dp",
+        str(DEFAULT_SNV_POST_MIN_DP),
+        "--min-gq",
+        str(DEFAULT_SNV_POST_MIN_GQ),
+    ]
+    _run_task(
+        ctx=ctx,
+        stage="snv_post_processing",
+        command=cmd,
+        outputs=[summary_path],
+    )
+
+
 def _run_modkit(ctx: RunContext, group_name: str) -> None:
     group = _group_lookup(ctx, group_name)
     stage_dir = _modkit_stage_dir(ctx, group_name)
@@ -1276,7 +1333,8 @@ def _run_clair3(ctx: RunContext, group_name: str) -> None:
     group = _group_lookup(ctx, group_name)
     stage_dir = _clair3_stage_dir(ctx, group_name)
     stage_dir.mkdir(parents=True, exist_ok=True)
-    output_vcf = stage_dir / "merge_output.vcf.gz"
+    output_vcf = _clair3_merge_output_path(ctx, group_name)
+    pileup_vcf = _clair3_pileup_output_path(ctx, group_name)
     model_path = ctx.params.get("clair3_model_path")
     if not model_path and not ctx.dry_run:
         raise ValueError(
@@ -1295,7 +1353,7 @@ def _run_clair3(ctx: RunContext, group_name: str) -> None:
         # "--include_all_ctgs",
         # "--remove_intermediate_dir",
     ]
-    _run_task(ctx=ctx, stage="clair3", group_name=group_name, command=cmd, outputs=[output_vcf])
+    _run_task(ctx=ctx, stage="clair3", group_name=group_name, command=cmd, outputs=[output_vcf, pileup_vcf])
 
 
 def _write_harmonized_variant_summary(ctx: RunContext) -> Path | None:
@@ -1390,6 +1448,8 @@ def _execute_local(ctx: RunContext) -> None:
         if stage in GROUP_SCOPED_STAGES:
             for group_name in ctx.selected_groups:
                 stage_handlers[stage](ctx, group_name)
+            if stage == "clair3" and len(ctx.selected_groups) == 2:
+                _run_snv_post_processing(ctx)
         elif stage == "collapse":
             if len(ctx.selected_groups) != 2:
                 raise ValueError("collapse requires exactly two selected groups")
@@ -1547,6 +1607,7 @@ def _render_slurm(ctx: RunContext) -> None:
         "medaka": ("pp_medaka", "24:00:00"),
         "tdb_create": ("pp_tdbc", "04:00:00"),
         "clair3": ("pp_clair3", "24:00:00"),
+        "snv_post_processing": ("pp_snvpost", "04:00:00"),
         "modkit": ("pp_modkit", "12:00:00"),
         "collapse": ("pp_collapse", "02:00:00"),
         "tdb_merge": ("pp_tdbmerge", "04:00:00"),
@@ -1571,6 +1632,7 @@ def _render_slurm(ctx: RunContext) -> None:
                 body_lines=body,
                 array=f"1-{len(groups)}",
             )
+            continue
         elif stage == "collapse" and len(groups) == 2:
             script_path = ctx.slurm_dir / "collapse.sbatch.sh"
             body = [
@@ -1591,6 +1653,46 @@ def _render_slurm(ctx: RunContext) -> None:
                 script_path=script_path, job_name=job_name, cpus=threads,
                 time_limit=time_limit, body_lines=body, array=None,
             )
+
+    if "clair3" in ctx.stages and len(groups) == 2:
+        script_path = ctx.slurm_dir / "snv_post_processing.sbatch.sh"
+        body = [
+            f"export PYTHONPATH={shlex.quote(str(REPO_ROOT / 'src'))}:${{PYTHONPATH:-}}",
+            shlex.join(
+                [
+                    sys.executable,
+                    "-m",
+                    "sniffcell.main",
+                    "discover",
+                    "ctprocessing",
+                    "snv",
+                    "--split-dir",
+                    str(ctx.split_dir),
+                    "--groups",
+                    ",".join(groups),
+                    "--group-a-gvcf",
+                    str(_clair3_pileup_output_path(ctx, groups[0])),
+                    "--group-b-gvcf",
+                    str(_clair3_pileup_output_path(ctx, groups[1])),
+                    "--output-dir",
+                    str(_snv_post_stage_dir(ctx)),
+                    "--sample-id",
+                    ctx.sample_id,
+                    "--min-dp",
+                    str(DEFAULT_SNV_POST_MIN_DP),
+                    "--min-gq",
+                    str(DEFAULT_SNV_POST_MIN_GQ),
+                ]
+            ),
+        ]
+        _write_slurm_script(
+            script_path=script_path,
+            job_name="pp_snvpost",
+            cpus=threads,
+            time_limit=stage_time_map["snv_post_processing"][1],
+            body_lines=body,
+            array=None,
+        )
 
     _render_submit_script(ctx)
 
@@ -1643,16 +1745,19 @@ def _render_submit_script(ctx: RunContext) -> Path:
         lines.append("")
 
     # Dependent chain
-    dep_chain = [
+    dep_chain = []
+    if "clair3" in stages_set and len(groups) == 2:
+        dep_chain.append(("snv_post_processing", "clair3"))
+    dep_chain.extend([
         ("sniffles_filter", "sniffles"),
         ("kanpig", "sniffles_filter"),
         ("collapse", "kanpig"),
         ("tdb_create", "medaka"),
         ("tdb_merge", "tdb_create"),
-    ]
+    ])
     dep_section_started = False
     for stage, dep_stage in dep_chain:
-        if stage not in stages_set:
+        if stage not in stages_set and not (stage == "snv_post_processing" and "clair3" in stages_set and len(groups) == 2):
             continue
         if not dep_section_started:
             lines.append("# ---- Dependent stages -------------------------------------------------------")
