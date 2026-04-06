@@ -210,11 +210,11 @@ group_name = output_dir.name
 if group_name == "Neuron":
     records = [
         "chr1\\t10\\t.\\tA\\tG\\t60\\tPASS\\tP\\tGT:GQ:DP:AD:AF\\t0/1:30:8:4,4:0.5",
-        "chr1\\t20\\t.\\tC\\t.\\t20\\tRefCall\\tP\\tGT:GQ:DP:AD:AF\\t0/0:20:8:8:0",
+        "chr1\\t20\\t.\\tC\\t.\\t20\\tRefCall\\tP\\tGT:GQ:DP:AD:AF\\t0/0:20:18:18:1.0",
     ]
 else:
     records = [
-        "chr1\\t10\\t.\\tA\\t.\\t20\\tRefCall\\tP\\tGT:GQ:DP:AD:AF\\t0/0:20:9:9:0",
+        "chr1\\t10\\t.\\tA\\t.\\t20\\tRefCall\\tP\\tGT:GQ:DP:AD:AF\\t0/0:20:19:19:1.0",
         "chr1\\t20\\t.\\tC\\tT\\t60\\tPASS\\tP\\tGT:GQ:DP:AD:AF\\t0/1:30:9:4,5:0.5",
     ]
 
