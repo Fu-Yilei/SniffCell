@@ -152,10 +152,10 @@ def parse_args(argv):
     find_parser.add_argument("-ck", "--celltypes_keys", required=True, help="keys for major cell types in the cell type json file")
     find_parser.add_argument("-o", "--output", required=True, help="Output BED files for cell type DMRs")
 
-    find_parser.add_argument( "--diff_threshold", type=float, default=0.40, help="Minimum difference threshold for calling DMRs, default=0.40" )
+    find_parser.add_argument( "--diff_threshold", type=float, default=0.35, help="Minimum difference threshold for calling DMRs, default=0.35" )
     find_parser.add_argument( "--min_rows", type=int, default=2, help="Minimum number of rows (CpG groups in index) for calling DMRs, default=2")
     find_parser.add_argument( "--min_cpgs", type=int, default=3, help="Minimum number of CpGs for calling DMRs, default=3" )
-    find_parser.add_argument( "--max_gap_bp", type=int, default=500, help="Maximum gap among groups for calling DMRs, default=500" )
+    find_parser.add_argument( "--max_gap_bp", type=int, default=2000, help="Maximum gap among groups for calling DMRs, default=2000" )
 
 
     # Subcommand: deconv

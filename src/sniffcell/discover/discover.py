@@ -25,7 +25,10 @@ DEFAULT_SV_POST_MIN_DP = 5
 DEFAULT_SV_POST_MIN_TARGET_ALT_AD = 2
 DEFAULT_SV_POST_OTHER_MAX_ALT_AD = 0
 DEFAULT_SNV_POST_MIN_DP = 5
-DEFAULT_SNV_POST_MIN_GQ = 0
+DEFAULT_SNV_POST_MAX_DP = 50
+DEFAULT_SNV_POST_MIN_DP_ABSENCE = 15
+DEFAULT_SNV_POST_MIN_GQ = 21
+DEFAULT_SNV_POST_MIN_OTHER_AF = 0.9
 DEFAULT_STAGE_ORDER = (
     "sniffles",
     "sniffles_filter",
@@ -1288,8 +1291,14 @@ def _run_snv_post_processing(ctx: RunContext) -> None:
         ctx.sample_id,
         "--min-dp",
         str(DEFAULT_SNV_POST_MIN_DP),
+        "--max-dp",
+        str(DEFAULT_SNV_POST_MAX_DP),
+        "--min-dp-absence",
+        str(DEFAULT_SNV_POST_MIN_DP_ABSENCE),
         "--min-gq",
         str(DEFAULT_SNV_POST_MIN_GQ),
+        "--min-other-af",
+        str(DEFAULT_SNV_POST_MIN_OTHER_AF),
     ]
     _run_task(
         ctx=ctx,
@@ -1680,8 +1689,14 @@ def _render_slurm(ctx: RunContext) -> None:
                     ctx.sample_id,
                     "--min-dp",
                     str(DEFAULT_SNV_POST_MIN_DP),
+                    "--max-dp",
+                    str(DEFAULT_SNV_POST_MAX_DP),
+                    "--min-dp-absence",
+                    str(DEFAULT_SNV_POST_MIN_DP_ABSENCE),
                     "--min-gq",
                     str(DEFAULT_SNV_POST_MIN_GQ),
+                    "--min-other-af",
+                    str(DEFAULT_SNV_POST_MIN_OTHER_AF),
                 ]
             ),
         ]

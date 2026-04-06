@@ -209,13 +209,13 @@ group_name = output_dir.name
 
 if group_name == "Neuron":
     records = [
-        "chr1\\t10\\t.\\tA\\tG\\t60\\tPASS\\tP\\tGT:GQ:DP:AF\\t0/1:30:8:0.5",
-        "chr1\\t20\\t.\\tC\\t.\\t20\\tRefCall\\tP\\tGT:GQ:DP:AF\\t0/0:20:8:0",
+        "chr1\\t10\\t.\\tA\\tG\\t60\\tPASS\\tP\\tGT:GQ:DP:AD:AF\\t0/1:30:8:4,4:0.5",
+        "chr1\\t20\\t.\\tC\\t.\\t20\\tRefCall\\tP\\tGT:GQ:DP:AD:AF\\t0/0:20:8:8:0",
     ]
 else:
     records = [
-        "chr1\\t10\\t.\\tA\\t.\\t20\\tRefCall\\tP\\tGT:GQ:DP:AF\\t0/0:20:9:0",
-        "chr1\\t20\\t.\\tC\\tT\\t60\\tPASS\\tP\\tGT:GQ:DP:AF\\t0/1:30:9:0.5",
+        "chr1\\t10\\t.\\tA\\t.\\t20\\tRefCall\\tP\\tGT:GQ:DP:AD:AF\\t0/0:20:9:9:0",
+        "chr1\\t20\\t.\\tC\\tT\\t60\\tPASS\\tP\\tGT:GQ:DP:AD:AF\\t0/1:30:9:4,5:0.5",
     ]
 
 for path in (merge_output, pileup_output):
@@ -224,6 +224,7 @@ for path in (merge_output, pileup_output):
         handle.write("##FORMAT=<ID=GT,Number=1,Type=String,Description=\\"GT\\">\\n")
         handle.write("##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\\"GQ\\">\\n")
         handle.write("##FORMAT=<ID=DP,Number=1,Type=Integer,Description=\\"DP\\">\\n")
+        handle.write("##FORMAT=<ID=AD,Number=R,Type=Integer,Description=\\"AD\\">\\n")
         handle.write("##FORMAT=<ID=AF,Number=1,Type=Float,Description=\\"AF\\">\\n")
         handle.write("#CHROM\\tPOS\\tID\\tREF\\tALT\\tQUAL\\tFILTER\\tINFO\\tFORMAT\\tSAMPLE\\n")
         for record in records:
