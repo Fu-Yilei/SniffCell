@@ -130,6 +130,59 @@ def _load_sv_rows(sv_bed: Path) -> list[dict[str, Any]]:
     return rows
 
 
+def _load_snv_rows(
+    snv_tsv: Path | None,
+    group_a_label: str,
+    group_b_label: str,
+    *,
+    include_all_snv_candidates: bool,
+) -> list[dict[str, Any]]:
+    """Convert snv_changes.tsv rows to the harmonized schema.
+
+    Read names are read from the group_a/b_read_names columns written by
+    snv_post_processing (populated via BAM pileup there).  Falls back to
+    empty ``[]`` if those columns are absent (e.g. older runs).
+    """
+    rows: list[dict[str, Any]] = []
+    if snv_tsv is None or not snv_tsv.exists():
+        return rows
+    for r in _read_tsv(snv_tsv):
+        if not include_all_snv_candidates:
+            pass_flag = r.get("snv_pass_for_harmonized", "").strip().lower()
+            if pass_flag not in {"true", "1", "yes"}:
+                continue
+        direction = r.get("direction", "")
+        chrom = r["chrom"]
+        pos = int(r["pos"])
+        ref = r.get("ref", ".")
+        alt = r.get("alt", ".")
+        alt_ad = r.get("target_alt_ad", "0")
+        if direction == "group_a_only":
+            category = "group_a_only"
+            a_alt, b_alt = alt_ad, "0"
+        elif direction == "group_b_only":
+            category = "group_b_only"
+            a_alt, b_alt = "0", alt_ad
+        else:
+            category = direction
+            a_alt = b_alt = "0"
+        rows.append({
+            "chrom": chrom,
+            "start": pos - 1,
+            "end": pos,
+            "variant_class": "SNV",
+            "variant_id": f"{chrom}:{pos}:{ref}>{alt}",
+            "variant_subtype": f"{ref}>{alt}",
+            "category": category,
+            "change_size_bp": 1,
+            "group_a_alt_reads": a_alt,
+            "group_b_alt_reads": b_alt,
+            "group_a_read_names": r.get("group_a_read_names", "[]") or "[]",
+            "group_b_read_names": r.get("group_b_read_names", "[]") or "[]",
+        })
+    return rows
+
+
 _CHROM_ORDER: dict[str, int] = {f"chr{i}": i for i in range(1, 23)}
 _CHROM_ORDER.update({"chrX": 23, "chrY": 24, "chrM": 25, "chrMT": 25})
 
@@ -147,7 +200,9 @@ def write_harmonized_variants(
     group_b_label: str,
     tr_bed: Path | None = None,
     sv_bed: Path | None = None,
+    snv_tsv: Path | None = None,
     include_all_tr_candidates: bool = True,
+    include_all_snv_candidates: bool = False,
 ) -> dict[str, int]:
     tr_rows = _load_tr_rows(
         tr_bed,
@@ -156,8 +211,14 @@ def write_harmonized_variants(
         include_all_tr_candidates=include_all_tr_candidates,
     )
     sv_rows = _load_sv_rows(sv_bed) if sv_bed is not None else []
+    snv_rows = _load_snv_rows(
+        snv_tsv,
+        group_a_label,
+        group_b_label,
+        include_all_snv_candidates=include_all_snv_candidates,
+    )
 
-    all_rows = tr_rows + sv_rows
+    all_rows = tr_rows + sv_rows + snv_rows
     all_rows.sort(key=_sort_key)
 
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -171,6 +232,7 @@ def write_harmonized_variants(
         "total_rows": len(all_rows),
         "tr_rows": len(tr_rows),
         "sv_rows": len(sv_rows),
+        "snv_rows": len(snv_rows),
     }
 
 
@@ -189,6 +251,7 @@ def _build_arg_parser(
     )
     parser.add_argument("--tr-bed", required=True, help="tr_changes.bed.tsv from tr_post_processing")
     parser.add_argument("--sv-bed", required=True, help="sv_changes.bed.tsv from sv_post_processing")
+    parser.add_argument("--snv-tsv", default=None, help="snv_changes.tsv from snv_post_processing (optional)")
     parser.add_argument(
         "--group-a-label", required=True,
         help="Sample label used for group A in the TR bed (values in the change_group / baseline_group columns)",
@@ -213,6 +276,7 @@ def harmonize_main(cli_args=None) -> None:
 
     tr_bed = Path(args.tr_bed)
     sv_bed = Path(args.sv_bed)
+    snv_tsv = Path(args.snv_tsv) if args.snv_tsv else None
     output = Path(args.output)
     stats = write_harmonized_variants(
         output=output,
@@ -220,12 +284,13 @@ def harmonize_main(cli_args=None) -> None:
         group_b_label=args.group_b_label,
         tr_bed=tr_bed,
         sv_bed=sv_bed,
+        snv_tsv=snv_tsv,
         include_all_tr_candidates=not args.passing_tr_only,
     )
 
     logging.info(
-        "Wrote %d rows (%d TR, %d SV) → %s",
-        stats["total_rows"], stats["tr_rows"], stats["sv_rows"], output,
+        "Wrote %d rows (%d TR, %d SV, %d SNV) → %s",
+        stats["total_rows"], stats["tr_rows"], stats["sv_rows"], stats["snv_rows"], output,
     )
 
 

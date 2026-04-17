@@ -135,7 +135,7 @@ def parse_args(argv):
         version=f"sniffcell {version}"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
-    valid_commands = ["find", "deconv", "anno", "svanno", "dmsv", "viz", "igvviz", "report", "discover"]
+    valid_commands = ["find", "deconv", "discover", "anno", "svanno", "dmsv", "viz", "igvviz", "report"]
     # Subcommand: find
     find_parser = subparsers.add_parser("find", help="Find cell type-specific DMRs.")
     atlas_dir = os.path.abspath("atlas")
@@ -156,6 +156,59 @@ def parse_args(argv):
     find_parser.add_argument( "--min_rows", type=int, default=2, help="Minimum number of rows (CpG groups in index) for calling DMRs, default=2")
     find_parser.add_argument( "--min_cpgs", type=int, default=3, help="Minimum number of CpGs for calling DMRs, default=3" )
     find_parser.add_argument( "--max_gap_bp", type=int, default=2000, help="Maximum gap among groups for calling DMRs, default=2000" )
+
+    discover_parser = subparsers.add_parser(
+        "discover",
+        help="Postprocess deconv split BAM outputs with SV, TR, and methylation workflows.",
+    )
+    discover_subparsers = discover_parser.add_subparsers(dest="discover_section")
+
+    discover_tools_parser = discover_subparsers.add_parser(
+        "tools",
+        help="Run discover tool-facing commands.",
+    )
+    discover_tools_subparsers = discover_tools_parser.add_subparsers(dest="discover_tools_command")
+    discover_tools_run_parser = discover_tools_subparsers.add_parser(
+        "run",
+        help="Run the main discover external-tool pipeline.",
+        parents=[_build_discover_run_parent_parser()],
+    )
+    discover_tools_sv_parser = discover_tools_subparsers.add_parser(
+        "sv",
+        help="Run standalone SV discovery before discover/anno.",
+        parents=[_build_discover_sv_discovery_parser(prog="sniffcell discover tools sv", add_help=False)],
+    )
+    discover_tools_check_parser = discover_tools_subparsers.add_parser(
+        "check",
+        help="Preflight-check discover external dependencies.",
+        parents=[_build_discover_envcheck_parser(prog="sniffcell discover tools check", add_help=False)],
+    )
+
+    discover_ctprocessing_parser = discover_subparsers.add_parser(
+        "ctprocessing",
+        help="Run discover cell-type post-processing utilities.",
+    )
+    discover_ctprocessing_subparsers = discover_ctprocessing_parser.add_subparsers(dest="discover_ctprocessing_command")
+    discover_ctprocessing_snv_parser = discover_ctprocessing_subparsers.add_parser(
+        "snv",
+        help="Run SNP post-processing on two Clair3 gVCF groups.",
+        parents=[_build_discover_snv_post_parser(prog="sniffcell discover ctprocessing snv", add_help=False)],
+    )
+    discover_ctprocessing_sv_parser = discover_ctprocessing_subparsers.add_parser(
+        "sv",
+        help="Run SV post-processing on two split groups.",
+        parents=[_build_discover_sv_post_parser(prog="sniffcell discover ctprocessing sv", add_help=False)],
+    )
+    discover_ctprocessing_tr_parser = discover_ctprocessing_subparsers.add_parser(
+        "tr",
+        help="Run tandem-repeat post-processing on two split groups.",
+        parents=[_build_discover_tr_post_parser(prog="sniffcell discover ctprocessing tr", add_help=False)],
+    )
+    discover_ctprocessing_harmonize_parser = discover_ctprocessing_subparsers.add_parser(
+        "harmonize",
+        help="Merge TR and SV post-processing outputs into a harmonized variant TSV.",
+        parents=[_build_discover_harmonize_parser(prog="sniffcell discover ctprocessing harmonize", add_help=False)],
+    )
 
 
     # Subcommand: deconv
@@ -194,6 +247,22 @@ def parse_args(argv):
             "Example: 't_cell,b_cell,nk_cell;monocyte' or 'lymph=t_cell,b_cell,nk_cell;myeloid=monocyte'. "
             "Labels are matched case-insensitively after punctuation normalization, and parent labels expand to their leaf subtypes."
         ),
+    )
+    deconv_parser.add_argument(
+        "--regions",
+        type=str,
+        default=None,
+        help=(
+            "Optional targeted region selector. Accepts either a BED file or a single chr:start-end region string. "
+            "When set, deconv restricts the ctDMR catalog to overlapping ctDMRs plus the nearest flank ctDMRs on each side, "
+            "and subsets the BAM to the resulting expanded interval(s) before classification."
+        ),
+    )
+    deconv_parser.add_argument(
+        "--regions-ctdmrs",
+        type=int,
+        default=10,
+        help="When --regions is set, include this many nearest ctDMRs on each side of each target. Default=10.",
     )
     deconv_parser.add_argument(
         "--resume",
@@ -243,7 +312,19 @@ def parse_args(argv):
     anno_parser.add_argument("-o", "--output", required=True, help="Output folder")
     anno_parser.add_argument( "-krn", "--kanpig_read_names", type=str, default=None, help="Read names TSV from kanpig output, will use Sniffles read names if not sepecified." )
     anno_parser.add_argument("-t", "--threads", type=int, default=1, help="Number of threads to use, default=1")
-    anno_parser.add_argument("-w", "--window", type=int, default=5000, help="Window size for filtering BED based on variants, default=5000")
+    anno_parser.add_argument("-w", "--window", type=int, default=10000, help="Window size for filtering BED based on variants, default=10000")
+    anno_parser.add_argument(
+        "--deconv-reads",
+        type=str,
+        default=None,
+        dest="deconv_reads",
+        help=(
+            "Path to deconv_reads_classification.tsv from a prior sniffcell deconv run. "
+            "When provided with a harmonized variant source, skips the BAM re-scan and uses "
+            "pre-computed read classifications from deconvolution. Requires --vcf to point to "
+            "a harmonized variants TSV. The BAM (--input) and BED (--bed) are not used."
+        ),
+    )
     anno_parser.add_argument(
         "--breakpoint_exclusion_frac",
         type=float,
@@ -783,60 +864,6 @@ def parse_args(argv):
             "Defaults to <anno_output>/report/."
         ),
     )
-
-    discover_parser = subparsers.add_parser(
-        "discover",
-        help="Postprocess deconv split BAM outputs with SV, TR, and methylation workflows.",
-    )
-    discover_subparsers = discover_parser.add_subparsers(dest="discover_section")
-
-    discover_tools_parser = discover_subparsers.add_parser(
-        "tools",
-        help="Run discover tool-facing commands.",
-    )
-    discover_tools_subparsers = discover_tools_parser.add_subparsers(dest="discover_tools_command")
-    discover_tools_run_parser = discover_tools_subparsers.add_parser(
-        "run",
-        help="Run the main discover external-tool pipeline.",
-        parents=[_build_discover_run_parent_parser()],
-    )
-    discover_tools_sv_parser = discover_tools_subparsers.add_parser(
-        "sv",
-        help="Run standalone SV discovery before discover/anno.",
-        parents=[_build_discover_sv_discovery_parser(prog="sniffcell discover tools sv", add_help=False)],
-    )
-    discover_tools_check_parser = discover_tools_subparsers.add_parser(
-        "check",
-        help="Preflight-check discover external dependencies.",
-        parents=[_build_discover_envcheck_parser(prog="sniffcell discover tools check", add_help=False)],
-    )
-
-    discover_ctprocessing_parser = discover_subparsers.add_parser(
-        "ctprocessing",
-        help="Run discover cell-type post-processing utilities.",
-    )
-    discover_ctprocessing_subparsers = discover_ctprocessing_parser.add_subparsers(dest="discover_ctprocessing_command")
-    discover_ctprocessing_snv_parser = discover_ctprocessing_subparsers.add_parser(
-        "snv",
-        help="Run SNP post-processing on two Clair3 gVCF groups.",
-        parents=[_build_discover_snv_post_parser(prog="sniffcell discover ctprocessing snv", add_help=False)],
-    )
-    discover_ctprocessing_sv_parser = discover_ctprocessing_subparsers.add_parser(
-        "sv",
-        help="Run SV post-processing on two split groups.",
-        parents=[_build_discover_sv_post_parser(prog="sniffcell discover ctprocessing sv", add_help=False)],
-    )
-    discover_ctprocessing_tr_parser = discover_ctprocessing_subparsers.add_parser(
-        "tr",
-        help="Run tandem-repeat post-processing on two split groups.",
-        parents=[_build_discover_tr_post_parser(prog="sniffcell discover ctprocessing tr", add_help=False)],
-    )
-    discover_ctprocessing_harmonize_parser = discover_ctprocessing_subparsers.add_parser(
-        "harmonize",
-        help="Merge TR and SV post-processing outputs into a harmonized variant TSV.",
-        parents=[_build_discover_harmonize_parser(prog="sniffcell discover ctprocessing harmonize", add_help=False)],
-    )
-
 
     top_level_passthrough = {"-h", "--help", "-v", "--version"}
 

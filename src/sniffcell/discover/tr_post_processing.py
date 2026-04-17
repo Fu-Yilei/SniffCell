@@ -1674,6 +1674,7 @@ def _classify_tr_row(row, *, require_sample_range_support: bool = True) -> tuple
         )
         return ("strong", False) if strong else ("supportive", False)
 
+    _no_cross_mix = change_cross is False and baseline_cross is False
     supportive = (
         change_type == "expansion"
         and change_length_bp is not None and change_length_bp >= 100.0
@@ -1682,9 +1683,37 @@ def _classify_tr_row(row, *, require_sample_range_support: bool = True) -> tuple
         and median_shift_bp is not None and median_shift_bp >= 50.0
         and other_hap_median_delta_bp is not None and other_hap_median_delta_bp <= 50.0
         and hp_changed_fraction is not None and hp_changed_fraction <= 0.15
-        and change_cross is False
-        and baseline_cross is False
+        and _no_cross_mix
     )
+    # Path A: moderate expansion with fewer reads/smaller shift, gated by pairing confidence.
+    # pairing_confidence == 0.0 means both haplotype orientations are equally plausible (no
+    # directional signal); every noise/artifact row in benchmarking had pairing_confidence=0.0
+    # while true positives had pairing_confidence >= 0.735.
+    if not supportive:
+        supportive = (
+            change_type == "expansion"
+            and change_length_bp is not None and change_length_bp >= 50.0
+            and n_change_reads is not None and n_change_reads >= 5.0
+            and n_baseline_reads is not None and n_baseline_reads >= 10.0
+            and median_shift_bp is not None and median_shift_bp >= 30.0
+            and other_hap_median_delta_bp is not None and other_hap_median_delta_bp <= 30.0
+            and hp_changed_fraction is not None and hp_changed_fraction == 0.0
+            and _no_cross_mix
+            and pairing_confidence is not None and pairing_confidence >= 0.05
+        )
+    # Path B: small confirmed expansion, very high pairing confidence required.
+    if not supportive:
+        supportive = (
+            change_type == "expansion"
+            and change_length_bp is not None and change_length_bp >= 15.0
+            and n_change_reads is not None and n_change_reads >= 8.0
+            and n_baseline_reads is not None and n_baseline_reads >= 10.0
+            and median_shift_bp is not None and median_shift_bp >= 15.0
+            and other_hap_median_delta_bp is not None and other_hap_median_delta_bp <= 20.0
+            and hp_changed_fraction is not None and hp_changed_fraction == 0.0
+            and _no_cross_mix
+            and pairing_confidence is not None and pairing_confidence >= 0.75
+        )
     if not supportive:
         return "weak", False
 

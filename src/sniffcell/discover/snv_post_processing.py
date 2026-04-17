@@ -3,11 +3,14 @@ from __future__ import annotations
 import argparse
 import csv
 import gzip
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Iterator, TextIO
+
+import pysam
 
 from sniffcell.discover.discover import (
     _expand_path,
@@ -15,6 +18,11 @@ from sniffcell.discover.discover import (
     _sanitize_token,
     _write_json,
 )
+
+
+_DEFAULT_HP_MIN_READS = 5
+_DEFAULT_HP_MIN_ALT_FRAC = 0.85
+_DEFAULT_HP_MAX_OTHER_FRAC = 0.15
 
 
 @dataclass(frozen=True)
@@ -213,6 +221,65 @@ def _compare_positions(left: PositionSummary, right: PositionSummary) -> int:
     return 0
 
 
+def _fetch_alt_read_names(
+    bam: pysam.AlignmentFile,
+    chrom: str,
+    pos: int,
+    alt: str,
+) -> list[str]:
+    """Return read names at 1-based *pos* that carry the *alt* base."""
+    names: list[str] = []
+    seen: set[str] = set()
+    try:
+        for col in bam.pileup(
+            chrom,
+            pos - 1,
+            pos,
+            truncate=True,
+            min_base_quality=0,
+            min_mapping_quality=0,
+            ignore_overlaps=False,
+            stepper="nofilter",
+        ):
+            if col.reference_pos != pos - 1:
+                continue
+            for pread in col.pileups:
+                if pread.is_del or pread.is_refskip:
+                    continue
+                aln = pread.alignment
+                if aln.is_secondary or aln.is_supplementary:
+                    continue
+                qseq = aln.query_sequence
+                if qseq is None:
+                    continue
+                base = qseq[pread.query_position]
+                if base == alt:
+                    name = aln.query_name
+                    if name and name not in seen:
+                        seen.add(name)
+                        names.append(name)
+    except (ValueError, KeyError):
+        pass
+    return names
+
+
+def _classify_snv_tier(alt_ad: int, dp: int) -> str:
+    """Assign a quality tier to an SNV call.
+
+    GQ from Clair3 on deconvolved BAMs is poorly calibrated (range 21-28 in
+    practice), so alt_ad and dp are the primary quality discriminators.
+
+    strong:     alt_ad >= 15 AND dp >= 25  — well-supported het call
+    supportive: alt_ad >= 8  AND dp >= 15  — moderate support
+    weak:       everything else that passed the basic SNV filters
+    """
+    if alt_ad >= 15 and dp >= 25:
+        return "strong"
+    if alt_ad >= 8 and dp >= 15:
+        return "supportive"
+    return "weak"
+
+
 def _merged_headers() -> list[str]:
     return [
         "direction",
@@ -232,6 +299,11 @@ def _merged_headers() -> list[str]:
         "other_dp",
         "other_alt_ad",
         "other_af",
+        "snv_tier",
+        "snv_pass_for_harmonized",
+        "germline_hp_filter",
+        "group_a_read_names",
+        "group_b_read_names",
     ]
 
 
@@ -243,6 +315,8 @@ def _row_from_match(
     target_call: CallRecord,
     other_call: CallRecord,
 ) -> dict[str, Any]:
+    alt_ad = _alt_read_count(target_call, target_call.alt)
+    tier = _classify_snv_tier(alt_ad, target_call.dp)
     return {
         "direction": direction,
         "chrom": target_call.chrom,
@@ -254,14 +328,174 @@ def _row_from_match(
         "target_gt": target_call.gt,
         "target_gq": target_call.gq,
         "target_dp": target_call.dp,
-        "target_alt_ad": _alt_read_count(target_call, target_call.alt),
+        "target_alt_ad": alt_ad,
         "target_af": target_call.af,
         "other_gt": other_call.gt,
         "other_gq": other_call.gq,
         "other_dp": other_call.dp,
         "other_alt_ad": _alt_read_count(other_call, target_call.alt),
         "other_af": other_call.af,
+        "snv_tier": tier,
+        "snv_pass_for_harmonized": tier != "weak",
+        "germline_hp_filter": False,
+        "group_a_read_names": "[]",
+        "group_b_read_names": "[]",
     }
+
+
+def _enrich_rows_with_read_names(
+    rows: list[dict[str, Any]],
+    *,
+    group_a_bam: Path,
+    group_b_bam: Path,
+) -> None:
+    """Populate group_a/b_read_names for passing rows via BAM pileup (in-place)."""
+    logger = logging.getLogger("snv_post_processing")
+    bam_a = pysam.AlignmentFile(str(group_a_bam), "rb")
+    bam_b = pysam.AlignmentFile(str(group_b_bam), "rb")
+    try:
+        for row in rows:
+            if not row.get("snv_pass_for_harmonized"):
+                continue
+            chrom = row["chrom"]
+            pos = int(row["pos"])
+            alt = row["alt"]
+            direction = row["direction"]
+            if direction == "group_a_only":
+                names = _fetch_alt_read_names(bam_a, chrom, pos, alt)
+                row["group_a_read_names"] = json.dumps(names)
+            elif direction == "group_b_only":
+                names = _fetch_alt_read_names(bam_b, chrom, pos, alt)
+                row["group_b_read_names"] = json.dumps(names)
+    finally:
+        bam_a.close()
+        bam_b.close()
+    logger.info("BAM pileup complete for %d candidate rows", len(rows))
+
+
+def _hp_allele_counts(
+    bam: pysam.AlignmentFile,
+    chrom: str,
+    pos: int,
+    ref: str,
+    alt: str,
+) -> dict[str, dict[str, int]]:
+    """Count REF and ALT reads at 1-based *pos* stratified by HP tag (1, 2, none)."""
+    counts: dict[str, dict[str, int]] = {
+        "1": {"ref": 0, "alt": 0},
+        "2": {"ref": 0, "alt": 0},
+        "none": {"ref": 0, "alt": 0},
+    }
+    try:
+        for col in bam.pileup(
+            chrom,
+            pos - 1,
+            pos,
+            truncate=True,
+            min_base_quality=0,
+            min_mapping_quality=0,
+            ignore_overlaps=False,
+            stepper="nofilter",
+        ):
+            if col.reference_pos != pos - 1:
+                continue
+            for pread in col.pileups:
+                if pread.is_del or pread.is_refskip:
+                    continue
+                aln = pread.alignment
+                if aln.is_secondary or aln.is_supplementary:
+                    continue
+                qseq = aln.query_sequence
+                if qseq is None:
+                    continue
+                base = qseq[pread.query_position]
+                hp = str(aln.get_tag("HP")) if aln.has_tag("HP") else "none"
+                if hp not in counts:
+                    hp = "none"
+                if base == alt:
+                    counts[hp]["alt"] += 1
+                elif base == ref:
+                    counts[hp]["ref"] += 1
+    except (ValueError, KeyError):
+        pass
+    return counts
+
+
+def _haplotype_specific(
+    counts: dict[str, dict[str, int]],
+) -> tuple[bool, str | None]:
+    """Return (is_haplotype_specific, alt_hp) where alt_hp is "1", "2", or None.
+
+    Returns True if one HP carries ≥ _DEFAULT_HP_MIN_ALT_FRAC of ALT reads,
+    the other carries ≤ _DEFAULT_HP_MAX_OTHER_FRAC, and both have ≥
+    _DEFAULT_HP_MIN_READS covering reads.
+    """
+    for hp_a, hp_b in [("1", "2"), ("2", "1")]:
+        a = counts[hp_a]
+        b = counts[hp_b]
+        tot_a = a["ref"] + a["alt"]
+        tot_b = b["ref"] + b["alt"]
+        if tot_a < _DEFAULT_HP_MIN_READS or tot_b < _DEFAULT_HP_MIN_READS:
+            continue
+        if (
+            a["alt"] / tot_a >= _DEFAULT_HP_MIN_ALT_FRAC
+            and b["alt"] / tot_b <= _DEFAULT_HP_MAX_OTHER_FRAC
+        ):
+            return True, hp_a
+    return False, None
+
+
+def _apply_germline_hp_filter(
+    rows: list[dict[str, Any]],
+    *,
+    group_a_bam: Path,
+    group_b_bam: Path,
+) -> None:
+    """Flag rows as germline HP false positives using the split BAMs.
+
+    Two conditions must both hold:
+    1. In the *target* group's split BAM the SNV is haplotype-specific:
+       one HP carries ≥ _DEFAULT_HP_MIN_ALT_FRAC of ALT reads and the other
+       carries ≤ _DEFAULT_HP_MAX_OTHER_FRAC (with ≥ _DEFAULT_HP_MIN_READS
+       reads per HP).
+    2. That same ALT haplotype has < _DEFAULT_HP_MIN_READS reads in the
+       *other* group's split BAM — i.e. it is under-sampled there, explaining
+       why the variant was not called in the other group.
+
+    Sets germline_hp_filter=True and snv_pass_for_harmonized=False on hits.
+    Modifies rows in-place.
+    """
+    logger = logging.getLogger("snv_post_processing")
+    bam_a = pysam.AlignmentFile(str(group_a_bam), "rb")
+    bam_b = pysam.AlignmentFile(str(group_b_bam), "rb")
+    flagged = 0
+    try:
+        for row in rows:
+            chrom = row["chrom"]
+            pos = int(row["pos"])
+            ref = row["ref"]
+            alt = row["alt"]
+            tgt_bam = bam_a if row["direction"] == "group_a_only" else bam_b
+            oth_bam = bam_b if row["direction"] == "group_a_only" else bam_a
+
+            tgt_counts = _hp_allele_counts(tgt_bam, chrom, pos, ref, alt)
+            is_hap, alt_hp = _haplotype_specific(tgt_counts)
+
+            if is_hap and alt_hp is not None:
+                oth_counts = _hp_allele_counts(oth_bam, chrom, pos, ref, alt)
+                oth_alt_hp_total = oth_counts[alt_hp]["ref"] + oth_counts[alt_hp]["alt"]
+                is_germline = oth_alt_hp_total < _DEFAULT_HP_MIN_READS
+            else:
+                is_germline = False
+
+            row["germline_hp_filter"] = is_germline
+            if is_germline:
+                row["snv_pass_for_harmonized"] = False
+                flagged += 1
+    finally:
+        bam_a.close()
+        bam_b.close()
+    logger.info("Germline HP filter: %d/%d rows flagged", flagged, len(rows))
 
 
 def _open_writer(path: Path) -> tuple[Any, Any]:
@@ -279,8 +513,16 @@ def _absence_supporting_record(summary: PositionSummary, alt: str, *, min_dp_abs
             continue
         if _alt_read_count(rec, alt) != 0:
             continue
-        if rec.af != "." and float(rec.af) < min_other_af:
-            continue
+        if rec.af != ".":
+            af_values = [float(x) for x in rec.af.split(",") if x not in ("", ".")]
+            # For RefCall (GT=0/0), AF is ref fraction directly (single value).
+            # For multi-allelic calls, AF lists alt fractions; ref fraction = 1 - sum.
+            if rec.gt == "0/0" or len(af_values) == 1:
+                ref_frac = af_values[0] if af_values else 0.0
+            else:
+                ref_frac = max(0.0, 1.0 - sum(af_values))
+            if ref_frac < min_other_af:
+                continue
         best = _better_record(best, rec)
     return best
 
@@ -304,6 +546,8 @@ def compare_group_specific_snvs(
     min_dp_absence: int,
     min_gq: int,
     min_other_af: float,
+    group_a_bam: Path | None = None,
+    group_b_bam: Path | None = None,
 ) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     sets_dir = output_dir / "sets"
@@ -363,6 +607,16 @@ def compare_group_specific_snvs(
     group_a_rows.sort(key=_sort_key, reverse=True)
     group_b_rows.sort(key=_sort_key, reverse=True)
     all_rows = sorted(group_a_rows + group_b_rows, key=_sort_key, reverse=True)
+
+    if (
+        group_a_bam is not None and group_a_bam.exists()
+        and group_b_bam is not None and group_b_bam.exists()
+    ):
+        _enrich_rows_with_read_names(all_rows, group_a_bam=group_a_bam, group_b_bam=group_b_bam)
+        _apply_germline_hp_filter(all_rows, group_a_bam=group_a_bam, group_b_bam=group_b_bam)
+        all_rows = [r for r in all_rows if not r.get("germline_hp_filter")]
+        group_a_rows = [r for r in group_a_rows if not r.get("germline_hp_filter")]
+        group_b_rows = [r for r in group_b_rows if not r.get("germline_hp_filter")]
 
     merged_handle, merged_writer = _open_writer(merged_path)
     group_a_handle, group_a_writer = _open_writer(group_a_only_path)
@@ -454,6 +708,17 @@ def snv_post_processing_main(cli_args: list[str] | None = None) -> dict[str, Any
 
     group_a_label = f"{args.sample_id}.{args.group_a}"
     group_b_label = f"{args.sample_id}.{args.group_b}"
+
+    # Auto-discover group BAMs from split_dir; skip enrichment if not found
+    group_a_bam = args.split_dir / f"{args.group_a}.bam"
+    group_b_bam = args.split_dir / f"{args.group_b}.bam"
+    if not (group_a_bam.exists() and group_b_bam.exists()):
+        logging.getLogger("snv_post_processing").warning(
+            "BAMs not found in split_dir (%s, %s) — read names will be empty",
+            group_a_bam, group_b_bam,
+        )
+        group_a_bam = group_b_bam = None
+
     summary = compare_group_specific_snvs(
         group_a_label=group_a_label,
         group_b_label=group_b_label,
@@ -465,6 +730,8 @@ def snv_post_processing_main(cli_args: list[str] | None = None) -> dict[str, Any
         min_dp_absence=args.min_dp_absence,
         min_gq=args.min_gq,
         min_other_af=args.min_other_af,
+        group_a_bam=group_a_bam,
+        group_b_bam=group_b_bam,
     )
     summary.update(
         {
@@ -495,6 +762,7 @@ def snv_post_processing_main(cli_args: list[str] | None = None) -> dict[str, Any
                 f"Minimum DP for absence support in other group: {args.min_dp_absence}",
                 f"Minimum GQ for target non-reference SNP calls: {args.min_gq}",
                 f"Minimum reference allele fraction (AF) in other group's absence record: {args.min_other_af}",
+                f"Germline HP filter: uses split BAMs (min_hp_reads={_DEFAULT_HP_MIN_READS}, min_hp_alt_frac={_DEFAULT_HP_MIN_ALT_FRAC}, max_other_hp_frac={_DEFAULT_HP_MAX_OTHER_FRAC})",
                 f"Group A label: {group_a_label}",
                 f"Group B label: {group_b_label}",
                 f"Group A gVCF: {args.group_a_gvcf}",

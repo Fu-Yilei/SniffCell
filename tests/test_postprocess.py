@@ -21,12 +21,12 @@ from sniffcell.discover.discover import (
     _build_context,
     _build_recursive_cli,
     _clear_force_rerun_state,
+    _discover_groups,
     _parse_stages,
+    _select_groups,
     _render_slurm,
     _render_submit_script,
     _sanitize_token,
-    _select_groups,
-    _discover_groups,
 )
 
 
@@ -1037,10 +1037,6 @@ class TestBuildRecursiveCli(unittest.TestCase):
             self.assertFalse((ctx.status_dir / "clair3.Oligodendrocyte.done.json").exists())
             self.assertFalse((ctx.status_dir / "snv_post_processing.done.json").exists())
 
-
-# ---------------------------------------------------------------------------
-# SLURM script generation tests
-# ---------------------------------------------------------------------------
 
 class TestPostprocessContextAndSlurm(unittest.TestCase):
 

@@ -21,6 +21,7 @@ from sniffcell.anno.variant_assignment import (
     _summarize_celltype_links,
 )
 from sniffcell.deconv.bam_split import _sanitize_group_label, _write_requested_split_group_outputs
+from sniffcell.deconv.regions import ResolvedRegionalInputs, resolve_regional_inputs
 
 
 def _resolve_output_paths(output_arg: str) -> dict[str, str]:
@@ -58,6 +59,11 @@ def _write_deconv_run_manifest(
     bam: str,
     reference: str,
     bed: str,
+    original_bam: str | None = None,
+    original_bed: str | None = None,
+    regions: str | None = None,
+    regions_ctdmrs: int | None = None,
+    regional_inputs: ResolvedRegionalInputs | None = None,
     threads: int,
     read_assignment_mode: str,
     split_bam_groups: str | None,
@@ -69,15 +75,19 @@ def _write_deconv_run_manifest(
         "command": "deconv",
         "version": "v1",
         "inputs": {
-            "bam": os.path.abspath(bam),
+            "bam": os.path.abspath(original_bam or bam),
             "reference": os.path.abspath(reference),
-            "bed": os.path.abspath(bed),
+            "bed": os.path.abspath(original_bed or bed),
+            "effective_bam": os.path.abspath(bam),
+            "effective_bed": os.path.abspath(bed),
         },
         "runtime": {
             "threads": int(threads),
             "read_assignment_mode": str(read_assignment_mode),
             "split_bam_groups": split_bam_groups,
             "per_read_min_agreement": float(per_read_min_agreement),
+            "regions": regions,
+            "regions_ctdmrs": (None if regions_ctdmrs is None else int(regions_ctdmrs)),
         },
         "outputs": {
             "requested_output": os.path.abspath(output_path),
@@ -90,6 +100,14 @@ def _write_deconv_run_manifest(
             "requested_group_split_dir": os.path.abspath(outputs["requested_split_dir"]),
         },
     }
+    if regional_inputs is not None:
+        payload["regional_inputs"] = {
+            "manifest": regional_inputs.manifest_path,
+            "targets_bed": regional_inputs.targets_bed_path,
+            "expanded_bed": regional_inputs.expanded_bed_path,
+            "selected_ctdmr_count": int(regional_inputs.selected_ctdmr_count),
+            "subset_bam_read_count": int(regional_inputs.subset_bam_read_count),
+        }
     with open(manifest_path, "w", encoding="utf-8") as fh:
         json.dump(payload, fh, indent=2, sort_keys=True)
     return manifest_path
@@ -637,8 +655,13 @@ def deconv_main(args):
     read_assignment_mode = str(getattr(args, "read_assignment_mode", "closest_reference_mean")).strip().lower()
     split_bam_groups = getattr(args, "split_bam_groups", None)
     split_bam_groups = None if split_bam_groups is None else str(split_bam_groups).strip() or None
+    regions = getattr(args, "regions", None)
+    regions = None if regions is None else str(regions).strip() or None
+    regions_ctdmrs = int(getattr(args, "regions_ctdmrs", 10))
     per_read_min_agreement = float(getattr(args, "per_read_min_agreement", 0.66))
     skip_overall_summary = bool(getattr(args, "skip_overall_summary", False))
+    regional_inputs: ResolvedRegionalInputs | None = None
+    preloaded_bed_df: pd.DataFrame | None = None
 
     if threads < 1:
         raise ValueError("threads must be >= 1")
@@ -646,9 +669,39 @@ def deconv_main(args):
         raise ValueError("read_assignment_mode must be one of: closest_reference_mean, kmeans")
     if not (0.0 <= per_read_min_agreement <= 1.0):
         raise ValueError("per_read_min_agreement must be in [0, 1]")
+    if regions_ctdmrs < 0:
+        raise ValueError("regions_ctdmrs must be >= 0")
 
     outputs = _resolve_output_paths(output_arg)
     os.makedirs(outputs["output_dir"], exist_ok=True)
+
+    original_bam = input_bam
+    original_bed = bed_input
+    if regions:
+        logger.info(
+            "Resolving targeted deconv inputs: regions=%s ctdmrs=%d",
+            regions,
+            regions_ctdmrs,
+        )
+        full_bed_df = _load_ctdmr_bed(bed_input)
+        regional_inputs = resolve_regional_inputs(
+            ctdmr_df=full_bed_df,
+            input_bam=input_bam,
+            output_dir=outputs["output_dir"],
+            regions_arg=regions,
+            left_ctdmrs=regions_ctdmrs,
+            right_ctdmrs=regions_ctdmrs,
+        )
+        bed_input = regional_inputs.subset_bed_path
+        input_bam = regional_inputs.subset_bam_path
+        preloaded_bed_df = _load_ctdmr_bed(bed_input)
+        logger.info(
+            "Resolved regional deconv inputs: selected_ctdmrs=%d subset_bam_reads=%d effective_bam=%s effective_bed=%s",
+            regional_inputs.selected_ctdmr_count,
+            regional_inputs.subset_bam_read_count,
+            input_bam,
+            bed_input,
+        )
 
     logger.info(
         "Starting deconvolution: bed=%s bam=%s ref=%s threads=%d read_assignment_mode=%s "
@@ -667,6 +720,11 @@ def deconv_main(args):
         bam=input_bam,
         reference=reference,
         bed=bed_input,
+        original_bam=original_bam,
+        original_bed=original_bed,
+        regions=regions,
+        regions_ctdmrs=regions_ctdmrs if regions else None,
+        regional_inputs=regional_inputs,
         threads=threads,
         read_assignment_mode=read_assignment_mode,
         split_bam_groups=split_bam_groups,
@@ -702,7 +760,7 @@ def deconv_main(args):
         if resume:
             logger.warning("--resume requested but %s not found; running full ctDMR phase", reads_tsv)
 
-        bed_df = _load_ctdmr_bed(bed_input)
+        bed_df = preloaded_bed_df if preloaded_bed_df is not None else _load_ctdmr_bed(bed_input)
         logger.info("Loaded BED with %d unique ctDMRs", len(bed_df))
 
         # _stream_ctdmr_classification writes the TSV outputs AND returns the full

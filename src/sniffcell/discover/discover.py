@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import fcntl
+import gzip
 import hashlib
 import json
 import logging
@@ -195,17 +196,136 @@ def _run_command(
     stderr_path: Path,
     dry_run: bool,
     shell: bool = False,
+    env: dict[str, str] | None = None,
 ) -> None:
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
     stderr_path.parent.mkdir(parents=True, exist_ok=True)
     if dry_run:
         return
     with stdout_path.open("a") as stdout_handle, stderr_path.open("a") as stderr_handle:
-        subprocess.run(cmd, shell=shell, check=True, stdout=stdout_handle, stderr=stderr_handle)
+        subprocess.run(cmd, shell=shell, check=True, stdout=stdout_handle, stderr=stderr_handle, env=env)
 
 
 def _run_command_capture(cmd: Sequence[str]) -> str:
     return subprocess.check_output(cmd, text=True).strip()
+
+
+def _normalize_chrom(value: object) -> str:
+    text = str(value).strip()
+    if not text:
+        return ""
+    lowered = text.lower()
+    return lowered[3:] if lowered.startswith("chr") else lowered
+
+
+def _vcf_has_records(vcf_path: Path) -> bool:
+    openers = [gzip.open, open] if str(vcf_path).endswith(".gz") else [open]
+    for opener in openers:
+        try:
+            with opener(vcf_path, "rt", encoding="utf-8", errors="ignore") as handle:
+                for line in handle:
+                    if line.startswith("#"):
+                        continue
+                    if line.strip():
+                        return True
+            return False
+        except (gzip.BadGzipFile, OSError, EOFError):
+            continue
+    return False
+
+
+def _text_file_has_records(path: Path) -> bool:
+    if not path.exists():
+        return False
+    with path.open(encoding="utf-8", errors="ignore") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            if line.startswith("#"):
+                continue
+            return True
+    return False
+
+
+def _write_empty_vcf(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    header = "##fileformat=VCFv4.2\n#CHROM\tPOS\tID\tREF\tALT\tQUAL\tFILTER\tINFO\n"
+    if str(path).endswith(".gz"):
+        with gzip.open(path, "wt", encoding="utf-8") as handle:
+            handle.write(header)
+        return
+    path.write_text(header, encoding="utf-8")
+
+
+def _deconv_run_manifest_path(ctx: RunContext) -> Path:
+    return ctx.deconv_dir / "deconv_run_manifest.json"
+
+
+def _deconv_region_bed(ctx: RunContext) -> Path | None:
+    manifest_path = _deconv_run_manifest_path(ctx)
+    if not manifest_path.exists():
+        return None
+    payload = _read_json(manifest_path)
+    regional_inputs = payload.get("regional_inputs")
+    if not isinstance(regional_inputs, dict):
+        return None
+    expanded_bed = str(regional_inputs.get("expanded_bed", "")).strip()
+    if not expanded_bed:
+        return None
+    candidate = _expand_path(expanded_bed)
+    return candidate if candidate.exists() else None
+
+
+def _resolve_targeted_tr_bed(ctx: RunContext) -> Path:
+    region_bed = _deconv_region_bed(ctx)
+    if region_bed is None:
+        return ctx.tr_bed
+    output_bed = ctx.manifest_dir / "targeted_tr.bed"
+    if output_bed.exists():
+        return output_bed
+
+    regions_by_chrom: dict[str, list[tuple[int, int]]] = {}
+    with region_bed.open(encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            fields = line.split("\t")
+            if len(fields) < 3:
+                continue
+            chrom = _normalize_chrom(fields[0])
+            start = int(fields[1])
+            end = int(fields[2])
+            regions_by_chrom.setdefault(chrom, []).append((start, end))
+
+    output_bed.parent.mkdir(parents=True, exist_ok=True)
+    with ctx.tr_bed.open(encoding="utf-8") as source, output_bed.open("w", encoding="utf-8") as sink:
+        for raw_line in source:
+            line = raw_line.rstrip("\n")
+            if not line.strip() or line.startswith("#"):
+                continue
+            fields = line.split("\t")
+            if len(fields) < 3:
+                continue
+            chrom = _normalize_chrom(fields[0])
+            if chrom not in regions_by_chrom:
+                continue
+            start = int(fields[1])
+            end = int(fields[2])
+            if any(start < region_end and end > region_start for region_start, region_end in regions_by_chrom[chrom]):
+                sink.write(line + "\n")
+    return output_bed
+
+
+def _clair3_env(ctx: RunContext) -> dict[str, str]:
+    env = os.environ.copy()
+    clair3_bin = Path(ctx.tool_paths["clair3"]).expanduser().resolve()
+    bin_dir = clair3_bin.parent
+    existing_path = env.get("PATH", "")
+    env["PATH"] = f"{bin_dir}{os.pathsep}{existing_path}" if existing_path else str(bin_dir)
+    if bin_dir.name == "bin":
+        env.setdefault("CONDA_PREFIX", str(bin_dir.parent))
+    return env
 
 
 def _require_paths(paths: Iterable[Path]) -> None:
@@ -715,6 +835,7 @@ def _run_task(
     outputs: Iterable[Path],
     group_name: str | None = None,
     shell: bool = False,
+    env: dict[str, str] | None = None,
 ) -> None:
     outputs = list(outputs)
     task = _task_id(stage, group_name)
@@ -733,7 +854,14 @@ def _run_task(
         {"state": "running", "started_at": _now_utc(), "outputs": [str(x) for x in outputs]},
     )
     try:
-        _run_command(cmd=command, stdout_path=stdout_path, stderr_path=stderr_path, dry_run=ctx.dry_run, shell=shell)
+        _run_command(
+            cmd=command,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            dry_run=ctx.dry_run,
+            shell=shell,
+            env=env,
+        )
         if not ctx.dry_run:
             missing = [str(path) for path in outputs if not path.exists()]
             if missing:
@@ -881,6 +1009,46 @@ def _run_kanpig(ctx: RunContext, group_name: str) -> None:
     ]
     if ctx.params["kanpig_passonly"]:
         cmd.append("--passonly")
+    outputs = [output_vcf, rnames_tsv]
+    if not ctx.dry_run and not _vcf_has_records(input_vcf):
+        task = _task_id("kanpig", group_name)
+        command_path, _, _ = _task_paths(ctx, "kanpig", group_name)
+        empty_cmd = ["skip-empty-kanpig-input", str(input_vcf), str(output_vcf)]
+        _write_command(command_path, empty_cmd)
+        if _should_skip(ctx=ctx, stage="kanpig", outputs=outputs, group_name=group_name):
+            _update_status(
+                ctx,
+                task,
+                {"state": "skipped", "updated_at": _now_utc(), "outputs": [str(x) for x in outputs]},
+            )
+            return
+        _update_status(
+            ctx,
+            task,
+            {
+                "state": "running",
+                "started_at": _now_utc(),
+                "outputs": [str(x) for x in outputs],
+                "empty_input_vcf": str(input_vcf),
+            },
+        )
+        _symlink_or_copy(input_vcf, output_vcf)
+        input_index = Path(str(input_vcf) + ".tbi")
+        if input_index.exists():
+            _symlink_or_copy(input_index, Path(str(output_vcf) + ".tbi"))
+        rnames_tsv.write_text("", encoding="utf-8")
+        _record_done(ctx=ctx, stage="kanpig", outputs=outputs, command=empty_cmd, group_name=group_name)
+        _update_status(
+            ctx,
+            task,
+            {
+                "state": "completed_empty",
+                "finished_at": _now_utc(),
+                "outputs": [str(x) for x in outputs],
+                "empty_input_vcf": str(input_vcf),
+            },
+        )
+        return
     _run_task(ctx=ctx, stage="kanpig", group_name=group_name, command=cmd, outputs=[raw_vcf, rnames_tsv])
     if not ctx.dry_run:
         subprocess.run(
@@ -1081,6 +1249,14 @@ def _run_sv_post_processing(ctx: RunContext) -> None:
     )
 
 
+def _write_empty_medaka_outputs(stage_dir: Path, output_vcf: Path) -> None:
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    _write_empty_vcf(output_vcf)
+    trimmed_reads = stage_dir / "trimmed_reads.fasta"
+    if not trimmed_reads.exists():
+        trimmed_reads.write_text("", encoding="utf-8")
+
+
 def _run_medaka(ctx: RunContext, group_name: str) -> None:
     group = _group_lookup(ctx, group_name)
     stage_dir = _medaka_stage_dir(ctx, group_name)
@@ -1137,6 +1313,35 @@ def _run_medaka(ctx: RunContext, group_name: str) -> None:
                 {"state": "failed", "finished_at": _now_utc(), "error": str(exc)},
             )
             raise
+    effective_tr_bed = _resolve_targeted_tr_bed(ctx)
+    if not ctx.dry_run and not _text_file_has_records(effective_tr_bed):
+        command = ["skip-empty-tr-bed", str(effective_tr_bed), str(output_vcf)]
+        task = _task_id("medaka", group_name)
+        command_path, _, _ = _task_paths(ctx, "medaka", group_name)
+        _write_command(command_path, command)
+        _update_status(
+            ctx,
+            task,
+            {
+                "state": "running",
+                "started_at": _now_utc(),
+                "outputs": [str(output_vcf)],
+                "targeted_tr_bed": str(effective_tr_bed),
+            },
+        )
+        _write_empty_medaka_outputs(stage_dir, output_vcf)
+        _record_done(ctx=ctx, stage="medaka", outputs=[output_vcf], command=command, group_name=group_name)
+        _update_status(
+            ctx,
+            task,
+            {
+                "state": "completed_empty",
+                "finished_at": _now_utc(),
+                "outputs": [str(output_vcf)],
+                "targeted_tr_bed": str(effective_tr_bed),
+            },
+        )
+        return
     sample_name = _sample_name(str(ctx.params["medaka_sample_name_template"]), ctx.sample_id, group_name)
     cmd = [
         ctx.tool_paths["medaka"],
@@ -1151,19 +1356,67 @@ def _run_medaka(ctx: RunContext, group_name: str) -> None:
         str(ctx.params["medaka_padding"]),
         group.bam_path,
         str(ctx.reference),
-        str(ctx.tr_bed),
+        str(effective_tr_bed),
         ctx.sex,
         str(stage_dir),
     ]
     if ctx.params["medaka_phasing"]:
         cmd[2:2] = ["--phasing", str(ctx.params["medaka_phasing"])]
-    _run_task(
-        ctx=ctx,
-        stage="medaka",
-        group_name=group_name,
-        command=cmd,
-        outputs=[output_vcf],
+    task = _task_id("medaka", group_name)
+    command_path, stdout_path, stderr_path = _task_paths(ctx, "medaka", group_name)
+    _write_command(command_path, cmd)
+    if _should_skip(ctx=ctx, stage="medaka", outputs=[output_vcf], group_name=group_name):
+        _update_status(
+            ctx,
+            task,
+            {"state": "skipped", "updated_at": _now_utc(), "outputs": [str(output_vcf)]},
+        )
+        return
+    _update_status(
+        ctx,
+        task,
+        {
+            "state": "running",
+            "started_at": _now_utc(),
+            "outputs": [str(output_vcf)],
+            "targeted_tr_bed": str(effective_tr_bed),
+        },
     )
+    try:
+        _run_command(
+            cmd=cmd,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            dry_run=ctx.dry_run,
+        )
+        if not ctx.dry_run:
+            if not output_vcf.exists():
+                _write_empty_medaka_outputs(stage_dir, output_vcf)
+            _record_done(ctx=ctx, stage="medaka", outputs=[output_vcf], command=cmd, group_name=group_name)
+            _update_status(
+                ctx,
+                task,
+                {
+                    "state": ("completed" if _vcf_has_records(output_vcf) else "completed_empty"),
+                    "finished_at": _now_utc(),
+                    "outputs": [str(output_vcf)],
+                    "targeted_tr_bed": str(effective_tr_bed),
+                },
+            )
+        else:
+            _update_status(
+                ctx,
+                task,
+                {"state": "dry_run", "finished_at": _now_utc(), "outputs": [str(output_vcf)]},
+            )
+    except Exception as exc:  # pragma: no cover - exercised via integration
+        _record_failure(ctx=ctx, stage="medaka", command=cmd, error=exc, group_name=group_name)
+        _update_status(
+            ctx,
+            task,
+            {"state": "failed", "finished_at": _now_utc(), "error": str(exc)},
+        )
+        raise
 
 
 def _resolve_tdb_input(ctx: RunContext, group_name: str) -> Path:
@@ -1201,6 +1454,34 @@ def _run_tdb_merge(ctx: RunContext) -> None:
     output_tdb.parent.mkdir(parents=True, exist_ok=True)
     input_a = _tdb_output_path(ctx, ctx.selected_groups[0])
     input_b = _tdb_output_path(ctx, ctx.selected_groups[1])
+    medaka_a = _resolve_tdb_input(ctx, ctx.selected_groups[0])
+    medaka_b = _resolve_tdb_input(ctx, ctx.selected_groups[1])
+    if not ctx.dry_run and (not _vcf_has_records(medaka_a) or not _vcf_has_records(medaka_b)):
+        command = ["skip-empty-tdb-merge", str(medaka_a), str(medaka_b)]
+        task = _task_id("tdb_merge", None)
+        command_path, _, _ = _task_paths(ctx, "tdb_merge", None)
+        _write_command(command_path, command)
+        _update_status(
+            ctx,
+            task,
+            {
+                "state": "running",
+                "started_at": _now_utc(),
+                "empty_medaka_inputs": [str(medaka_a), str(medaka_b)],
+            },
+        )
+        _record_done(ctx=ctx, stage="tdb_merge", outputs=[], command=command)
+        _update_status(
+            ctx,
+            task,
+            {
+                "state": "completed_empty",
+                "finished_at": _now_utc(),
+                "empty_medaka_inputs": [str(medaka_a), str(medaka_b)],
+            },
+        )
+        _run_tr_post_processing(ctx)
+        return
     cmd = [
         ctx.tool_paths["tdb"],
         "merge",
@@ -1362,7 +1643,17 @@ def _run_clair3(ctx: RunContext, group_name: str) -> None:
         # "--include_all_ctgs",
         # "--remove_intermediate_dir",
     ]
-    _run_task(ctx=ctx, stage="clair3", group_name=group_name, command=cmd, outputs=[output_vcf, pileup_vcf])
+    region_bed = _deconv_region_bed(ctx)
+    if region_bed is not None:
+        cmd.append(f"--bed_fn={region_bed}")
+    _run_task(
+        ctx=ctx,
+        stage="clair3",
+        group_name=group_name,
+        command=cmd,
+        outputs=[output_vcf, pileup_vcf],
+        env=_clair3_env(ctx),
+    )
 
 
 def _write_harmonized_variant_summary(ctx: RunContext) -> Path | None:
@@ -1371,15 +1662,19 @@ def _write_harmonized_variant_summary(ctx: RunContext) -> Path | None:
 
     sv_summary = _sv_post_stage_dir(ctx) / "summary.json"
     tr_summary = _tr_post_stage_dir(ctx) / "summary.json"
+    snv_summary = _snv_post_stage_dir(ctx) / "summary.json"
 
     sv_payload = _read_json(sv_summary) if sv_summary.exists() else {}
     tr_payload = _read_json(tr_summary) if tr_summary.exists() else {}
+    snv_payload = _read_json(snv_summary) if snv_summary.exists() else {}
 
     sv_bed_text = str(sv_payload.get("sv_bed_tsv", "")).strip() if isinstance(sv_payload, dict) else ""
     tr_bed_text = str(tr_payload.get("tr_bed_tsv", "")).strip() if isinstance(tr_payload, dict) else ""
+    snv_tsv_text = str(snv_payload.get("merged_tsv", "")).strip() if isinstance(snv_payload, dict) else ""
 
     sv_bed = Path(sv_bed_text) if sv_bed_text else None
     tr_bed = Path(tr_bed_text) if tr_bed_text else None
+    snv_tsv = Path(snv_tsv_text) if snv_tsv_text else None
     if (sv_bed is None or not sv_bed.exists()) and (tr_bed is None or not tr_bed.exists()):
         return None
 
@@ -1394,8 +1689,10 @@ def _write_harmonized_variant_summary(ctx: RunContext) -> Path | None:
         group_b_label=group_b_label,
         tr_bed=tr_bed,
         sv_bed=sv_bed,
+        snv_tsv=snv_tsv,
         include_all_tr_candidates=include_all_tr_candidates,
     )
+
     _write_json(
         ctx.run_root / "harmonized_variants_manifest.json",
         {
@@ -1405,6 +1702,7 @@ def _write_harmonized_variant_summary(ctx: RunContext) -> Path | None:
             "group_b_label": group_b_label,
             "tr_bed_tsv": (str(tr_bed) if tr_bed is not None and tr_bed.exists() else ""),
             "sv_bed_tsv": (str(sv_bed) if sv_bed is not None and sv_bed.exists() else ""),
+            "snv_tsv": (str(snv_tsv) if snv_tsv is not None and snv_tsv.exists() else ""),
             "include_all_tr_candidates": include_all_tr_candidates,
             "counts": stats,
         },
@@ -1665,40 +1963,39 @@ def _render_slurm(ctx: RunContext) -> None:
 
     if "clair3" in ctx.stages and len(groups) == 2:
         script_path = ctx.slurm_dir / "snv_post_processing.sbatch.sh"
+        snv_post_cmd = [
+            sys.executable,
+            "-m",
+            "sniffcell.main",
+            "discover",
+            "ctprocessing",
+            "snv",
+            "--split-dir",
+            str(ctx.split_dir),
+            "--groups",
+            ",".join(groups),
+            "--group-a-gvcf",
+            str(_clair3_pileup_output_path(ctx, groups[0])),
+            "--group-b-gvcf",
+            str(_clair3_pileup_output_path(ctx, groups[1])),
+            "--output-dir",
+            str(_snv_post_stage_dir(ctx)),
+            "--sample-id",
+            ctx.sample_id,
+            "--min-dp",
+            str(DEFAULT_SNV_POST_MIN_DP),
+            "--max-dp",
+            str(DEFAULT_SNV_POST_MAX_DP),
+            "--min-dp-absence",
+            str(DEFAULT_SNV_POST_MIN_DP_ABSENCE),
+            "--min-gq",
+            str(DEFAULT_SNV_POST_MIN_GQ),
+            "--min-other-af",
+            str(DEFAULT_SNV_POST_MIN_OTHER_AF),
+        ]
         body = [
             f"export PYTHONPATH={shlex.quote(str(REPO_ROOT / 'src'))}:${{PYTHONPATH:-}}",
-            shlex.join(
-                [
-                    sys.executable,
-                    "-m",
-                    "sniffcell.main",
-                    "discover",
-                    "ctprocessing",
-                    "snv",
-                    "--split-dir",
-                    str(ctx.split_dir),
-                    "--groups",
-                    ",".join(groups),
-                    "--group-a-gvcf",
-                    str(_clair3_pileup_output_path(ctx, groups[0])),
-                    "--group-b-gvcf",
-                    str(_clair3_pileup_output_path(ctx, groups[1])),
-                    "--output-dir",
-                    str(_snv_post_stage_dir(ctx)),
-                    "--sample-id",
-                    ctx.sample_id,
-                    "--min-dp",
-                    str(DEFAULT_SNV_POST_MIN_DP),
-                    "--max-dp",
-                    str(DEFAULT_SNV_POST_MAX_DP),
-                    "--min-dp-absence",
-                    str(DEFAULT_SNV_POST_MIN_DP_ABSENCE),
-                    "--min-gq",
-                    str(DEFAULT_SNV_POST_MIN_GQ),
-                    "--min-other-af",
-                    str(DEFAULT_SNV_POST_MIN_OTHER_AF),
-                ]
-            ),
+            shlex.join(snv_post_cmd),
         ]
         _write_slurm_script(
             script_path=script_path,

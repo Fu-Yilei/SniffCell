@@ -642,6 +642,7 @@ def assign_sv_celltypes(
     sv_id_col: str = "id",
     unique_reads_for_overlap: bool = True,
     per_read_min_agreement: float = 0.66,
+    use_read_names: bool = False,
 ) -> pd.DataFrame:
     """
     Link SVs to cell-type codes derived from per-read assignments and attach coordinates.
@@ -653,9 +654,17 @@ def assign_sv_celltypes(
       - human-readable decoded summaries (`linked_celltypes`, counts/fractions, multi-link flag)
       - `n_mixed_reads`: reads excluded from voting due to conflicting ctDMR codes
 
-    SV linking is coordinate-based:
-      - SV and DMR chromosomes must match (chr-normalized).
-      - A DMR is linked to an SV if it is within `window` bp padding around the SV interval.
+    SV linking is coordinate-based (default) or read-name-based:
+      - When use_read_names=False (default): SV and DMR chromosomes must match
+        (chr-normalized), and a DMR is linked to an SV if it is within `window` bp
+        padding around the SV interval.
+      - When use_read_names=True: the spatial window is bypassed entirely. Each
+        SV-supporting read is directly joined to its per-read classification using
+        all ctDMR evidence genome-wide. This is correct when sv_df already carries
+        explicit read name lists (e.g. harmonized variant tables), because the reads
+        were classified during deconvolution and the classifying ctDMR may lie
+        anywhere along the read, not necessarily within `window` bp of the SV
+        breakpoint.
       - ctDMRs overlapping the SV core expanded by
         `breakpoint_exclusion_frac * abs(SVLEN)` on each side are excluded.
 
@@ -788,7 +797,19 @@ def assign_sv_celltypes(
     )
     explicit_sv_col = sv_id_col if sv_id_col in assignment.columns else ("sv_id" if "sv_id" in assignment.columns else None)
 
-    if explicit_sv_col is not None:
+    if use_read_names:
+        # Bypass spatial window: directly join support reads with their full
+        # per-read classification. Every ctDMR a supporting read overlaps
+        # (anywhere in the genome) contributes evidence for the SV. This is
+        # correct for harmonized variant sources where reads were already
+        # classified during deconvolution and the classifying ctDMR may be
+        # far from the SV breakpoint on a long read.
+        if support_pairs.empty:
+            mapped = assignment.iloc[0:0].copy()
+            mapped[sv_id_col] = pd.Series(dtype="object")
+        else:
+            mapped = support_pairs.merge(assignment, on="read", how="inner")
+    elif explicit_sv_col is not None:
         mapped = assignment[assignment[explicit_sv_col].notna()].copy()
         if explicit_sv_col != sv_id_col:
             mapped = mapped.rename(columns={explicit_sv_col: sv_id_col})
@@ -834,7 +855,9 @@ def assign_sv_celltypes(
                 sv_id_col=sv_id_col,
             )
         mapped["read"] = mapped["read"].astype(str)
-        mapped = mapped.merge(support_pairs, on=[sv_id_col, "read"], how="inner")
+        if not use_read_names:
+            # spatial path: support_pairs filter not yet applied
+            mapped = mapped.merge(support_pairs, on=[sv_id_col, "read"], how="inner")
 
     evidence_cols = [
         sv_id_col,
