@@ -331,7 +331,7 @@ def parse_args(argv):
         default=0.0,
         help=(
             "Expand the no-ctDMR zone around the SV core by this fraction of absolute SV length on each side. "
-            "Example: 0.1 excludes ctDMRs within +/-10% of SV length around breakpoints. Default=0.0"
+            "Default=0.0"
         ),
     )
     anno_parser.add_argument(
@@ -408,7 +408,7 @@ def parse_args(argv):
         default=0.0,
         help=(
             "Expand the no-ctDMR zone around the SV core by this fraction of absolute SV length on each side. "
-            "Example: 0.1 excludes ctDMRs within +/-10% of SV length around breakpoints. Default=0.0"
+            "Default=0.0"
         ),
     )
     svanno_parser.add_argument(
