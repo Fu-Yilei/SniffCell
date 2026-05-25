@@ -18,6 +18,8 @@ from sniffcell.discover.discover import (
     DEFAULT_STAGE_ORDER,
     GROUP_SCOPED_STAGES,
     RunContext,
+    VALID_STAGES,
+    _apply_platform_tr_substitution,
     _build_context,
     _build_recursive_cli,
     _clear_force_rerun_state,
@@ -615,6 +617,46 @@ class TestParseStages(unittest.TestCase):
     def test_post_tdb_not_in_default_order(self):
         self.assertNotIn("post_tdb", DEFAULT_STAGE_ORDER)
 
+    def test_trgt_is_valid_stage(self):
+        # trgt is explicitly selectable but is kept out of DEFAULT_STAGE_ORDER so
+        # `--stages all` still runs exactly one TR genotyper.
+        self.assertIn("trgt", VALID_STAGES)
+        self.assertNotIn("trgt", DEFAULT_STAGE_ORDER)
+        self.assertEqual(_parse_stages("trgt"), ("trgt",))
+
+
+class TestPlatformTrSubstitution(unittest.TestCase):
+
+    def test_ont_platform_keeps_medaka(self):
+        stages = ("sniffles", "medaka", "tdb_create")
+        self.assertEqual(_apply_platform_tr_substitution(stages, "ont"), stages)
+
+    def test_hifi_platform_swaps_medaka_to_trgt(self):
+        stages = ("sniffles", "medaka", "tdb_create")
+        self.assertEqual(
+            _apply_platform_tr_substitution(stages, "hifi"),
+            ("sniffles", "trgt", "tdb_create"),
+        )
+
+    def test_hifi_case_insensitive(self):
+        self.assertEqual(
+            _apply_platform_tr_substitution(("medaka",), "HiFi"),
+            ("trgt",),
+        )
+
+    def test_no_medaka_means_no_substitution(self):
+        stages = ("sniffles", "kanpig")
+        self.assertEqual(_apply_platform_tr_substitution(stages, "hifi"), stages)
+
+    def test_explicit_trgt_already_present_is_left_alone(self):
+        stages = ("sniffles", "medaka", "trgt")
+        # trgt already requested → don't auto-swap medaka too (caller is explicit)
+        self.assertEqual(_apply_platform_tr_substitution(stages, "hifi"), stages)
+
+    def test_none_platform_is_noop(self):
+        stages = ("medaka",)
+        self.assertEqual(_apply_platform_tr_substitution(stages, None), stages)
+
 
 # ---------------------------------------------------------------------------
 # _sanitize_token tests
@@ -1072,7 +1114,9 @@ class TestPostprocessContextAndSlurm(unittest.TestCase):
             args = parse_args(_base_slurm_argv(deconv_dir, ref, tr_bed, tool_paths))
             ctx = _build_context(args)
             _render_slurm(ctx)
-            for stage in GROUP_SCOPED_STAGES:
+            # Only the group-scoped stages that were actually requested for this
+            # run should have sbatch scripts emitted; trgt is opt-in (HiFi only).
+            for stage in GROUP_SCOPED_STAGES & set(ctx.stages):
                 script = ctx.slurm_dir / f"{stage}.array.sbatch.sh"
                 self.assertTrue(script.exists(), f"Missing SLURM script for {stage}")
 

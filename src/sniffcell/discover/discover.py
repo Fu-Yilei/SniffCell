@@ -41,6 +41,11 @@ DEFAULT_STAGE_ORDER = (
     "clair3",
     "modkit",
 )
+# `trgt` is the PacBio HiFi-friendly TR genotyper. It sits parallel to `medaka`
+# and is auto-substituted in when --clair3-platform=hifi; kept out of
+# DEFAULT_STAGE_ORDER so the "all" alias stays a single TR-genotyping pass.
+VALID_STAGES = DEFAULT_STAGE_ORDER + ("trgt",)
+TR_GENOTYPER_STAGES = {"medaka", "trgt"}
 STAGE_ALIASES = {
     "all": set(DEFAULT_STAGE_ORDER),
     "sv": {"sniffles", "sniffles_filter", "kanpig", "collapse"},
@@ -53,6 +58,7 @@ GROUP_SCOPED_STAGES = {
     "sniffles_filter",
     "kanpig",
     "medaka",
+    "trgt",
     "tdb_create",
     "clair3",
     "modkit",
@@ -63,6 +69,7 @@ STAGE_RUNTIME_TOOLS = {
     "kanpig": {"kanpig", "bcftools"},
     "collapse": {"bcftools", "truvari", "kanpig", "bgzip", "tabix"},
     "medaka": {"medaka"},
+    "trgt": {"trgt", "samtools"},
     "tdb_create": {"tdb"},
     "tdb_merge": {"tdb"},
     "clair3": {"clair3"},
@@ -354,13 +361,28 @@ def _parse_stages(stage_text: str | None) -> tuple[str, ...]:
                 if stage in STAGE_ALIASES[token] and stage not in requested:
                     requested.append(stage)
             continue
-        if token not in DEFAULT_STAGE_ORDER:
+        if token not in VALID_STAGES:
             raise ValueError(f"Unsupported stage: {token}")
         if token not in requested:
             requested.append(token)
     if not requested:
         raise ValueError("No valid stages were selected")
     return tuple(requested)
+
+
+def _apply_platform_tr_substitution(
+    stages: tuple[str, ...], platform: str | None
+) -> tuple[str, ...]:
+    """For HiFi platforms, swap medaka→trgt so a single TR genotyper runs.
+
+    Only applies when medaka is present and trgt is not already requested.
+    Returns the stages tuple unchanged when no substitution is needed.
+    """
+    if not platform or str(platform).lower() != "hifi":
+        return stages
+    if "trgt" in stages or "medaka" not in stages:
+        return stages
+    return tuple("trgt" if stage == "medaka" else stage for stage in stages)
 
 
 def _required_tools_for_stages(stages: Sequence[str]) -> set[str]:
@@ -433,6 +455,7 @@ def _build_context(args) -> RunContext:
     run_id = args.run_id or f"discover_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     run_root = split_dir / "discover" / run_id
     stages = _parse_stages(args.stages)
+    stages = _apply_platform_tr_substitution(stages, getattr(args, "clair3_platform", None))
     required_tools = _required_tools_for_stages(stages)
     tool_paths = {
         "bcftools": _resolve_tool_optional("bcftools", args.bcftools_bin, required="bcftools" in required_tools),
@@ -441,9 +464,11 @@ def _build_context(args) -> RunContext:
         "medaka": _resolve_tool_optional("medaka", args.medaka_bin, required="medaka" in required_tools),
         "modkit": _resolve_tool_optional("modkit", args.modkit_bin, required="modkit" in required_tools),
         "python": _ensure_tool("python", sys.executable),
+        "samtools": _resolve_tool_optional("samtools", getattr(args, "samtools_bin", None), required="samtools" in required_tools),
         "sniffles": _resolve_tool_optional("sniffles", args.sniffles_bin, required="sniffles" in required_tools),
         "tabix": _resolve_tool_optional("tabix", args.tabix_bin, required="tabix" in required_tools),
         "tdb": _resolve_tool_optional("tdb", args.tdb_bin, required="tdb" in required_tools),
+        "trgt": _resolve_tool_optional("trgt", getattr(args, "trgt_bin", None), required="trgt" in required_tools),
         "truvari": _resolve_tool_optional("truvari", args.truvari_bin, required="truvari" in required_tools),
         "clair3": _resolve_tool_optional("run_clair3.sh", args.clair3_bin, required="clair3" in required_tools),
     }
@@ -478,6 +503,8 @@ def _build_context(args) -> RunContext:
         "truvari_refdist": args.truvari_refdist,
         "clair3_platform": args.clair3_platform,
         "clair3_model_path": args.clair3_model_path,
+        "trgt_sample_name_template": getattr(args, "trgt_sample_name_template", "{sample_id}.{group}"),
+        "trgt_karyotype": getattr(args, "trgt_karyotype", None),
     }
     return RunContext(
         sample_id=sample_id,
@@ -633,6 +660,35 @@ def _sv_post_stage_dir(ctx: RunContext) -> Path:
 
 def _medaka_stage_dir(ctx: RunContext, group_name: str) -> Path:
     return ctx.run_root / "medaka_tandem" / f"{_sanitize_token(group_name)}.medaka"
+
+
+def _trgt_stage_dir(ctx: RunContext, group_name: str) -> Path:
+    return ctx.run_root / "trgt" / f"{_sanitize_token(group_name)}.trgt"
+
+
+def _trgt_output_prefix(ctx: RunContext, group_name: str, sample_name: str) -> Path:
+    return _trgt_stage_dir(ctx, group_name) / f"{sample_name}.trgt"
+
+
+def _trgt_output_vcf(ctx: RunContext, group_name: str, sample_name: str) -> Path:
+    return _trgt_output_prefix(ctx, group_name, sample_name).with_suffix(".vcf.gz")
+
+
+def _trgt_output_spanning_sorted_bam(ctx: RunContext, group_name: str, sample_name: str) -> Path:
+    prefix = _trgt_output_prefix(ctx, group_name, sample_name)
+    return prefix.parent / f"{prefix.name}.spanning.sorted.bam"
+
+
+def _karyotype_for_trgt(ctx: RunContext) -> str:
+    override = ctx.params.get("trgt_karyotype")
+    if override:
+        return str(override)
+    sex = (ctx.sex or "").lower()
+    if sex == "male":
+        return "XY"
+    if sex == "female":
+        return "XX"
+    return "XX"
 
 
 def _tdb_stage_dir(ctx: RunContext) -> Path:
@@ -1419,6 +1475,149 @@ def _run_medaka(ctx: RunContext, group_name: str) -> None:
         raise
 
 
+def _run_trgt(ctx: RunContext, group_name: str) -> None:
+    """Run trgt genotype on the per-group split BAM, then sort/index the spanning BAM.
+
+    Mirrors _run_medaka's bookkeeping (status/done/failed records and skip logic)
+    but invokes PacBio's trgt instead of medaka tandem.
+    """
+    group = _group_lookup(ctx, group_name)
+    sample_name = _sample_name(
+        str(ctx.params["trgt_sample_name_template"]), ctx.sample_id, group_name
+    )
+    stage_dir = _trgt_stage_dir(ctx, group_name)
+    stage_dir.mkdir(parents=True, exist_ok=True)
+    output_prefix = _trgt_output_prefix(ctx, group_name, sample_name)
+    output_vcf = _trgt_output_vcf(ctx, group_name, sample_name)
+    spanning_bam = output_prefix.parent / f"{output_prefix.name}.spanning.bam"
+    spanning_sorted = _trgt_output_spanning_sorted_bam(ctx, group_name, sample_name)
+    spanning_sorted_bai = spanning_sorted.with_suffix(spanning_sorted.suffix + ".bai")
+
+    effective_tr_bed = _resolve_targeted_tr_bed(ctx)
+    task = _task_id("trgt", group_name)
+    command_path, stdout_path, stderr_path = _task_paths(ctx, "trgt", group_name)
+
+    if not ctx.dry_run and not _text_file_has_records(effective_tr_bed):
+        empty_cmd = ["skip-empty-tr-bed", str(effective_tr_bed), str(output_vcf)]
+        _write_command(command_path, empty_cmd)
+        _update_status(
+            ctx,
+            task,
+            {
+                "state": "running",
+                "started_at": _now_utc(),
+                "outputs": [str(output_vcf), str(spanning_sorted)],
+                "targeted_tr_bed": str(effective_tr_bed),
+            },
+        )
+        _write_empty_vcf(output_vcf)
+        spanning_sorted.write_bytes(b"")
+        spanning_sorted_bai.write_bytes(b"")
+        _record_done(
+            ctx=ctx,
+            stage="trgt",
+            outputs=[output_vcf, spanning_sorted],
+            command=empty_cmd,
+            group_name=group_name,
+        )
+        _update_status(
+            ctx,
+            task,
+            {
+                "state": "completed_empty",
+                "finished_at": _now_utc(),
+                "outputs": [str(output_vcf), str(spanning_sorted)],
+                "targeted_tr_bed": str(effective_tr_bed),
+            },
+        )
+        return
+
+    karyotype = _karyotype_for_trgt(ctx)
+    threads = str(ctx.params["threads"])
+    cmd = [
+        ctx.tool_paths["trgt"],
+        "genotype",
+        "--genome",
+        str(ctx.reference),
+        "--reads",
+        group.bam_path,
+        "--repeats",
+        str(effective_tr_bed),
+        "--output-prefix",
+        str(output_prefix),
+        "--karyotype",
+        karyotype,
+        "--sample-name",
+        sample_name,
+        "--threads",
+        threads,
+    ]
+    _write_command(command_path, cmd)
+    outputs = [output_vcf, spanning_sorted]
+    if _should_skip(ctx=ctx, stage="trgt", outputs=outputs, group_name=group_name):
+        _update_status(
+            ctx,
+            task,
+            {"state": "skipped", "updated_at": _now_utc(), "outputs": [str(p) for p in outputs]},
+        )
+        return
+    _update_status(
+        ctx,
+        task,
+        {
+            "state": "running",
+            "started_at": _now_utc(),
+            "outputs": [str(p) for p in outputs],
+            "targeted_tr_bed": str(effective_tr_bed),
+        },
+    )
+    try:
+        _run_command(
+            cmd=cmd,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            dry_run=ctx.dry_run,
+        )
+        if not ctx.dry_run:
+            if spanning_bam.exists():
+                samtools = ctx.tool_paths["samtools"]
+                sort_cmd = [samtools, "sort", "-@", threads, "-o", str(spanning_sorted), str(spanning_bam)]
+                _run_command(cmd=sort_cmd, stdout_path=stdout_path, stderr_path=stderr_path, dry_run=False)
+                index_cmd = [samtools, "index", "-@", threads, str(spanning_sorted)]
+                _run_command(cmd=index_cmd, stdout_path=stdout_path, stderr_path=stderr_path, dry_run=False)
+            _record_done(
+                ctx=ctx,
+                stage="trgt",
+                outputs=outputs,
+                command=cmd,
+                group_name=group_name,
+            )
+            _update_status(
+                ctx,
+                task,
+                {
+                    "state": "completed" if output_vcf.exists() else "completed_empty",
+                    "finished_at": _now_utc(),
+                    "outputs": [str(p) for p in outputs],
+                    "targeted_tr_bed": str(effective_tr_bed),
+                },
+            )
+        else:
+            _update_status(
+                ctx,
+                task,
+                {"state": "dry_run", "finished_at": _now_utc(), "outputs": [str(p) for p in outputs]},
+            )
+    except Exception as exc:  # pragma: no cover - exercised via integration
+        _record_failure(ctx=ctx, stage="trgt", command=cmd, error=exc, group_name=group_name)
+        _update_status(
+            ctx,
+            task,
+            {"state": "failed", "finished_at": _now_utc(), "error": str(exc)},
+        )
+        raise
+
+
 def _resolve_tdb_input(ctx: RunContext, group_name: str) -> Path:
     run_vcf = _medaka_output_vcf(ctx, group_name)
     if run_vcf.exists():
@@ -1747,6 +1946,7 @@ def _execute_local(ctx: RunContext) -> None:
         "sniffles_filter": _run_sniffles_filter,
         "kanpig": _run_kanpig,
         "medaka": _run_medaka,
+        "trgt": _run_trgt,
         "tdb_create": _run_tdb_create,
         "clair3": _run_clair3,
         "modkit": _run_modkit,
@@ -1844,7 +2044,15 @@ def _build_recursive_cli(
         ctx.tool_paths["clair3"],
         "--clair3-platform",
         str(ctx.params["clair3_platform"]),
+        "--trgt-bin",
+        ctx.tool_paths.get("trgt") or "trgt",
+        "--samtools-bin",
+        ctx.tool_paths.get("samtools") or "samtools",
+        "--trgt-sample-name-template",
+        str(ctx.params["trgt_sample_name_template"]),
     ]
+    if ctx.params.get("trgt_karyotype"):
+        cmd.extend(["--trgt-karyotype", str(ctx.params["trgt_karyotype"])])
     if ctx.params.get("medaka_phasing"):
         cmd.extend(["--medaka-phasing", str(ctx.params["medaka_phasing"])])
     if ctx.params["collapse_use"] != "kanpig":
@@ -1912,6 +2120,7 @@ def _render_slurm(ctx: RunContext) -> None:
         "sniffles_filter": ("pp_snifflt", "01:00:00"),
         "kanpig": ("pp_kanpig", "12:00:00"),
         "medaka": ("pp_medaka", "24:00:00"),
+        "trgt": ("pp_trgt", "06:00:00"),
         "tdb_create": ("pp_tdbc", "04:00:00"),
         "clair3": ("pp_clair3", "24:00:00"),
         "snv_post_processing": ("pp_snvpost", "04:00:00"),

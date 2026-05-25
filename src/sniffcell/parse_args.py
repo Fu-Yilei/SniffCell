@@ -100,8 +100,20 @@ def _build_discover_run_parent_parser() -> argparse.ArgumentParser:
         help="Output mode label for modkit-derived methylation summaries. Default=separate.",
     )
     parser.add_argument("--clair3-bin", default=None, help="Optional run_clair3.sh executable path.")
-    parser.add_argument("--clair3-platform", default="ont", help="Sequencing platform for Clair3 (e.g. ont, hifi). Default=ont.")
+    parser.add_argument("--clair3-platform", default="ont", help="Sequencing platform for Clair3 (e.g. ont, hifi). When set to 'hifi', the discover pipeline auto-substitutes trgt for medaka in the TR genotyping stage. Default=ont.")
     parser.add_argument("--clair3-model-path", default=None, help="Path to Clair3 model directory. Required when running the clair3 stage.")
+    parser.add_argument("--trgt-bin", default=None, help="Optional trgt executable path. Required for the trgt stage (used as the TR genotyper on PacBio HiFi data).")
+    parser.add_argument("--samtools-bin", default=None, help="Optional samtools executable path. Used by the trgt stage to sort/index the spanning BAM output.")
+    parser.add_argument(
+        "--trgt-sample-name-template",
+        default="{sample_id}.{group}",
+        help="Sample naming template for trgt genotype. Default={sample_id}.{group}.",
+    )
+    parser.add_argument(
+        "--trgt-karyotype",
+        default=None,
+        help="Karyotype string passed to trgt (XX, XY, or a path to a karyotype file). If unset, inferred from --sex (male→XY, female→XX).",
+    )
     return parser
 
 
