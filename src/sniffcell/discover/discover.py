@@ -505,6 +505,8 @@ def _build_context(args) -> RunContext:
         "clair3_model_path": args.clair3_model_path,
         "trgt_sample_name_template": getattr(args, "trgt_sample_name_template", "{sample_id}.{group}"),
         "trgt_karyotype": getattr(args, "trgt_karyotype", None),
+        "tr_margin_bp": getattr(args, "tr_margin_bp", 100),
+        "tr_min_supporting_reads": getattr(args, "tr_min_supporting_reads", 2),
     }
     return RunContext(
         sample_id=sample_id,
@@ -1700,11 +1702,6 @@ def _run_tr_post_processing(ctx: RunContext) -> None:
         raise ValueError("tr_post_processing requires exactly two selected groups")
     output_dir = _tr_post_stage_dir(ctx)
     summary_path = output_dir / "summary.json"
-    merged_tdb = _merged_tdb_output_path(ctx)
-    if not merged_tdb.exists() and not ctx.dry_run:
-        existing_tdb = _existing_split_merged_tdb(ctx)
-        if existing_tdb.exists():
-            merged_tdb = existing_tdb
     group_a, group_b = ctx.selected_groups
     sample_a_label = _sample_name(str(ctx.params["medaka_sample_name_template"]), ctx.sample_id, group_a)
     sample_b_label = _sample_name(str(ctx.params["medaka_sample_name_template"]), ctx.sample_id, group_b)
@@ -1724,17 +1721,15 @@ def _run_tr_post_processing(ctx: RunContext) -> None:
         sample_a_label,
         "--sample-b-label",
         sample_b_label,
-        "--merged-tdb",
-        str(merged_tdb),
         "--group-a-fasta",
         str(_resolve_trimmed_reads_input(ctx, group_a)),
         "--group-b-fasta",
         str(_resolve_trimmed_reads_input(ctx, group_b)),
+        "--margin-bp",
+        str(ctx.params["tr_margin_bp"]),
+        "--min-supporting-reads",
+        str(ctx.params["tr_min_supporting_reads"]),
     ]
-    if bool(ctx.params.get("tail_expansion_rescue", False)):
-        cmd.append("--tail-expansion-rescue")
-    if not bool(ctx.params.get("tail_require_sample_range_support", True)):
-        cmd.append("--no-tail-expansion-require-sample-range-support")
     _run_task(
         ctx=ctx,
         stage="tr_post_processing",

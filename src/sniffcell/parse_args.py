@@ -72,23 +72,21 @@ def _build_discover_run_parent_parser() -> argparse.ArgumentParser:
         help="Sample naming template for medaka tandem. Default={sample_id}.{group}.",
     )
     parser.add_argument(
-        "--tail-expansion-rescue",
-        action="store_true",
-        default=False,
+        "--tr-margin-bp",
+        type=int,
+        default=100,
         help=(
-            "Experimental: let tr_post_processing rescue loci with little/no TDB hap delta when one group "
-            "shows a hap-specific expansion tail in the trimmed reads."
+            "TR read-length scan: minimum bp by which each supporting read of the change group "
+            "must exceed the baseline group's longest read at a locus. Default=100."
         ),
     )
     parser.add_argument(
-        "--tail-expansion-require-sample-range-support",
-        dest="tail_require_sample_range_support",
-        action=argparse.BooleanOptionalAction,
-        default=True,
+        "--tr-min-supporting-reads",
+        type=int,
+        default=2,
         help=(
-            "When tail-expansion rescue is enabled, require the rescued haplotype to also show same-haplotype "
-            "TDB sample-range support. Use --no-tail-expansion-require-sample-range-support to allow "
-            "trimmed-read-only tail rescue."
+            "TR read-length scan: number of the change group's longest reads that must each clear "
+            "the baseline-max + margin threshold for a locus to be called. Default=2."
         ),
     )
     parser.add_argument("--tdb-create-mem", type=int, default=4, help="Memory in GB for tdb create. Default=4.")
