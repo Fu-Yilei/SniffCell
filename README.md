@@ -165,6 +165,19 @@ anno_out/
 For samples where you want to compare SVs across cell populations:
 
 ```bash
+# Optional: plan regional inputs before running targeted deconvolution/discovery
+sniffcell regions \
+  -b pbmc_ctdmr.tsv \
+  --regions loci_of_interest.bed \
+  -o regional_plan \
+  --regions-ctdmrs 10
+```
+
+This writes `regional_plan/subset_regions.bed` for downstream subsetting plus
+`ctdmr_subset.tsv`, `ctdmr_region_summary.tsv`, and `ctdmr_selected_summary.tsv`
+describing the ctDMRs selected from the `sniffcell find` output.
+
+```bash
 # Step 1: Deconvolve reads and split into cell-type-specific BAMs
 sniffcell deconv \
   -i sample.bam \

@@ -63,6 +63,8 @@ def _write_deconv_run_manifest(
     original_bed: str | None = None,
     regions: str | None = None,
     regions_ctdmrs: int | None = None,
+    regions_left_ctdmrs: int | None = None,
+    regions_right_ctdmrs: int | None = None,
     regional_inputs: ResolvedRegionalInputs | None = None,
     threads: int,
     read_assignment_mode: str,
@@ -88,6 +90,12 @@ def _write_deconv_run_manifest(
             "per_read_min_agreement": float(per_read_min_agreement),
             "regions": regions,
             "regions_ctdmrs": (None if regions_ctdmrs is None else int(regions_ctdmrs)),
+            "regions_left_ctdmrs": (
+                None if regions_left_ctdmrs is None else int(regions_left_ctdmrs)
+            ),
+            "regions_right_ctdmrs": (
+                None if regions_right_ctdmrs is None else int(regions_right_ctdmrs)
+            ),
         },
         "outputs": {
             "requested_output": os.path.abspath(output_path),
@@ -105,6 +113,8 @@ def _write_deconv_run_manifest(
             "manifest": regional_inputs.manifest_path,
             "targets_bed": regional_inputs.targets_bed_path,
             "expanded_bed": regional_inputs.expanded_bed_path,
+            "subset_regions_bed": regional_inputs.expanded_bed_path,
+            "subset_bed": regional_inputs.subset_bed_path,
             "selected_ctdmr_count": int(regional_inputs.selected_ctdmr_count),
             "subset_bam_read_count": int(regional_inputs.subset_bam_read_count),
         }
@@ -658,6 +668,10 @@ def deconv_main(args):
     regions = getattr(args, "regions", None)
     regions = None if regions is None else str(regions).strip() or None
     regions_ctdmrs = int(getattr(args, "regions_ctdmrs", 10))
+    regions_left_arg = getattr(args, "regions_left_ctdmrs", None)
+    regions_right_arg = getattr(args, "regions_right_ctdmrs", None)
+    regions_left_ctdmrs = regions_ctdmrs if regions_left_arg is None else int(regions_left_arg)
+    regions_right_ctdmrs = regions_ctdmrs if regions_right_arg is None else int(regions_right_arg)
     per_read_min_agreement = float(getattr(args, "per_read_min_agreement", 0.66))
     skip_overall_summary = bool(getattr(args, "skip_overall_summary", False))
     regional_inputs: ResolvedRegionalInputs | None = None
@@ -671,6 +685,10 @@ def deconv_main(args):
         raise ValueError("per_read_min_agreement must be in [0, 1]")
     if regions_ctdmrs < 0:
         raise ValueError("regions_ctdmrs must be >= 0")
+    if regions_left_ctdmrs < 0:
+        raise ValueError("regions_left_ctdmrs must be >= 0")
+    if regions_right_ctdmrs < 0:
+        raise ValueError("regions_right_ctdmrs must be >= 0")
 
     outputs = _resolve_output_paths(output_arg)
     os.makedirs(outputs["output_dir"], exist_ok=True)
@@ -679,9 +697,10 @@ def deconv_main(args):
     original_bed = bed_input
     if regions:
         logger.info(
-            "Resolving targeted deconv inputs: regions=%s ctdmrs=%d",
+            "Resolving targeted deconv inputs: regions=%s left_ctdmrs=%d right_ctdmrs=%d",
             regions,
-            regions_ctdmrs,
+            regions_left_ctdmrs,
+            regions_right_ctdmrs,
         )
         full_bed_df = _load_ctdmr_bed(bed_input)
         regional_inputs = resolve_regional_inputs(
@@ -689,8 +708,9 @@ def deconv_main(args):
             input_bam=input_bam,
             output_dir=outputs["output_dir"],
             regions_arg=regions,
-            left_ctdmrs=regions_ctdmrs,
-            right_ctdmrs=regions_ctdmrs,
+            left_ctdmrs=regions_left_ctdmrs,
+            right_ctdmrs=regions_right_ctdmrs,
+            threads=threads,
         )
         bed_input = regional_inputs.subset_bed_path
         input_bam = regional_inputs.subset_bam_path
@@ -724,6 +744,8 @@ def deconv_main(args):
         original_bed=original_bed,
         regions=regions,
         regions_ctdmrs=regions_ctdmrs if regions else None,
+        regions_left_ctdmrs=regions_left_ctdmrs if regions else None,
+        regions_right_ctdmrs=regions_right_ctdmrs if regions else None,
         regional_inputs=regional_inputs,
         threads=threads,
         read_assignment_mode=read_assignment_mode,

@@ -9,6 +9,7 @@ from sniffcell.discover import tr_post_processing as discover_tr_post_processing
 from sniffcell.find import find
 from sniffcell.parse_args import parse_args  # assuming you defined parse_args in args.py
 from sniffcell.deconv import deconv  # assuming these modules exist
+from sniffcell.deconv import regions as region_planner
 from sniffcell.dmsv import dmsv
 from sniffcell.discover import discover_main
 from sniffcell import sv_discovery as discover_sv_discovery
@@ -22,6 +23,8 @@ def main(argv=None):
     args = parse_args(argv)
     if args.command == "find":
         find.find_main(args)
+    elif args.command == "regions":
+        region_planner.regions_main(args)
     elif args.command == "anno":
         os.makedirs(args.output, exist_ok=True)
         anno.anno_main(args)

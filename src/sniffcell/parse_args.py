@@ -147,7 +147,7 @@ def parse_args(argv):
         version=f"sniffcell {version}"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
-    valid_commands = ["find", "deconv", "discover", "anno", "svanno", "dmsv", "viz", "igvviz", "report"]
+    valid_commands = ["find", "regions", "deconv", "discover", "anno", "svanno", "dmsv", "viz", "igvviz", "report"]
     # Subcommand: find
     find_parser = subparsers.add_parser("find", help="Find cell type-specific DMRs.")
     atlas_dir = os.path.abspath("atlas")
@@ -168,6 +168,46 @@ def parse_args(argv):
     find_parser.add_argument( "--min_rows", type=int, default=2, help="Minimum number of rows (CpG groups in index) for calling DMRs, default=2")
     find_parser.add_argument( "--min_cpgs", type=int, default=3, help="Minimum number of CpGs for calling DMRs, default=3" )
     find_parser.add_argument( "--max_gap_bp", type=int, default=2000, help="Maximum gap among groups for calling DMRs, default=2000" )
+
+    regions_parser = subparsers.add_parser(
+        "regions",
+        help="Plan regional ctDMR and subset BED inputs without running deconvolution.",
+    )
+    regions_parser.add_argument(
+        "-b",
+        "--bed",
+        required=True,
+        help="Input ctDMR BED/TSV file from sniffcell find. Use the main TSV, not the .igv.bed companion.",
+    )
+    regions_parser.add_argument(
+        "--regions",
+        required=True,
+        help="Target loci as a BED file or a single chr:start-end region string.",
+    )
+    regions_parser.add_argument(
+        "-o",
+        "--output",
+        required=True,
+        help="Output directory for targets.bed, subset_regions.bed, ctDMR subset, summaries, and manifest.",
+    )
+    regions_parser.add_argument(
+        "--regions-ctdmrs",
+        type=int,
+        default=10,
+        help="Include this many nearest ctDMRs on each side of each target unless side-specific counts are set. Default=10.",
+    )
+    regions_parser.add_argument(
+        "--regions-left-ctdmrs",
+        type=int,
+        default=None,
+        help="Nearest ctDMRs to include on the left side of each target. Overrides --regions-ctdmrs for the left side.",
+    )
+    regions_parser.add_argument(
+        "--regions-right-ctdmrs",
+        type=int,
+        default=None,
+        help="Nearest ctDMRs to include on the right side of each target. Overrides --regions-ctdmrs for the right side.",
+    )
 
     discover_parser = subparsers.add_parser(
         "discover",
@@ -275,6 +315,18 @@ def parse_args(argv):
         type=int,
         default=10,
         help="When --regions is set, include this many nearest ctDMRs on each side of each target. Default=10.",
+    )
+    deconv_parser.add_argument(
+        "--regions-left-ctdmrs",
+        type=int,
+        default=None,
+        help="When --regions is set, include this many nearest ctDMRs on the left side of each target. Overrides --regions-ctdmrs for the left side.",
+    )
+    deconv_parser.add_argument(
+        "--regions-right-ctdmrs",
+        type=int,
+        default=None,
+        help="When --regions is set, include this many nearest ctDMRs on the right side of each target. Overrides --regions-ctdmrs for the right side.",
     )
     deconv_parser.add_argument(
         "--resume",

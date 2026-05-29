@@ -16,6 +16,7 @@ from sniffcell.deconv.bam_split import (
     _parse_requested_split_groups,
     _write_requested_split_group_outputs,
 )
+from sniffcell.deconv.regions import TargetRegion, _write_subset_bam
 from sniffcell.parse_args import parse_args
 
 
@@ -204,6 +205,55 @@ class TestDeconvOutputPaths(unittest.TestCase):
             b_df = pd.read_csv(Path(td) / "B.tsv", sep="\t", index_col=0)
             self.assertEqual(a_df.index.tolist(), ["r1", "r2"])
             self.assertEqual(b_df.index.tolist(), ["r3"])
+
+
+class TestRegionalDeconvInputs(unittest.TestCase):
+    def _make_read(self, name: str, start: int, length: int) -> pysam.AlignedSegment:
+        seg = pysam.AlignedSegment()
+        seg.query_name = name
+        seg.query_sequence = "A" * length
+        seg.flag = 0
+        seg.reference_id = 0
+        seg.reference_start = start
+        seg.mapping_quality = 60
+        seg.cigar = ((0, length),)
+        seg.query_qualities = pysam.qualitystring_to_array("I" * length)
+        return seg
+
+    def test_write_subset_bam_sorts_before_indexing(self):
+        header = {"HD": {"VN": "1.6", "SO": "coordinate"}, "SQ": [{"SN": "chr1", "LN": 1000}]}
+        with tempfile.TemporaryDirectory() as td:
+            input_bam = Path(td) / "input.bam"
+            with pysam.AlignmentFile(str(input_bam), "wb", header=header) as bam_out:
+                bam_out.write(self._make_read("spans_both", 185, 40))
+                bam_out.write(self._make_read("first_only", 190, 10))
+            pysam.index(str(input_bam))
+
+            output_bam = Path(td) / "subset.bam"
+            regions_bed = Path(td) / "regions.bed"
+            regions_bed.write_text("chr1\t190\t200\nchr1\t210\t215\n", encoding="utf-8")
+            n_reads = _write_subset_bam(
+                input_bam=str(input_bam),
+                output_bam=output_bam,
+                regions=[
+                    TargetRegion("chr1", 190, 200),
+                    TargetRegion("chr1", 210, 215),
+                ],
+                regions_bed=regions_bed,
+                threads=2,
+            )
+
+            self.assertEqual(n_reads, 2)
+            self.assertTrue(output_bam.exists())
+            self.assertTrue(Path(str(output_bam) + ".bai").exists())
+            self.assertFalse((Path(td) / "subset.unsorted.bam").exists())
+
+            with pysam.AlignmentFile(str(output_bam), "rb") as bam_in:
+                records = list(bam_in.fetch(until_eof=True))
+                starts = [record.reference_start for record in records]
+                names = [record.query_name for record in records]
+            self.assertEqual(starts, sorted(starts))
+            self.assertEqual(names, ["spans_both", "first_only"])
 
 
 class TestRequestedBamSplits(unittest.TestCase):
