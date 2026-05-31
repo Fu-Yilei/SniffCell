@@ -38,13 +38,14 @@ DEFAULT_STAGE_ORDER = (
     "medaka",
     "tdb_create",
     "tdb_merge",
-    "clair3",
     "modkit",
 )
 # `trgt` is the PacBio HiFi-friendly TR genotyper. It sits parallel to `medaka`
 # and is auto-substituted in when --clair3-platform=hifi; kept out of
 # DEFAULT_STAGE_ORDER so the "all" alias stays a single TR-genotyping pass.
-VALID_STAGES = DEFAULT_STAGE_ORDER + ("trgt",)
+# `clair3` is explicit opt-in because it is substantially heavier than the
+# default SV/TR/methylation discovery stages.
+VALID_STAGES = DEFAULT_STAGE_ORDER + ("trgt", "clair3")
 TR_GENOTYPER_STAGES = {"medaka", "trgt"}
 STAGE_ALIASES = {
     "all": set(DEFAULT_STAGE_ORDER),
@@ -357,7 +358,7 @@ def _parse_stages(stage_text: str | None) -> tuple[str, ...]:
         if not token:
             continue
         if token in STAGE_ALIASES:
-            for stage in DEFAULT_STAGE_ORDER:
+            for stage in VALID_STAGES:
                 if stage in STAGE_ALIASES[token] and stage not in requested:
                     requested.append(stage)
             continue

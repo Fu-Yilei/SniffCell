@@ -562,6 +562,7 @@ class TestParseStages(unittest.TestCase):
 
     def test_none_returns_default_order(self):
         self.assertEqual(_parse_stages(None), DEFAULT_STAGE_ORDER)
+        self.assertNotIn("clair3", DEFAULT_STAGE_ORDER)
 
     def test_empty_string_returns_default_order(self):
         self.assertEqual(_parse_stages(""), DEFAULT_STAGE_ORDER)
@@ -585,6 +586,7 @@ class TestParseStages(unittest.TestCase):
     def test_all_alias_returns_full_order(self):
         stages = _parse_stages("all")
         self.assertEqual(stages, DEFAULT_STAGE_ORDER)
+        self.assertNotIn("clair3", stages)
 
     def test_sv_tdb_modkit_combo(self):
         stages = _parse_stages("sv,tdb,modkit")
@@ -1136,11 +1138,12 @@ class TestPostprocessContextAndSlurm(unittest.TestCase):
             args = parse_args(_base_slurm_argv(deconv_dir, ref, tr_bed, tool_paths))
             ctx = _build_context(args)
             _render_slurm(ctx)
-            for script_name in ("collapse.sbatch.sh", "tdb_merge.sbatch.sh", "snv_post_processing.sbatch.sh"):
+            for script_name in ("collapse.sbatch.sh", "tdb_merge.sbatch.sh"):
                 self.assertTrue(
                     (ctx.slurm_dir / script_name).exists(),
                     f"Missing SLURM script: {script_name}",
                 )
+            self.assertFalse((ctx.slurm_dir / "snv_post_processing.sbatch.sh").exists())
 
     def test_submit_script_has_concurrent_first_tier(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1152,10 +1155,10 @@ class TestPostprocessContextAndSlurm(unittest.TestCase):
             submit_text = (ctx.slurm_dir / "submit_pipeline.sh").read_text()
             # First-tier independent jobs
             self.assertIn("SNIFFLES_JID", submit_text)
-            self.assertIn("CLAIR3_JID", submit_text)
-            self.assertIn("SNV_POST_PROCESSING_JID", submit_text)
             self.assertIn("MEDAKA_JID", submit_text)
             self.assertIn("MODKIT_JID", submit_text)
+            self.assertNotIn("CLAIR3_JID", submit_text)
+            self.assertNotIn("SNV_POST_PROCESSING_JID", submit_text)
 
     def test_submit_script_has_dependent_chain(self):
         with tempfile.TemporaryDirectory() as td:
