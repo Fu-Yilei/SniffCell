@@ -507,7 +507,9 @@ def _build_context(args) -> RunContext:
         "trgt_sample_name_template": getattr(args, "trgt_sample_name_template", "{sample_id}.{group}"),
         "trgt_karyotype": getattr(args, "trgt_karyotype", None),
         "tr_margin_bp": getattr(args, "tr_margin_bp", 100),
-        "tr_min_supporting_reads": getattr(args, "tr_min_supporting_reads", 2),
+        "tr_min_supporting_reads": getattr(args, "tr_min_supporting_reads", 3),
+        "tr_min_total_reads": getattr(args, "tr_min_total_reads", 5),
+        "tr_min_motif_size": getattr(args, "tr_min_motif_size", 3),
     }
     return RunContext(
         sample_id=sample_id,
@@ -773,6 +775,46 @@ def _resolve_trimmed_reads_input(ctx: RunContext, group_name: str) -> Path:
     return run_fasta
 
 
+def _resolve_trgt_spanning_input(ctx: RunContext, group_name: str) -> Path:
+    sample_name = _sample_name(
+        str(ctx.params["trgt_sample_name_template"]), ctx.sample_id, group_name
+    )
+    return _trgt_output_spanning_sorted_bam(ctx, group_name, sample_name)
+
+
+def _tr_post_source_args(ctx: RunContext, group_a: str, group_b: str) -> list[str]:
+    fasta_a = _resolve_trimmed_reads_input(ctx, group_a)
+    fasta_b = _resolve_trimmed_reads_input(ctx, group_b)
+    if fasta_a.exists() and fasta_b.exists():
+        return [
+            "--group-a-fasta",
+            str(fasta_a),
+            "--group-b-fasta",
+            str(fasta_b),
+        ]
+
+    spanning_a = _resolve_trgt_spanning_input(ctx, group_a)
+    spanning_b = _resolve_trgt_spanning_input(ctx, group_b)
+    if spanning_a.exists() and spanning_b.exists():
+        return [
+            "--group-a-spanning-bam",
+            str(spanning_a),
+            "--group-b-spanning-bam",
+            str(spanning_b),
+            "--tr-bed",
+            str(ctx.tr_bed),
+        ]
+
+    # Preserve the historical skipped-output behavior when neither source is
+    # available yet, while recording the Medaka paths the caller expected.
+    return [
+        "--group-a-fasta",
+        str(fasta_a),
+        "--group-b-fasta",
+        str(fasta_b),
+    ]
+
+
 def _write_run_manifest(ctx: RunContext) -> None:
     payload = {
         "created_at": _now_utc(),
@@ -845,6 +887,8 @@ def _selected_task_specs(ctx: RunContext) -> list[tuple[str, str | None]]:
             specs.extend((stage, group_name) for group_name in ctx.selected_groups)
             if stage == "clair3" and len(ctx.selected_groups) == 2:
                 specs.append(("snv_post_processing", None))
+            if stage == "trgt" and len(ctx.selected_groups) == 2:
+                specs.append(("tr_post_processing", None))
             continue
         if stage == "collapse":
             specs.extend(
@@ -1722,15 +1766,15 @@ def _run_tr_post_processing(ctx: RunContext) -> None:
         sample_a_label,
         "--sample-b-label",
         sample_b_label,
-        "--group-a-fasta",
-        str(_resolve_trimmed_reads_input(ctx, group_a)),
-        "--group-b-fasta",
-        str(_resolve_trimmed_reads_input(ctx, group_b)),
         "--margin-bp",
         str(ctx.params["tr_margin_bp"]),
         "--min-supporting-reads",
         str(ctx.params["tr_min_supporting_reads"]),
-    ]
+        "--min-total-reads",
+        str(ctx.params["tr_min_total_reads"]),
+        "--min-motif-size",
+        str(ctx.params["tr_min_motif_size"]),
+    ] + _tr_post_source_args(ctx, group_a, group_b)
     _run_task(
         ctx=ctx,
         stage="tr_post_processing",
@@ -1953,6 +1997,8 @@ def _execute_local(ctx: RunContext) -> None:
                 stage_handlers[stage](ctx, group_name)
             if stage == "clair3" and len(ctx.selected_groups) == 2:
                 _run_snv_post_processing(ctx)
+            if stage == "trgt" and len(ctx.selected_groups) == 2:
+                _run_tr_post_processing(ctx)
         elif stage == "collapse":
             if len(ctx.selected_groups) != 2:
                 raise ValueError("collapse requires exactly two selected groups")

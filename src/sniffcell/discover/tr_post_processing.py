@@ -2,17 +2,18 @@
 
 This module implements the "somatic scan" TR-discovery method: instead of
 modelling tandem-repeat allele lengths through a merged TDB, it works directly
-off the per-group spanning reads that ``medaka tandem`` already trims out
-(``trimmed_reads.fasta``) and uses each read's length as a proxy for the TR
-allele length at its locus.
+off the per-group spanning reads emitted by the TR genotyper. For medaka tandem
+this is ``trimmed_reads.fasta``. For TRGT this is the spanning BAM; the read
+length proxy is flank-adjusted using TRGT's ``FL`` tag when available.
 
 For every locus that has spanning reads in either of the two split groups we
 pool the read lengths per group (haplotype-agnostic) and apply a paired,
 directional comparison:
 
     A locus is a confident TR change in favour of one group ("change group")
-    when its top ``min_supporting_reads`` reads are EACH longer than the other
-    group's longest read by at least ``margin_bp``.
+    when both groups have at least ``min_total_reads`` spanning reads and the
+    change group's top ``min_supporting_reads`` reads are EACH longer than the
+    other group's longest read by at least ``margin_bp``.
 
 The longest read of the comparator group is the "anchor"; the comparator must
 contribute at least one read (loci where the baseline group has no spanning
@@ -20,7 +21,15 @@ reads are skipped to avoid coverage-driven false positives). The method only
 calls expansions of the change group relative to the baseline group, which is
 exactly the signal the genome-wide somatic scan was built around.
 
-``margin_bp`` and ``min_supporting_reads`` are the two tunable parameters.
+``margin_bp``, ``min_supporting_reads``, and ``min_total_reads`` are the tunable
+parameters.
+
+A locus is additionally dropped when the repeat unit driving the call is shorter
+than ``min_motif_size`` bp. The motif is read directly off the change group's
+longest spanning read, so homopolymer (1 bp) and dinucleotide (2 bp) tracts --
+where ONT length estimation slips badly and inflates a handful of reads into
+spurious multi-kb "expansions" -- are excluded by default (``min_motif_size=3``).
+Set ``--min-motif-size 1`` to recover the previous, unfiltered behaviour.
 
 The output schema (``tr_changes.bed.tsv`` + ``summary.json``) is kept
 compatible with :mod:`sniffcell.discover.harmonize_variants` so the rest of the
@@ -49,7 +58,20 @@ from sniffcell.discover.discover import (
 
 
 DEFAULT_MARGIN_BP = 100
-DEFAULT_MIN_SUPPORTING_READS = 2
+DEFAULT_MIN_SUPPORTING_READS = 3
+DEFAULT_MIN_TOTAL_READS = 5
+DEFAULT_TRGT_FALLBACK_FLANK_BP = 50
+DEFAULT_MIN_MOTIF_SIZE = 3
+
+# Motif detection on the change group's longest read: the smallest repeat unit
+# (1..``_MOTIF_MAX_PERIOD`` bp) is accepted only when at least
+# ``_MOTIF_MIN_MATCH_FRAC`` of bases match the base ``period`` positions ahead,
+# evaluated over the most repetitive ``_MOTIF_PROBE_WINDOW_BP`` window so flanks
+# do not dilute the signal. Below the match floor the motif is "undetermined"
+# and the locus is kept (the filter only ever drops *confident* short motifs).
+_MOTIF_MAX_PERIOD = 6
+_MOTIF_MIN_MATCH_FRAC = 0.7
+_MOTIF_PROBE_WINDOW_BP = 200
 
 _READLEN_SIGNAL_CLASS = "readlen_paired"
 _CHANGE_ALLELE = "all"  # the scan pools reads across haplotypes
@@ -76,7 +98,7 @@ _TR_BED_COLS: list[str] = [
     "n_change_reads", "n_baseline_reads",
     "n_change_support_reads", "n_baseline_support_reads",
     "change_max_bp", "baseline_max_bp", "baseline_anchor_bp",
-    "margin_bp", "min_supporting_reads",
+    "margin_bp", "min_supporting_reads", "min_total_reads",
     "change_length_bp", "change_support_min_excess_bp",
     "change_read_mean", "baseline_read_mean",
     "change_read_range", "baseline_read_range",
@@ -98,8 +120,14 @@ class TrPostArgs:
     sample_b_label: str
     group_a_fasta: Path
     group_b_fasta: Path
+    group_a_spanning_bam: Path | None
+    group_b_spanning_bam: Path | None
+    tr_bed: Path | None
+    trgt_fallback_flank_bp: int
     margin_bp: int
     min_supporting_reads: int
+    min_total_reads: int
+    min_motif_size: int
     make_plots: bool
 
 
@@ -123,8 +151,9 @@ def _build_arg_parser(
         description=(
             "Call tandem-repeat changes between two split groups using a paired "
             "read-length comparison of medaka trimmed reads. A locus is called when "
-            "one group's top --min-supporting-reads reads each exceed the other "
-            "group's longest read by at least --margin-bp."
+            "both groups have at least --min-total-reads reads and one group's top "
+            "--min-supporting-reads reads each exceed the other group's longest read "
+            "by at least --margin-bp."
         ),
         add_help=add_help,
     )
@@ -145,6 +174,30 @@ def _build_arg_parser(
         help="trimmed_reads.fasta for the second group (default <split-dir>/medaka_tandem/<group_b>.medaka/trimmed_reads.fasta)",
     )
     parser.add_argument(
+        "--group-a-spanning-bam",
+        default=None,
+        help="trgt spanning BAM for the first group. Used when --group-a-fasta is unavailable.",
+    )
+    parser.add_argument(
+        "--group-b-spanning-bam",
+        default=None,
+        help="trgt spanning BAM for the second group. Used when --group-b-fasta is unavailable.",
+    )
+    parser.add_argument(
+        "--tr-bed",
+        default=None,
+        help="TR BED used by trgt. Required when using --group-a/--group-b-spanning-bam.",
+    )
+    parser.add_argument(
+        "--trgt-fallback-flank-bp",
+        type=int,
+        default=DEFAULT_TRGT_FALLBACK_FLANK_BP,
+        help=(
+            "Fallback per-side TRGT flank length to subtract when a spanning BAM read lacks "
+            f"the FL tag. Default={DEFAULT_TRGT_FALLBACK_FLANK_BP}."
+        ),
+    )
+    parser.add_argument(
         "--margin-bp",
         type=int,
         default=DEFAULT_MARGIN_BP,
@@ -160,6 +213,26 @@ def _build_arg_parser(
         help=(
             "Number of the change group's longest reads that must each clear the baseline-max + margin "
             f"threshold for a locus to be called. Default={DEFAULT_MIN_SUPPORTING_READS}."
+        ),
+    )
+    parser.add_argument(
+        "--min-total-reads",
+        type=int,
+        default=DEFAULT_MIN_TOTAL_READS,
+        help=(
+            "Minimum total spanning reads required in each group before testing a locus. "
+            f"Default={DEFAULT_MIN_TOTAL_READS}."
+        ),
+    )
+    parser.add_argument(
+        "--min-motif-size",
+        type=int,
+        default=DEFAULT_MIN_MOTIF_SIZE,
+        help=(
+            "Drop a called locus when the repeat unit of the change group's longest read is "
+            "shorter than this many bp. Excludes homopolymer/dinucleotide tracts where ONT "
+            "length estimation slips and inflates a few reads into spurious multi-kb expansions. "
+            f"Use 1 to disable. Default={DEFAULT_MIN_MOTIF_SIZE}."
         ),
     )
     parser.add_argument(
@@ -195,12 +268,24 @@ def _resolve_args(raw_args) -> TrPostArgs:
         if raw_args.group_b_fasta
         else split_dir / "medaka_tandem" / f"{group_b}.medaka" / "trimmed_reads.fasta"
     )
+    group_a_spanning_bam = _expand_path(raw_args.group_a_spanning_bam) if raw_args.group_a_spanning_bam else None
+    group_b_spanning_bam = _expand_path(raw_args.group_b_spanning_bam) if raw_args.group_b_spanning_bam else None
+    tr_bed = _expand_path(raw_args.tr_bed) if raw_args.tr_bed else None
+    trgt_fallback_flank_bp = int(raw_args.trgt_fallback_flank_bp)
     margin_bp = int(raw_args.margin_bp)
     min_supporting_reads = int(raw_args.min_supporting_reads)
+    min_total_reads = int(raw_args.min_total_reads)
+    min_motif_size = int(raw_args.min_motif_size)
+    if trgt_fallback_flank_bp < 0:
+        raise ValueError("--trgt-fallback-flank-bp must be >= 0")
     if margin_bp < 0:
         raise ValueError("--margin-bp must be >= 0")
     if min_supporting_reads < 1:
         raise ValueError("--min-supporting-reads must be >= 1")
+    if min_total_reads < min_supporting_reads:
+        raise ValueError("--min-total-reads must be >= --min-supporting-reads")
+    if min_motif_size < 1:
+        raise ValueError("--min-motif-size must be >= 1")
     return TrPostArgs(
         split_dir=split_dir,
         output_dir=output_dir,
@@ -211,8 +296,14 @@ def _resolve_args(raw_args) -> TrPostArgs:
         sample_b_label=sample_b_label,
         group_a_fasta=group_a_fasta,
         group_b_fasta=group_b_fasta,
+        group_a_spanning_bam=group_a_spanning_bam,
+        group_b_spanning_bam=group_b_spanning_bam,
+        tr_bed=tr_bed,
+        trgt_fallback_flank_bp=trgt_fallback_flank_bp,
         margin_bp=margin_bp,
         min_supporting_reads=min_supporting_reads,
+        min_total_reads=min_total_reads,
+        min_motif_size=min_motif_size,
         make_plots=not bool(raw_args.skip_plots),
     )
 
@@ -249,6 +340,7 @@ def _build_summary_payload(
     n_tr_strong_rows: int = 0,
     n_tr_supportive_rows: int = 0,
     n_tr_weak_rows: int = 0,
+    n_tr_motif_filtered: int = 0,
     plots: list[str] | None = None,
 ) -> dict[str, Any]:
     summary = {
@@ -262,11 +354,15 @@ def _build_summary_payload(
         "split_dir": str(args.split_dir),
         "group_a_fasta": str(args.group_a_fasta),
         "group_b_fasta": str(args.group_b_fasta),
+        "group_a_spanning_bam": str(args.group_a_spanning_bam) if args.group_a_spanning_bam else "",
+        "group_b_spanning_bam": str(args.group_b_spanning_bam) if args.group_b_spanning_bam else "",
+        "tr_bed": str(args.tr_bed) if args.tr_bed else "",
         "n_loci_scanned": int(n_loci_scanned),
         "n_targets": int(n_targets),
         "n_tr_strong_rows": int(n_tr_strong_rows),
         "n_tr_supportive_rows": int(n_tr_supportive_rows),
         "n_tr_weak_rows": int(n_tr_weak_rows),
+        "n_tr_motif_filtered": int(n_tr_motif_filtered),
         "read_lengths_tsv": str(outputs.read_lengths_tsv),
         "targets_tsv": str(outputs.targets_tsv),
         "tr_bed_tsv": str(outputs.tr_bed_tsv),
@@ -274,6 +370,9 @@ def _build_summary_payload(
         "params": {
             "margin_bp": args.margin_bp,
             "min_supporting_reads": args.min_supporting_reads,
+            "min_total_reads": args.min_total_reads,
+            "min_motif_size": args.min_motif_size,
+            "trgt_fallback_flank_bp": args.trgt_fallback_flank_bp,
             "make_plots": args.make_plots,
         },
     }
@@ -341,6 +440,256 @@ def _parse_fasta_lengths(path: Path) -> dict[LocusKey, list[tuple[str, int]]]:
     return loci
 
 
+def _dominant_motif_period(seq: str) -> tuple[int, float]:
+    """Smallest repeat-unit length (bp) of ``seq`` and its support fraction.
+
+    For each candidate period ``p`` in ``1.._MOTIF_MAX_PERIOD`` we measure the
+    fraction of bases equal to the base ``p`` positions ahead, evaluated over the
+    most periodic ``_MOTIF_PROBE_WINDOW_BP`` window so long flanks cannot mask a
+    short repeat. Returns ``(period, match_fraction)`` for the best period, or
+    ``(0, 0.0)`` when the sequence is too short to assess.
+    """
+    seq = seq.upper()
+    n = len(seq)
+    if n < 2:
+        return (0, 0.0)
+    window = min(_MOTIF_PROBE_WINDOW_BP, n)
+    step = max(1, window // 2)
+    starts = list(range(0, n - window + 1, step)) or [0]
+    best_period = 0
+    best_frac = 0.0
+    for start in starts:
+        sub = seq[start:start + window]
+        for period in range(1, _MOTIF_MAX_PERIOD + 1):
+            denom = len(sub) - period
+            if denom <= 0:
+                continue
+            matches = sum(1 for i in range(denom) if sub[i] == sub[i + period])
+            frac = matches / denom
+            if frac > best_frac:
+                best_frac = frac
+                best_period = period
+    return (best_period, best_frac)
+
+
+def _parse_fasta_longest_seqs(path: Path, wanted: set[LocusKey]) -> dict[LocusKey, str]:
+    """Longest spanning-read sequence per locus, restricted to ``wanted`` keys.
+
+    Used after the scan to read the motif off the change group's longest read
+    only for loci that were actually called, so the extra FASTA pass stays cheap.
+    """
+    if not wanted:
+        return {}
+    longest: dict[LocusKey, tuple[int, str]] = {}
+    key: LocusKey | None = None
+    chunks: list[str] = []
+
+    def _flush() -> None:
+        nonlocal key, chunks
+        if key is not None and key in wanted and chunks:
+            seq = "".join(chunks)
+            previous = longest.get(key)
+            if previous is None or len(seq) > previous[0]:
+                longest[key] = (len(seq), seq)
+
+    with path.open(encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.rstrip("\n")
+            if not line:
+                continue
+            if line.startswith(">"):
+                _flush()
+                header = line[1:]
+                chunks = []
+                key = None
+                match = _REGION_RE.search(header)
+                if match:
+                    candidate = (match.group(1), int(match.group(2)), int(match.group(3)))
+                    if candidate in wanted:
+                        key = candidate
+            elif key is not None:
+                chunks.append(line.strip())
+        _flush()
+    return {key: value[1] for key, value in longest.items()}
+
+
+def _apply_motif_size_filter(
+    rows: list[dict[str, Any]],
+    *,
+    sample_a_label: str,
+    sample_b_label: str,
+    group_a_fasta: Path,
+    group_b_fasta: Path,
+    group_a_source: str,
+    group_b_source: str,
+    min_motif_size: int,
+) -> tuple[list[dict[str, Any]], int]:
+    """Drop called loci whose change-group repeat unit is < ``min_motif_size`` bp.
+
+    The motif is taken from the change group's longest spanning read. Loci whose
+    motif cannot be confidently determined (``match_fraction`` below
+    ``_MOTIF_MIN_MATCH_FRAC``) are kept -- the filter only removes confident short
+    motifs. Returns ``(kept_rows, n_dropped)``. Sequences are only available for
+    FASTA (medaka) inputs; TRGT spanning-BAM groups are left unfiltered.
+    """
+    if min_motif_size <= 1 or not rows:
+        return rows, 0
+
+    wanted_a = {
+        (row["chrom"], int(row["start"]), int(row["end"]))
+        for row in rows
+        if row["change_group"] == sample_a_label
+    }
+    wanted_b = {
+        (row["chrom"], int(row["start"]), int(row["end"]))
+        for row in rows
+        if row["change_group"] == sample_b_label
+    }
+    seqs_a = (
+        _parse_fasta_longest_seqs(group_a_fasta, wanted_a)
+        if group_a_source == "fasta"
+        else {}
+    )
+    seqs_b = (
+        _parse_fasta_longest_seqs(group_b_fasta, wanted_b)
+        if group_b_source == "fasta"
+        else {}
+    )
+
+    kept: list[dict[str, Any]] = []
+    dropped = 0
+    for row in rows:
+        key: LocusKey = (row["chrom"], int(row["start"]), int(row["end"]))
+        seq = seqs_a.get(key) if row["change_group"] == sample_a_label else seqs_b.get(key)
+        if seq:
+            period, frac = _dominant_motif_period(seq)
+            if period > 0 and frac >= _MOTIF_MIN_MATCH_FRAC and period < min_motif_size:
+                dropped += 1
+                continue
+        kept.append(row)
+    return kept, dropped
+
+
+def _parse_tr_bed_loci(path: Path) -> dict[str, LocusKey]:
+    """Map TRGT BED IDs to ``(chrom, start, end)`` locus keys."""
+    loci: dict[str, LocusKey] = {}
+    with path.open(encoding="utf-8") as handle:
+        for raw_line in handle:
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            fields = line.split("\t")
+            if len(fields) < 4:
+                continue
+            chrom = fields[0]
+            start = int(fields[1])
+            end = int(fields[2])
+            trid = ""
+            for token in fields[3].split(";"):
+                if token.startswith("ID="):
+                    trid = token[3:]
+                    break
+            if not trid:
+                trid = fields[3]
+            loci[trid] = (chrom, start, end)
+    return loci
+
+
+def _parse_trgt_flanks(fl_tag_value: Any, fallback_flank_bp: int) -> tuple[int, int]:
+    """Return TRGT left/right flank lengths from an FL tag.
+
+    TRGT writes ``FL:B:I,left,right`` in spanning BAMs. The string branch keeps
+    this compatible with SAM text values and mirrors mTRplotter's parser.
+    """
+    if fl_tag_value is not None:
+        if isinstance(fl_tag_value, str):
+            parts = fl_tag_value.split(",")
+            value_parts = parts[1:] if parts and parts[0].isalpha() else parts
+        else:
+            try:
+                value_parts = list(fl_tag_value)
+            except TypeError:
+                value_parts = []
+        if len(value_parts) >= 2:
+            try:
+                return int(value_parts[0]), int(value_parts[1])
+            except (TypeError, ValueError):
+                pass
+    return fallback_flank_bp, fallback_flank_bp
+
+
+def _parse_trgt_spanning_bam_lengths(
+    path: Path,
+    tr_bed: Path,
+    *,
+    fallback_flank_bp: int,
+) -> dict[LocusKey, list[tuple[str, int]]]:
+    """Map each TRGT locus to unique ``(read_name, read_length)`` records.
+
+    TRGT's spanning BAM stores the repeat ID in the ``TR`` tag and the
+    repeat-spanning sequence in the BAM query sequence. Following mTRplotter,
+    the per-read allele-length proxy is ``len(query_sequence) - FL_left -
+    FL_right`` where TRGT's ``FL`` tag is present, with a configurable fallback
+    flank length for older or malformed records.
+    """
+    import pysam
+
+    tr_loci = _parse_tr_bed_loci(tr_bed)
+    by_locus: dict[LocusKey, dict[str, int]] = defaultdict(dict)
+    with pysam.AlignmentFile(str(path), "rb") as bam:
+        for read in bam.fetch(until_eof=True):
+            if read.is_unmapped or read.is_secondary or read.is_supplementary:
+                continue
+            seq = read.query_sequence
+            if not seq:
+                continue
+            try:
+                trid = read.get_tag("TR")
+            except KeyError:
+                continue
+            locus = tr_loci.get(str(trid))
+            if locus is None:
+                continue
+            read_name = str(read.query_name)
+            try:
+                fl_tag = read.get_tag("FL")
+            except KeyError:
+                fl_tag = None
+            flank_left, flank_right = _parse_trgt_flanks(fl_tag, fallback_flank_bp)
+            read_length = len(seq) - flank_left - flank_right
+            previous = by_locus[locus].get(read_name)
+            if previous is None or read_length > previous:
+                by_locus[locus][read_name] = read_length
+    return {locus: sorted(reads.items()) for locus, reads in by_locus.items()}
+
+
+def _load_group_loci(
+    *,
+    fasta: Path,
+    spanning_bam: Path | None,
+    tr_bed: Path | None,
+    trgt_fallback_flank_bp: int,
+) -> tuple[dict[LocusKey, list[tuple[str, int]]] | None, str, str | None]:
+    if fasta.exists():
+        return _parse_fasta_lengths(fasta), "fasta", None
+    if spanning_bam is not None and spanning_bam.exists():
+        if tr_bed is None or not tr_bed.exists():
+            return None, "trgt_spanning_bam", f"Missing TR BED for spanning BAM input: {tr_bed or ''}"
+        return (
+            _parse_trgt_spanning_bam_lengths(
+                spanning_bam,
+                tr_bed,
+                fallback_flank_bp=trgt_fallback_flank_bp,
+            ),
+            "trgt_spanning_bam",
+            None,
+        )
+    candidates = [str(fasta)]
+    if spanning_bam is not None:
+        candidates.append(str(spanning_bam))
+    return None, "missing", "Missing required input(s): " + ", ".join(candidates)
+
+
 # ---------------------------------------------------------------------------
 # Paired read-length scan
 # ---------------------------------------------------------------------------
@@ -351,17 +700,18 @@ def _direction_excess(
     *,
     margin_bp: int,
     min_supporting_reads: int,
+    min_total_reads: int,
 ) -> int | None:
     """Excess (bp) of the change group's longest read over the baseline anchor,
     or ``None`` if this direction does not pass the paired-comparison rule.
 
-    Passes when the baseline contributes >=1 read, the change group has at least
-    ``min_supporting_reads`` reads, and each of its top ``min_supporting_reads``
-    reads exceeds ``baseline_max + margin_bp``.
+    Passes when both groups contribute at least ``min_total_reads`` reads and
+    each of the change group's top ``min_supporting_reads`` reads exceeds
+    ``baseline_max + margin_bp``.
     """
-    if not baseline_lengths_desc:
+    if len(baseline_lengths_desc) < min_total_reads:
         return None
-    if len(change_lengths_desc) < min_supporting_reads:
+    if len(change_lengths_desc) < min_total_reads:
         return None
     anchor = baseline_lengths_desc[0]
     threshold = anchor + margin_bp
@@ -392,6 +742,7 @@ def _scan_loci(
     sample_b_label: str,
     margin_bp: int,
     min_supporting_reads: int,
+    min_total_reads: int,
 ) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for key in set(a_loci) | set(b_loci):
@@ -401,10 +752,18 @@ def _scan_loci(
         b_lengths = [length for _, length in b_pairs]
 
         excess_a = _direction_excess(
-            a_lengths, b_lengths, margin_bp=margin_bp, min_supporting_reads=min_supporting_reads
+            a_lengths,
+            b_lengths,
+            margin_bp=margin_bp,
+            min_supporting_reads=min_supporting_reads,
+            min_total_reads=min_total_reads,
         )
         excess_b = _direction_excess(
-            b_lengths, a_lengths, margin_bp=margin_bp, min_supporting_reads=min_supporting_reads
+            b_lengths,
+            a_lengths,
+            margin_bp=margin_bp,
+            min_supporting_reads=min_supporting_reads,
+            min_total_reads=min_total_reads,
         )
         if excess_a is None and excess_b is None:
             continue
@@ -457,6 +816,7 @@ def _scan_loci(
                 "baseline_anchor_bp": int(threshold),
                 "margin_bp": int(margin_bp),
                 "min_supporting_reads": int(min_supporting_reads),
+                "min_total_reads": int(min_total_reads),
                 "change_length_bp": int(change_max - anchor),
                 "change_support_min_excess_bp": int(min(support_lengths) - anchor) if support_lengths else 0,
                 "change_read_mean": round(statistics.fmean(change_lengths), 1) if change_lengths else ".",
@@ -577,19 +937,31 @@ def tr_post_processing_main(cli_args=None) -> dict[str, Any]:
     args = _resolve_args(parser.parse_args(cli_args))
     outputs = _build_output_paths(args.output_dir)
 
-    missing_inputs = [
-        str(path)
-        for path in (args.split_dir, args.group_a_fasta, args.group_b_fasta)
-        if not path.exists()
-    ]
-    if missing_inputs:
+    missing_inputs = [str(args.split_dir)] if not args.split_dir.exists() else []
+    a_loci: dict[LocusKey, list[tuple[str, int]]] | None = None
+    b_loci: dict[LocusKey, list[tuple[str, int]]] | None = None
+    group_a_source = "missing"
+    group_b_source = "missing"
+    if not missing_inputs:
+        a_loci, group_a_source, a_error = _load_group_loci(
+            fasta=args.group_a_fasta,
+            spanning_bam=args.group_a_spanning_bam,
+            tr_bed=args.tr_bed,
+            trgt_fallback_flank_bp=args.trgt_fallback_flank_bp,
+        )
+        b_loci, group_b_source, b_error = _load_group_loci(
+            fasta=args.group_b_fasta,
+            spanning_bam=args.group_b_spanning_bam,
+            tr_bed=args.tr_bed,
+            trgt_fallback_flank_bp=args.trgt_fallback_flank_bp,
+        )
+        missing_inputs = [err for err in (a_error, b_error) if err]
+    if missing_inputs or a_loci is None or b_loci is None:
         return _write_empty_outputs(
-            args, status="skipped", reason="Missing required input(s): " + ", ".join(missing_inputs)
+            args, status="skipped", reason="; ".join(missing_inputs)
         )
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    a_loci = _parse_fasta_lengths(args.group_a_fasta)
-    b_loci = _parse_fasta_lengths(args.group_b_fasta)
     n_loci_scanned = len(set(a_loci) | set(b_loci))
 
     rows = _scan_loci(
@@ -599,7 +971,25 @@ def tr_post_processing_main(cli_args=None) -> dict[str, Any]:
         sample_b_label=args.sample_b_label,
         margin_bp=args.margin_bp,
         min_supporting_reads=args.min_supporting_reads,
+        min_total_reads=args.min_total_reads,
     )
+
+    rows, n_motif_filtered = _apply_motif_size_filter(
+        rows,
+        sample_a_label=args.sample_a_label,
+        sample_b_label=args.sample_b_label,
+        group_a_fasta=args.group_a_fasta,
+        group_b_fasta=args.group_b_fasta,
+        group_a_source=group_a_source,
+        group_b_source=group_b_source,
+        min_motif_size=args.min_motif_size,
+    )
+    if n_motif_filtered:
+        logging.info(
+            "Dropped %d locus call(s) with repeat unit < %d bp (--min-motif-size)",
+            n_motif_filtered,
+            args.min_motif_size,
+        )
 
     read_rows = _read_length_rows(
         rows,
@@ -635,8 +1025,11 @@ def tr_post_processing_main(cli_args=None) -> dict[str, Any]:
         n_tr_strong_rows=n_strong,
         n_tr_supportive_rows=n_supportive,
         n_tr_weak_rows=n_weak,
+        n_tr_motif_filtered=n_motif_filtered,
         plots=plots,
     )
+    summary["group_a_source"] = group_a_source
+    summary["group_b_source"] = group_b_source
     _write_json(outputs.summary_json, summary)
     return summary
 

@@ -1359,19 +1359,57 @@ class TestTrPostProcessingScan(unittest.TestCase):
     def test_direction_excess_passes_when_topk_clear_margin(self):
         from sniffcell.discover.tr_post_processing import _direction_excess
 
-        excess = _direction_excess([1300, 1280, 900], [1000, 990], margin_bp=100, min_supporting_reads=2)
+        excess = _direction_excess(
+            [1300, 1280, 1260, 900, 850],
+            [1000, 990, 980, 970, 960],
+            margin_bp=100,
+            min_supporting_reads=3,
+            min_total_reads=5,
+        )
         self.assertEqual(excess, 300)  # 1300 - 1000
 
     def test_direction_excess_requires_min_supporting_reads(self):
         from sniffcell.discover.tr_post_processing import _direction_excess
 
         # only one read clears baseline_max(1000) + margin(100)
-        self.assertIsNone(_direction_excess([1300, 1050], [1000], margin_bp=100, min_supporting_reads=2))
+        self.assertIsNone(
+            _direction_excess(
+                [1300, 1050, 1040, 1030, 1020],
+                [1000, 990, 980, 970, 960],
+                margin_bp=100,
+                min_supporting_reads=3,
+                min_total_reads=5,
+            )
+        )
 
     def test_direction_excess_skips_when_baseline_empty(self):
         from sniffcell.discover.tr_post_processing import _direction_excess
 
-        self.assertIsNone(_direction_excess([2000, 1900], [], margin_bp=100, min_supporting_reads=2))
+        self.assertIsNone(
+            _direction_excess([2000, 1900, 1800, 1700, 1600], [], margin_bp=100, min_supporting_reads=3, min_total_reads=5)
+        )
+
+    def test_direction_excess_requires_total_reads_in_both_groups(self):
+        from sniffcell.discover.tr_post_processing import _direction_excess
+
+        self.assertIsNone(
+            _direction_excess(
+                [1300, 1280, 1260, 1240],
+                [1000, 990, 980, 970, 960],
+                margin_bp=100,
+                min_supporting_reads=3,
+                min_total_reads=5,
+            )
+        )
+        self.assertIsNone(
+            _direction_excess(
+                [1300, 1280, 1260, 1240, 1220],
+                [1000, 990, 980, 970],
+                margin_bp=100,
+                min_supporting_reads=3,
+                min_total_reads=5,
+            )
+        )
 
     def test_assign_tier_strong_vs_supportive(self):
         from sniffcell.discover.tr_post_processing import _assign_tier
@@ -1383,12 +1421,12 @@ class TestTrPostProcessingScan(unittest.TestCase):
     def test_scan_loci_calls_expansion_and_picks_change_group(self):
         from sniffcell.discover.tr_post_processing import _scan_loci
 
-        a_loci = {("chr1", 100, 200): [("a0", 1300), ("a1", 1280), ("a2", 1260)]}
-        b_loci = {("chr1", 100, 200): [("b0", 1000), ("b1", 1010)]}
+        a_loci = {("chr1", 100, 200): [("a0", 1300), ("a1", 1280), ("a2", 1260), ("a3", 1240), ("a4", 850)]}
+        b_loci = {("chr1", 100, 200): [("b0", 1000), ("b1", 1010), ("b2", 990), ("b3", 980), ("b4", 970)]}
         rows = _scan_loci(
             a_loci, b_loci,
             sample_a_label="s.Neuron", sample_b_label="s.Oligo",
-            margin_bp=100, min_supporting_reads=2,
+            margin_bp=100, min_supporting_reads=3, min_total_reads=5,
         )
         self.assertEqual(len(rows), 1)
         row = rows[0]
@@ -1405,14 +1443,14 @@ class TestTrPostProcessingScan(unittest.TestCase):
         from sniffcell.discover.tr_post_processing import _scan_loci
 
         a_loci = {
-            ("chr3", 0, 10): [("a0", 1050), ("a1", 1040)],   # within margin of baseline max
-            ("chr4", 0, 10): [("a0", 2000), ("a1", 1900)],   # baseline has no reads
+            ("chr3", 0, 10): [("a0", 1050), ("a1", 1040), ("a2", 1030), ("a3", 1020), ("a4", 1010)],
+            ("chr4", 0, 10): [("a0", 2000), ("a1", 1900), ("a2", 1800), ("a3", 1700), ("a4", 1600)],
         }
-        b_loci = {("chr3", 0, 10): [("b0", 1000), ("b1", 1005)]}
+        b_loci = {("chr3", 0, 10): [("b0", 1000), ("b1", 1005), ("b2", 990), ("b3", 980), ("b4", 970)]}
         rows = _scan_loci(
             a_loci, b_loci,
             sample_a_label="s.Neuron", sample_b_label="s.Oligo",
-            margin_bp=100, min_supporting_reads=2,
+            margin_bp=100, min_supporting_reads=3, min_total_reads=5,
         )
         self.assertEqual(rows, [])
 
@@ -1462,10 +1500,10 @@ class TestTrPostProcessingMain(unittest.TestCase):
             b_records: list[tuple[str, int]] = []
             # chr1: Neuron expanded, many supporting reads -> strong
             a_records += self._records("a_strong", "chr1_100_200", [1300, 1280, 1260, 1240, 1220])
-            b_records += self._records("b_strong", "chr1_100_200", [1000, 1005, 1010, 1008])
+            b_records += self._records("b_strong", "chr1_100_200", [1000, 1005, 1010, 1008, 995])
             # chr2: Oligo expanded, exactly min supporting reads -> supportive
-            a_records += self._records("a_supp", "chr2_200_300", [1000, 990])
-            b_records += self._records("b_supp", "chr2_200_300", [1250, 1240, 900, 880])
+            a_records += self._records("a_supp", "chr2_200_300", [1000, 990, 980, 970, 960])
+            b_records += self._records("b_supp", "chr2_200_300", [1250, 1240, 1230, 900, 880])
             # chr3: within margin -> not called
             a_records += self._records("a_neg", "chr3_300_400", [1050, 1040, 1030])
             b_records += self._records("b_neg", "chr3_300_400", [1000, 1005])
@@ -1485,6 +1523,9 @@ class TestTrPostProcessingMain(unittest.TestCase):
                     "--sample-b-label", "sample1.Oligodendrocyte",
                     "--group-a-fasta", str(group_a_fasta),
                     "--group-b-fasta", str(group_b_fasta),
+                    # Homopolymer placeholder reads; this test covers the length
+                    # tiering logic, not the motif filter, so disable it here.
+                    "--min-motif-size", "1",
                     "--skip-plots",
                 ]
             )
@@ -1495,7 +1536,8 @@ class TestTrPostProcessingMain(unittest.TestCase):
             self.assertEqual(summary["n_tr_supportive_rows"], 1)
             self.assertEqual(summary["n_tr_weak_rows"], 0)
             self.assertEqual(summary["params"]["margin_bp"], 100)
-            self.assertEqual(summary["params"]["min_supporting_reads"], 2)
+            self.assertEqual(summary["params"]["min_supporting_reads"], 3)
+            self.assertEqual(summary["params"]["min_total_reads"], 5)
 
             tr_bed = pd.read_csv(root / "out" / "tr_changes.bed.tsv", sep="\t")
             for col in (
@@ -1511,7 +1553,7 @@ class TestTrPostProcessingMain(unittest.TestCase):
             self.assertEqual(int(strong_row["change_length_bp"]), 290)
             supportive_row = tr_bed.iloc[1]
             self.assertEqual(supportive_row["change_group"], "sample1.Oligodendrocyte")
-            self.assertEqual(int(supportive_row["n_change_support_reads"]), 2)
+            self.assertEqual(int(supportive_row["n_change_support_reads"]), 3)
 
     def test_tr_post_processing_main_margin_and_min_reads_are_parameters(self):
         from sniffcell.discover.tr_post_processing import tr_post_processing_main
@@ -1524,10 +1566,68 @@ class TestTrPostProcessingMain(unittest.TestCase):
             group_b_fasta = medaka_dir / "Oligodendrocyte.medaka" / "trimmed_reads.fasta"
 
             # Neuron tops out 60 bp over Oligo's longest read: called only when margin <= 50.
-            self._write_fasta(group_a_fasta, self._records("a", "chr1_100_200", [1060, 1055]))
-            self._write_fasta(group_b_fasta, self._records("b", "chr1_100_200", [1000, 990]))
+            self._write_fasta(group_a_fasta, self._records("a", "chr1_100_200", [1060, 1055, 1052, 900, 890]))
+            self._write_fasta(group_b_fasta, self._records("b", "chr1_100_200", [1000, 990, 980, 970, 960]))
 
             base_argv = [
+                "--split-dir", str(split_dir),
+                "--groups", "Neuron,Oligodendrocyte",
+                "--sample-id", "sample1",
+                "--sample-a-label", "sample1.Neuron",
+                "--sample-b-label", "sample1.Oligodendrocyte",
+                "--group-a-fasta", str(group_a_fasta),
+                "--group-b-fasta", str(group_b_fasta),
+                # Homopolymer placeholder reads; this test covers the margin /
+                # min-reads parameters, not the motif filter, so disable it here.
+                "--min-motif-size", "1",
+                "--skip-plots",
+            ]
+
+            strict = tr_post_processing_main(base_argv + ["--output-dir", str(root / "strict"), "--margin-bp", "100"])
+            self.assertEqual(strict["n_targets"], 0)
+
+            loose = tr_post_processing_main(base_argv + ["--output-dir", str(root / "loose"), "--margin-bp", "50"])
+            self.assertEqual(loose["n_targets"], 1)
+
+            # Requiring 4 supporting reads drops the call (only 3 reads clear the threshold).
+            need3 = tr_post_processing_main(
+                base_argv + ["--output-dir", str(root / "need4"), "--margin-bp", "50", "--min-supporting-reads", "4"]
+            )
+            self.assertEqual(need3["n_targets"], 0)
+
+    def test_tr_post_processing_main_min_motif_size_filters_dinucleotide(self):
+        from sniffcell.discover.tr_post_processing import tr_post_processing_main
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            split_dir = root / "sample1" / "deconv" / "deconv_requested_group_splits"
+            medaka_dir = split_dir / "medaka_tandem"
+            group_a_fasta = medaka_dir / "Neuron.medaka" / "trimmed_reads.fasta"
+            group_b_fasta = medaka_dir / "Oligodendrocyte.medaka" / "trimmed_reads.fasta"
+
+            def write(path: Path, records: list[tuple[str, str]]) -> None:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with path.open("w", encoding="utf-8") as handle:
+                    for header, seq in records:
+                        handle.write(f">{header}\n{seq}\n")
+
+            def at(length: int) -> str:
+                return ("AT" * (length // 2 + 1))[:length]
+
+            # chr1: Neuron carries an AT-dinucleotide expansion vs the short Oligo
+            # baseline -> a valid length call whose motif is 2 bp.
+            a_records = [
+                (f"a_{i}_chr1_100_200_pad_0_0_fwd_hap1_phased-set1_ploidy2", at(n))
+                for i, n in enumerate([1300, 1280, 1260, 1240, 1220])
+            ]
+            b_records = [
+                (f"b_{i}_chr1_100_200_pad_0_0_fwd_hap1_phased-set1_ploidy2", at(n))
+                for i, n in enumerate([1000, 1005, 1010, 1008, 995])
+            ]
+            write(group_a_fasta, a_records)
+            write(group_b_fasta, b_records)
+
+            base = [
                 "--split-dir", str(split_dir),
                 "--groups", "Neuron,Oligodendrocyte",
                 "--sample-id", "sample1",
@@ -1538,17 +1638,18 @@ class TestTrPostProcessingMain(unittest.TestCase):
                 "--skip-plots",
             ]
 
-            strict = tr_post_processing_main(base_argv + ["--output-dir", str(root / "strict"), "--margin-bp", "100"])
-            self.assertEqual(strict["n_targets"], 0)
+            # Default (min-motif-size=3) drops the dinucleotide locus.
+            default = tr_post_processing_main(base + ["--output-dir", str(root / "default")])
+            self.assertEqual(default["n_targets"], 0)
+            self.assertEqual(default["n_tr_motif_filtered"], 1)
+            self.assertEqual(default["params"]["min_motif_size"], 3)
 
-            loose = tr_post_processing_main(base_argv + ["--output-dir", str(root / "loose"), "--margin-bp", "50"])
-            self.assertEqual(loose["n_targets"], 1)
-
-            # Requiring 3 supporting reads drops the call (only 2 reads present).
-            need3 = tr_post_processing_main(
-                base_argv + ["--output-dir", str(root / "need3"), "--margin-bp", "50", "--min-supporting-reads", "3"]
+            # Disabling the filter (=1) recovers the call.
+            disabled = tr_post_processing_main(
+                base + ["--output-dir", str(root / "off"), "--min-motif-size", "1"]
             )
-            self.assertEqual(need3["n_targets"], 0)
+            self.assertEqual(disabled["n_targets"], 1)
+            self.assertEqual(disabled["n_tr_motif_filtered"], 0)
 
     def test_tr_post_processing_main_skips_when_fasta_missing(self):
         from sniffcell.discover.tr_post_processing import tr_post_processing_main
@@ -1572,6 +1673,66 @@ class TestTrPostProcessingMain(unittest.TestCase):
             tr_bed = pd.read_csv(root / "out" / "tr_changes.bed.tsv", sep="\t")
             self.assertIn("tr_pass_for_harmonized", tr_bed.columns)
             self.assertEqual(len(tr_bed), 0)
+
+    def test_tr_post_processing_main_accepts_trgt_spanning_bam(self):
+        from array import array
+
+        import pysam
+
+        from sniffcell.discover.tr_post_processing import tr_post_processing_main
+
+        def write_bam(path: Path, lengths: list[int]) -> None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            header = {"HD": {"VN": "1.6"}, "SQ": [{"SN": "chr1", "LN": 1000}]}
+            with pysam.AlignmentFile(str(path), "wb", header=header) as bam_out:
+                for idx, length in enumerate(lengths):
+                    read = pysam.AlignedSegment()
+                    read.query_name = f"read{idx}"
+                    read.query_sequence = "A" * length
+                    read.flag = 0
+                    read.reference_id = 0
+                    read.reference_start = 50
+                    read.mapping_quality = 60
+                    read.cigar = ((0, length),)
+                    read.query_qualities = pysam.qualitystring_to_array("I" * length)
+                    read.set_tag("TR", "tr1")
+                    read.set_tag("FL", array("I", [50, 50]))
+                    bam_out.write(read)
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            split_dir = root / "sample1" / "deconv" / "deconv_requested_group_splits"
+            split_dir.mkdir(parents=True)
+            tr_bed = root / "repeats.bed"
+            tr_bed.write_text("chr1\t100\t200\tID=tr1;MOTIFS=A;STRUC=(A)n\n", encoding="utf-8")
+            group_a_bam = root / "a.spanning.bam"
+            group_b_bam = root / "b.spanning.bam"
+            write_bam(group_a_bam, [330, 325, 320, 210, 205])
+            write_bam(group_b_bam, [200, 198, 196, 194, 192])
+
+            summary = tr_post_processing_main(
+                [
+                    "--split-dir", str(split_dir),
+                    "--groups", "Neuron,Oligodendrocyte",
+                    "--output-dir", str(root / "out"),
+                    "--sample-id", "sample1",
+                    "--sample-a-label", "sample1.Neuron",
+                    "--sample-b-label", "sample1.Oligodendrocyte",
+                    "--group-a-spanning-bam", str(group_a_bam),
+                    "--group-b-spanning-bam", str(group_b_bam),
+                    "--tr-bed", str(tr_bed),
+                    "--skip-plots",
+                ]
+            )
+
+            self.assertEqual(summary["status"], "completed")
+            self.assertEqual(summary["group_a_source"], "trgt_spanning_bam")
+            self.assertEqual(summary["n_targets"], 1)
+            tr_rows = pd.read_csv(root / "out" / "tr_changes.bed.tsv", sep="\t")
+            self.assertEqual(tr_rows["change_group"].tolist(), ["sample1.Neuron"])
+            self.assertEqual(int(tr_rows.iloc[0]["change_length_bp"]), 130)
+            read_lengths = sorted(pd.read_csv(root / "out" / "read_lengths.tsv", sep="\t")["read_length"].tolist())
+            self.assertEqual(read_lengths, [92, 94, 96, 98, 100, 105, 110, 220, 225, 230])
 
 
 class TestPostprocessLocalIntegration(unittest.TestCase):

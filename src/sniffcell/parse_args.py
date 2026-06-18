@@ -83,10 +83,30 @@ def _build_discover_run_parent_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--tr-min-supporting-reads",
         type=int,
-        default=2,
+        default=3,
         help=(
             "TR read-length scan: number of the change group's longest reads that must each clear "
-            "the baseline-max + margin threshold for a locus to be called. Default=2."
+            "the baseline-max + margin threshold for a locus to be called. Default=3."
+        ),
+    )
+    parser.add_argument(
+        "--tr-min-total-reads",
+        type=int,
+        default=5,
+        help=(
+            "TR read-length scan: minimum total spanning reads required in each group before "
+            "testing a locus. Default=5."
+        ),
+    )
+    parser.add_argument(
+        "--tr-min-motif-size",
+        type=int,
+        default=3,
+        help=(
+            "TR read-length scan: drop a called locus when the repeat unit of the change "
+            "group's longest read is shorter than this many bp. Excludes homopolymer and "
+            "dinucleotide (e.g. AT/TA) tracts, where ONT length estimation slips and inflates "
+            "a few reads into spurious multi-kb expansions. Use 1 to disable. Default=3."
         ),
     )
     parser.add_argument("--tdb-create-mem", type=int, default=4, help="Memory in GB for tdb create. Default=4.")
