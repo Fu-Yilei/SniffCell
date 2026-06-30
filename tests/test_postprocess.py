@@ -504,13 +504,29 @@ class TestDiscoverParseArgs(unittest.TestCase):
             "tools",
             "check",
             "--stages", "sv,mods",
+            "--trgt-bin", "/tmp/trgt",
+            "--samtools-bin", "/tmp/samtools",
             "--json",
         ])
         self.assertEqual(args.command, "discover")
         self.assertEqual(args.discover_section, "tools")
         self.assertEqual(args.discover_tools_command, "check")
         self.assertEqual(args.stages, "sv,mods")
+        self.assertEqual(args.trgt_bin, "/tmp/trgt")
+        self.assertEqual(args.samtools_bin, "/tmp/samtools")
         self.assertTrue(args.json)
+
+    def test_discover_tools_check_all_includes_trgt_dependencies(self):
+        from sniffcell.discover import envcheck
+
+        parser = envcheck._build_parser()
+        args = parser.parse_args(["--stages", "all"])
+        stages = envcheck._parse_stages(args.stages)
+        required = envcheck._required_tools_for_stages(stages)
+        self.assertIn("trgt", required)
+        self.assertIn("samtools", required)
+        self.assertIn("trgt", envcheck.TOOL_DEFAULTS)
+        self.assertIn("samtools", envcheck.TOOL_DEFAULTS)
 
     def test_discover_tools_sv_parses(self):
         args = parse_args([

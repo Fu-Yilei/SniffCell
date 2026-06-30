@@ -21,9 +21,11 @@ TOOL_DEFAULTS = {
     "kanpig": "kanpig",
     "medaka": "medaka",
     "modkit": "modkit",
+    "samtools": "samtools",
     "sniffles": "sniffles",
     "tabix": "tabix",
     "tdb": "tdb",
+    "trgt": "trgt",
     "truvari": "truvari",
     "clair3": "run_clair3.sh",
 }
@@ -52,8 +54,10 @@ def _build_parser(*, prog: str = "sniffcell-check-discover", add_help: bool = Tr
     parser.add_argument("--medaka-bin", default=None)
     parser.add_argument("--tdb-bin", default=None)
     parser.add_argument("--modkit-bin", default=None)
+    parser.add_argument("--samtools-bin", default=None)
     parser.add_argument("--tabix-bin", default=None)
     parser.add_argument("--clair3-bin", default=None)
+    parser.add_argument("--trgt-bin", default=None)
     parser.add_argument("--clair3-model-path", default=None)
     parser.add_argument("--json", action="store_true", default=False, help="Emit machine-readable JSON.")
     return parser
@@ -88,7 +92,9 @@ def main(argv: list[str] | None = None) -> int:
         "medaka": args.medaka_bin,
         "tdb": args.tdb_bin,
         "modkit": args.modkit_bin,
+        "samtools": args.samtools_bin,
         "tabix": args.tabix_bin,
+        "trgt": args.trgt_bin,
         "clair3": args.clair3_bin,
     }
 
