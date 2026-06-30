@@ -24,6 +24,14 @@ def _write_gvcf(path: Path, records: list[str]) -> None:
             handle.write(record + "\n")
 
 
+def _write_split_manifest(split_dir: Path, groups: tuple[str, str]) -> None:
+    split_dir.mkdir(parents=True, exist_ok=True)
+    lines = ["requested_group\tbam_path\tread_summary_path\n"]
+    for group in groups:
+        lines.append(f"{group}\t{split_dir / f'{group}.bam'}\t{split_dir / f'{group}.read_summary.tsv'}\n")
+    (split_dir / "requested_group_splits.tsv").write_text("".join(lines), encoding="utf-8")
+
+
 class TestSnvPostProcessing(unittest.TestCase):
     def test_compare_group_specific_snvs(self):
         with tempfile.TemporaryDirectory() as td:
@@ -77,7 +85,7 @@ class TestSnvPostProcessing(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             split_dir = root / "sample1" / "deconv" / "deconv_requested_group_splits"
-            split_dir.mkdir(parents=True)
+            _write_split_manifest(split_dir, ("Neuron", "Oligodendrocyte"))
             group_a = root / "A.pileup.vcf.gz"
             group_b = root / "B.pileup.vcf.gz"
             _write_gvcf(
@@ -98,7 +106,6 @@ class TestSnvPostProcessing(unittest.TestCase):
             summary = snv_post_processing_main(
                 [
                     "--split-dir", str(split_dir),
-                    "--groups", "Neuron,Oligodendrocyte",
                     "--group-a-gvcf", str(group_a),
                     "--group-b-gvcf", str(group_b),
                     "--output-dir", str(root / "run"),
@@ -110,6 +117,7 @@ class TestSnvPostProcessing(unittest.TestCase):
             )
             self.assertEqual(summary["group_a_only_count"], 1)
             self.assertEqual(summary["group_b_only_count"], 1)
+            self.assertEqual((summary["group_a"], summary["group_b"]), ("Neuron", "Oligodendrocyte"))
             self.assertTrue(Path(summary["merged_tsv"]).exists())
             self.assertTrue((root / "run" / "summary.json").exists())
             self.assertEqual(summary["params"]["min_dp"], 5)

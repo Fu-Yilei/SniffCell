@@ -26,10 +26,22 @@ parameters.
 
 A locus is additionally dropped when the repeat unit driving the call is shorter
 than ``min_motif_size`` bp. The motif is read directly off the change group's
-longest spanning read, so homopolymer (1 bp) and dinucleotide (2 bp) tracts --
-where ONT length estimation slips badly and inflates a handful of reads into
-spurious multi-kb "expansions" -- are excluded by default (``min_motif_size=3``).
-Set ``--min-motif-size 1`` to recover the previous, unfiltered behaviour.
+longest spanning read, so homopolymer (1 bp) tracts -- where ONT length
+estimation slips badly and inflates a handful of reads into spurious multi-kb
+"expansions" -- are excluded by default (``min_motif_size=2``). Set
+``--min-motif-size 3`` to also drop dinucleotide (e.g. AT/TA) tracts, or
+``--min-motif-size 1`` to recover the previous, unfiltered behaviour.
+
+Called loci are additionally flagged ``hap_dropout_low_conf`` (and downgraded to
+the ``weak`` tier with ``tr_pass_for_harmonized=False``) when the expansion is
+confined to a haplotype that the baseline group has no spanning reads from -- for
+example every supporting read is ``hap2`` but the baseline group contributes no
+``hap2`` reads at the locus. The haplotype is read straight off the medaka
+trimmed-read name (``..._hap1_phased-set...``); such calls cannot be told apart
+from haplotype-coverage dropout in the baseline group, so they are marked low
+confidence rather than dropped. Read names without a phased ``hap1``/``hap2``
+token (e.g. ``hap0``) never trigger the flag, and TRGT spanning-BAM inputs --
+whose read names lack the token -- are left unflagged.
 
 The output schema (``tr_changes.bed.tsv`` + ``summary.json``) is kept
 compatible with :mod:`sniffcell.discover.harmonize_variants` so the rest of the
@@ -50,18 +62,20 @@ from pathlib import Path
 from typing import Any
 
 from sniffcell.discover.discover import (
+    _discover_groups,
     _expand_path,
     _infer_sample_id,
+    _resolve_two_group_names,
     _sanitize_token,
     _write_json,
 )
 
 
-DEFAULT_MARGIN_BP = 100
+DEFAULT_MARGIN_BP = 50
 DEFAULT_MIN_SUPPORTING_READS = 3
 DEFAULT_MIN_TOTAL_READS = 5
 DEFAULT_TRGT_FALLBACK_FLANK_BP = 50
-DEFAULT_MIN_MOTIF_SIZE = 3
+DEFAULT_MIN_MOTIF_SIZE = 2
 
 # Motif detection on the change group's longest read: the smallest repeat unit
 # (1..``_MOTIF_MAX_PERIOD`` bp) is accepted only when at least
@@ -79,6 +93,10 @@ _CHANGE_TYPE = "expansion"
 
 # First ``chrN_start_end`` triple anywhere in a trimmed-read FASTA header.
 _REGION_RE = re.compile(r"(chr[0-9A-Za-z]+)_(\d+)_(\d+)")
+
+# Phased haplotype token in a medaka trimmed-read name, e.g. ``..._hap2_phased-set...``.
+# Only ``hap1``/``hap2`` are treated as phased; ``hap0`` (unphased) is ignored.
+_HAP_RE = re.compile(r"_hap([12])_")
 
 _TR_TIER_ORDER: dict[str, int] = {
     "strong": 0,
@@ -104,6 +122,7 @@ _TR_BED_COLS: list[str] = [
     "change_read_range", "baseline_read_range",
     "change_read_names", "baseline_read_names",
     "change_support_read_names", "baseline_support_read_names",
+    "change_support_haps", "baseline_haps", "hap_dropout_low_conf",
     "signal_class",
     "tr_tier", "tr_pass_for_harmonized",
 ]
@@ -158,7 +177,11 @@ def _build_arg_parser(
         add_help=add_help,
     )
     parser.add_argument("--split-dir", required=True, help="deconv_requested_group_splits directory")
-    parser.add_argument("--groups", required=True, help="Exactly two group names, comma-separated")
+    parser.add_argument(
+        "--groups",
+        default=None,
+        help="Exactly two group names, comma-separated. Default: infer from a two-group split manifest.",
+    )
     parser.add_argument("--output-dir", default=None, help="Output directory for the TR post-processing report")
     parser.add_argument("--sample-id", default=None, help="Optional sample ID override")
     parser.add_argument("--sample-a-label", default=None, help="Read-group label for the first group (default <sample>.<group_a>)")
@@ -172,6 +195,11 @@ def _build_arg_parser(
         "--group-b-fasta",
         default=None,
         help="trimmed_reads.fasta for the second group (default <split-dir>/medaka_tandem/<group_b>.medaka/trimmed_reads.fasta)",
+    )
+    parser.add_argument(
+        "--discover-run-id",
+        default=None,
+        help="Optional discover run ID to search for medaka_tandem inputs when group FASTAs are omitted.",
     )
     parser.add_argument(
         "--group-a-spanning-bam",
@@ -244,12 +272,79 @@ def _build_arg_parser(
     return parser
 
 
+def _group_path_tokens(split_dir: Path, group_name: str) -> list[str]:
+    tokens = [group_name, _sanitize_token(group_name)]
+    try:
+        for group in _discover_groups(split_dir):
+            if group.name == group_name:
+                tokens.append(Path(group.bam_path).stem)
+                break
+    except (FileNotFoundError, ValueError):
+        pass
+    return list(dict.fromkeys(token for token in tokens if token))
+
+
+def _trimmed_reads_path(base_dir: Path, group_token: str) -> Path:
+    return base_dir / "medaka_tandem" / f"{group_token}.medaka" / "trimmed_reads.fasta"
+
+
+def _discover_run_dirs(split_dir: Path, discover_run_id: str | None) -> list[Path]:
+    discover_root = split_dir / "discover"
+    if discover_run_id:
+        return [discover_root / discover_run_id]
+    if not discover_root.exists():
+        return []
+    run_dirs = [path for path in discover_root.iterdir() if path.is_dir()]
+    return sorted(run_dirs, key=lambda path: path.stat().st_mtime, reverse=True)
+
+
+def _trimmed_read_pairs(
+    base_dir: Path,
+    group_a_tokens: list[str],
+    group_b_tokens: list[str],
+) -> list[tuple[Path, Path]]:
+    pairs: list[tuple[Path, Path]] = []
+    for group_a_token in group_a_tokens:
+        for group_b_token in group_b_tokens:
+            pairs.append(
+                (
+                    _trimmed_reads_path(base_dir, group_a_token),
+                    _trimmed_reads_path(base_dir, group_b_token),
+                )
+            )
+    return pairs
+
+
+def _resolve_default_trimmed_read_pair(
+    *,
+    split_dir: Path,
+    group_a: str,
+    group_b: str,
+    discover_run_id: str | None = None,
+) -> tuple[Path, Path]:
+    group_a_tokens = _group_path_tokens(split_dir, group_a)
+    group_b_tokens = _group_path_tokens(split_dir, group_b)
+    direct_pairs = _trimmed_read_pairs(split_dir, group_a_tokens, group_b_tokens)
+    for group_a_fasta, group_b_fasta in direct_pairs:
+        if group_a_fasta.exists() and group_b_fasta.exists():
+            return group_a_fasta, group_b_fasta
+
+    discover_pairs: list[tuple[Path, Path]] = []
+    for run_dir in _discover_run_dirs(split_dir, discover_run_id):
+        run_pairs = _trimmed_read_pairs(run_dir, group_a_tokens, group_b_tokens)
+        for group_a_fasta, group_b_fasta in run_pairs:
+            if group_a_fasta.exists() and group_b_fasta.exists():
+                return group_a_fasta, group_b_fasta
+        discover_pairs.extend(run_pairs)
+
+    if discover_run_id and discover_pairs:
+        return discover_pairs[0]
+    return direct_pairs[0]
+
+
 def _resolve_args(raw_args) -> TrPostArgs:
     split_dir = _expand_path(raw_args.split_dir)
-    tokens = [x.strip() for x in str(raw_args.groups).split(",") if x.strip()]
-    if len(tokens) != 2:
-        raise ValueError("--groups must contain exactly two group names")
-    group_a, group_b = tokens
+    group_a, group_b = _resolve_two_group_names(split_dir, raw_args.groups)
     sample_id = raw_args.sample_id or _infer_sample_id(split_dir.parent)
     output_dir = (
         _expand_path(raw_args.output_dir)
@@ -258,16 +353,24 @@ def _resolve_args(raw_args) -> TrPostArgs:
     )
     sample_a_label = raw_args.sample_a_label or f"{sample_id}.{group_a}"
     sample_b_label = raw_args.sample_b_label or f"{sample_id}.{group_b}"
-    group_a_fasta = (
-        _expand_path(raw_args.group_a_fasta)
-        if raw_args.group_a_fasta
-        else split_dir / "medaka_tandem" / f"{group_a}.medaka" / "trimmed_reads.fasta"
-    )
-    group_b_fasta = (
-        _expand_path(raw_args.group_b_fasta)
-        if raw_args.group_b_fasta
-        else split_dir / "medaka_tandem" / f"{group_b}.medaka" / "trimmed_reads.fasta"
-    )
+    if raw_args.group_a_fasta or raw_args.group_b_fasta:
+        group_a_fasta = (
+            _expand_path(raw_args.group_a_fasta)
+            if raw_args.group_a_fasta
+            else _trimmed_reads_path(split_dir, group_a)
+        )
+        group_b_fasta = (
+            _expand_path(raw_args.group_b_fasta)
+            if raw_args.group_b_fasta
+            else _trimmed_reads_path(split_dir, group_b)
+        )
+    else:
+        group_a_fasta, group_b_fasta = _resolve_default_trimmed_read_pair(
+            split_dir=split_dir,
+            group_a=group_a,
+            group_b=group_b,
+            discover_run_id=getattr(raw_args, "discover_run_id", None),
+        )
     group_a_spanning_bam = _expand_path(raw_args.group_a_spanning_bam) if raw_args.group_a_spanning_bam else None
     group_b_spanning_bam = _expand_path(raw_args.group_b_spanning_bam) if raw_args.group_b_spanning_bam else None
     tr_bed = _expand_path(raw_args.tr_bed) if raw_args.tr_bed else None
@@ -341,6 +444,7 @@ def _build_summary_payload(
     n_tr_supportive_rows: int = 0,
     n_tr_weak_rows: int = 0,
     n_tr_motif_filtered: int = 0,
+    n_tr_hap_dropout: int = 0,
     plots: list[str] | None = None,
 ) -> dict[str, Any]:
     summary = {
@@ -363,6 +467,7 @@ def _build_summary_payload(
         "n_tr_supportive_rows": int(n_tr_supportive_rows),
         "n_tr_weak_rows": int(n_tr_weak_rows),
         "n_tr_motif_filtered": int(n_tr_motif_filtered),
+        "n_tr_hap_dropout": int(n_tr_hap_dropout),
         "read_lengths_tsv": str(outputs.read_lengths_tsv),
         "targets_tsv": str(outputs.targets_tsv),
         "tr_bed_tsv": str(outputs.tr_bed_tsv),
@@ -568,6 +673,52 @@ def _apply_motif_size_filter(
                 continue
         kept.append(row)
     return kept, dropped
+
+
+def _phased_haps_from_read_names(names: list[str]) -> set[str]:
+    """Phased haplotype labels ({"1", "2"}) carried by ``names``.
+
+    The label is read off the medaka trimmed-read name (``..._hap1_phased-set...``).
+    Unphased reads (``hap0``) and names without the token contribute nothing.
+    """
+    haps: set[str] = set()
+    for name in names:
+        match = _HAP_RE.search(name)
+        if match:
+            haps.add(match.group(1))
+    return haps
+
+
+def _apply_haplotype_dropout_filter(rows: list[dict[str, Any]]) -> int:
+    """Flag calls whose expansion sits on a haplotype the baseline group lacks.
+
+    For each called locus the change group's *supporting* (expanded) read names
+    and the baseline group's full read names are parsed for phased ``hap1``/
+    ``hap2`` labels. When every supporting read is phased and none of those
+    haplotypes appear among the baseline reads (e.g. all supporting reads are
+    ``hap2`` but the baseline group has no ``hap2`` reads at the locus), the
+    apparent expansion cannot be distinguished from haplotype-coverage dropout in
+    the baseline group, so the row is marked low confidence: ``tr_tier`` is set to
+    ``weak`` and ``tr_pass_for_harmonized`` to ``False``.
+
+    Records ``change_support_haps``, ``baseline_haps`` and ``hap_dropout_low_conf``
+    on every row (set in-place). Returns the number of flagged rows. Loci whose
+    supporting reads are unphased -- including all TRGT spanning-BAM inputs, whose
+    read names lack the token -- are never flagged.
+    """
+    flagged = 0
+    for row in rows:
+        support_haps = _phased_haps_from_read_names(row.get("change_support_read_names", []))
+        baseline_haps = _phased_haps_from_read_names(row.get("baseline_read_names", []))
+        dropout = bool(support_haps) and support_haps.isdisjoint(baseline_haps)
+        row["change_support_haps"] = ",".join(sorted(support_haps)) if support_haps else "."
+        row["baseline_haps"] = ",".join(sorted(baseline_haps)) if baseline_haps else "."
+        row["hap_dropout_low_conf"] = dropout
+        if dropout:
+            row["tr_tier"] = "weak"
+            row["tr_pass_for_harmonized"] = False
+            flagged += 1
+    return flagged
 
 
 def _parse_tr_bed_loci(path: Path) -> dict[str, LocusKey]:
@@ -991,6 +1142,14 @@ def tr_post_processing_main(cli_args=None) -> dict[str, Any]:
             args.min_motif_size,
         )
 
+    n_hap_dropout = _apply_haplotype_dropout_filter(rows)
+    if n_hap_dropout:
+        logging.info(
+            "Flagged %d locus call(s) as low confidence: expansion on a haplotype "
+            "absent from the baseline group (hap_dropout_low_conf)",
+            n_hap_dropout,
+        )
+
     read_rows = _read_length_rows(
         rows,
         a_loci,
@@ -1026,6 +1185,7 @@ def tr_post_processing_main(cli_args=None) -> dict[str, Any]:
         n_tr_supportive_rows=n_supportive,
         n_tr_weak_rows=n_weak,
         n_tr_motif_filtered=n_motif_filtered,
+        n_tr_hap_dropout=n_hap_dropout,
         plots=plots,
     )
     summary["group_a_source"] = group_a_source

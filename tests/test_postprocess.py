@@ -273,7 +273,7 @@ def _build_minimal_env(root: Path) -> tuple[Path, Path, Path, dict[str, str]]:
     tool_paths: dict[str, str] = {}
     for tool_name in (
         "sniffles", "bcftools", "kanpig", "truvari", "medaka",
-        "tdb", "modkit", "tabix", "run_clair3.sh",
+        "tdb", "modkit", "tabix", "trgt", "samtools", "run_clair3.sh",
     ):
         p = tool_dir / tool_name
         _make_exec(p)
@@ -298,6 +298,8 @@ def _base_slurm_argv(deconv_dir, ref, tr_bed, tool_paths) -> list[str]:
         "--tdb-bin", tool_paths["tdb"],
         "--modkit-bin", tool_paths["modkit"],
         "--tabix-bin", tool_paths["tabix"],
+        "--trgt-bin", tool_paths["trgt"],
+        "--samtools-bin", tool_paths["samtools"],
         "--clair3-bin", tool_paths["run_clair3.sh"],
         "--clair3-model-path", "/tmp/clair3_model",
     ]
@@ -431,7 +433,7 @@ class TestDiscoverParseArgs(unittest.TestCase):
         ])
         self.assertEqual(args.mods_mode, "separate")
 
-    def test_clair3_platform_default(self):
+    def test_platform_default(self):
         args = parse_args([
             "discover",
             "--deconv-dir", "/tmp/d",
@@ -439,7 +441,21 @@ class TestDiscoverParseArgs(unittest.TestCase):
             "--tr-bed", "/tmp/t",
             "--sex", "male",
         ])
-        self.assertEqual(args.clair3_platform, "ont")
+        self.assertEqual(args.platform, "ont")
+
+    def test_platform_flag_and_deprecated_alias(self):
+        base = [
+            "discover",
+            "--deconv-dir", "/tmp/d",
+            "--reference", "/tmp/r",
+            "--tr-bed", "/tmp/t",
+            "--sex", "male",
+        ]
+        args = parse_args(base + ["--platform", "hifi"])
+        self.assertEqual(args.platform, "hifi")
+        # --clair3-platform remains a deprecated alias for the same dest.
+        alias = parse_args(base + ["--clair3-platform", "hifi"])
+        self.assertEqual(alias.platform, "hifi")
 
     def test_medaka_phasing_accepts_abpoa(self):
         args = parse_args([
@@ -531,11 +547,28 @@ class TestDiscoverParseArgs(unittest.TestCase):
             "tr",
             "--split-dir", "/tmp/splits",
             "--groups", "A,B",
+            "--discover-run-id", "run1",
         ])
         self.assertEqual(args.command, "discover")
         self.assertEqual(args.discover_section, "ctprocessing")
         self.assertEqual(args.discover_ctprocessing_command, "tr")
         self.assertEqual(args.groups, "A,B")
+        self.assertEqual(args.discover_run_id, "run1")
+
+    def test_discover_ctprocessing_groups_are_optional(self):
+        cases = [
+            (
+                ["snv", "--split-dir", "/tmp/splits", "--group-a-gvcf", "/tmp/a.vcf.gz", "--group-b-gvcf", "/tmp/b.vcf.gz"],
+                "snv",
+            ),
+            (["sv", "--split-dir", "/tmp/splits", "--reference", "/tmp/ref.fa"], "sv"),
+            (["tr", "--split-dir", "/tmp/splits"], "tr"),
+        ]
+        for argv_tail, command in cases:
+            with self.subTest(command=command):
+                args = parse_args(["discover", "ctprocessing", *argv_tail])
+                self.assertEqual(args.discover_ctprocessing_command, command)
+                self.assertIsNone(args.groups)
 
     def test_discover_ctprocessing_harmonize_parses(self):
         args = parse_args([
@@ -629,30 +662,33 @@ class TestParseStages(unittest.TestCase):
         self.assertNotIn("post_tdb", DEFAULT_STAGE_ORDER)
 
     def test_trgt_is_valid_stage(self):
-        # trgt is explicitly selectable but is kept out of DEFAULT_STAGE_ORDER so
-        # `--stages all` still runs exactly one TR genotyper.
         self.assertIn("trgt", VALID_STAGES)
-        self.assertNotIn("trgt", DEFAULT_STAGE_ORDER)
+        self.assertIn("trgt", DEFAULT_STAGE_ORDER)
         self.assertEqual(_parse_stages("trgt"), ("trgt",))
+
+    def test_medaka_is_valid_but_not_default(self):
+        self.assertIn("medaka", VALID_STAGES)
+        self.assertNotIn("medaka", DEFAULT_STAGE_ORDER)
+        self.assertEqual(_parse_stages("medaka"), ("medaka",))
 
 
 class TestPlatformTrSubstitution(unittest.TestCase):
 
-    def test_ont_platform_keeps_medaka(self):
+    def test_ont_platform_keeps_user_requested_medaka(self):
         stages = ("sniffles", "medaka", "tdb_create")
         self.assertEqual(_apply_platform_tr_substitution(stages, "ont"), stages)
 
-    def test_hifi_platform_swaps_medaka_to_trgt(self):
+    def test_hifi_platform_keeps_user_requested_medaka(self):
         stages = ("sniffles", "medaka", "tdb_create")
         self.assertEqual(
             _apply_platform_tr_substitution(stages, "hifi"),
-            ("sniffles", "trgt", "tdb_create"),
+            stages,
         )
 
-    def test_hifi_case_insensitive(self):
+    def test_hifi_case_insensitive_noop(self):
         self.assertEqual(
             _apply_platform_tr_substitution(("medaka",), "HiFi"),
-            ("trgt",),
+            ("medaka",),
         )
 
     def test_no_medaka_means_no_substitution(self):
@@ -661,7 +697,6 @@ class TestPlatformTrSubstitution(unittest.TestCase):
 
     def test_explicit_trgt_already_present_is_left_alone(self):
         stages = ("sniffles", "medaka", "trgt")
-        # trgt already requested → don't auto-swap medaka too (caller is explicit)
         self.assertEqual(_apply_platform_tr_substitution(stages, "hifi"), stages)
 
     def test_none_platform_is_noop(self):
@@ -1126,7 +1161,7 @@ class TestPostprocessContextAndSlurm(unittest.TestCase):
             ctx = _build_context(args)
             _render_slurm(ctx)
             # Only the group-scoped stages that were actually requested for this
-            # run should have sbatch scripts emitted; trgt is opt-in (HiFi only).
+            # run should have sbatch scripts emitted.
             for stage in GROUP_SCOPED_STAGES & set(ctx.stages):
                 script = ctx.slurm_dir / f"{stage}.array.sbatch.sh"
                 self.assertTrue(script.exists(), f"Missing SLURM script for {stage}")
@@ -1138,11 +1173,12 @@ class TestPostprocessContextAndSlurm(unittest.TestCase):
             args = parse_args(_base_slurm_argv(deconv_dir, ref, tr_bed, tool_paths))
             ctx = _build_context(args)
             _render_slurm(ctx)
-            for script_name in ("collapse.sbatch.sh", "tdb_merge.sbatch.sh"):
+            for script_name in ("collapse.sbatch.sh", "tr_post_processing.sbatch.sh"):
                 self.assertTrue(
                     (ctx.slurm_dir / script_name).exists(),
                     f"Missing SLURM script: {script_name}",
                 )
+            self.assertFalse((ctx.slurm_dir / "tdb_merge.sbatch.sh").exists())
             self.assertFalse((ctx.slurm_dir / "snv_post_processing.sbatch.sh").exists())
 
     def test_submit_script_has_concurrent_first_tier(self):
@@ -1155,8 +1191,9 @@ class TestPostprocessContextAndSlurm(unittest.TestCase):
             submit_text = (ctx.slurm_dir / "submit_pipeline.sh").read_text()
             # First-tier independent jobs
             self.assertIn("SNIFFLES_JID", submit_text)
-            self.assertIn("MEDAKA_JID", submit_text)
+            self.assertIn("TRGT_JID", submit_text)
             self.assertIn("MODKIT_JID", submit_text)
+            self.assertNotIn("MEDAKA_JID", submit_text)
             self.assertNotIn("CLAIR3_JID", submit_text)
             self.assertNotIn("SNV_POST_PROCESSING_JID", submit_text)
 
@@ -1173,10 +1210,11 @@ class TestPostprocessContextAndSlurm(unittest.TestCase):
             self.assertIn("afterok:${SNIFFLES_JID}", submit_text)
             # kanpig depends on sniffles_filter
             self.assertIn("afterok:${SNIFFLES_FILTER_JID}", submit_text)
-            # tdb_create depends on medaka
-            self.assertIn("afterok:${MEDAKA_JID}", submit_text)
-            # tdb_merge depends on tdb_create
-            self.assertIn("afterok:${TDB_CREATE_JID}", submit_text)
+            # tr_post_processing depends on trgt
+            self.assertIn("afterok:${TRGT_JID}", submit_text)
+            # Medaka/TDB are opt-in, not part of default submission
+            self.assertNotIn("afterok:${MEDAKA_JID}", submit_text)
+            self.assertNotIn("afterok:${TDB_CREATE_JID}", submit_text)
 
     def test_submit_script_account_prefilled_when_given(self):
         with tempfile.TemporaryDirectory() as td:
@@ -1486,6 +1524,77 @@ class TestTrPostProcessingMain(unittest.TestCase):
             for idx, length in enumerate(lengths)
         ]
 
+    def test_tr_resolve_args_infers_groups_from_manifest(self):
+        from sniffcell.discover.tr_post_processing import _resolve_args
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            deconv_dir, _ref, _tr_bed, _tool_paths = _build_minimal_env(root)
+            split_dir = deconv_dir / "deconv_requested_group_splits"
+            args = _resolve_args(SimpleNamespace(
+                split_dir=str(split_dir),
+                groups=None,
+                output_dir=str(root / "out"),
+                sample_id=None,
+                sample_a_label=None,
+                sample_b_label=None,
+                group_a_fasta=None,
+                group_b_fasta=None,
+                group_a_spanning_bam=None,
+                group_b_spanning_bam=None,
+                tr_bed=None,
+                trgt_fallback_flank_bp=50,
+                margin_bp=100,
+                min_supporting_reads=3,
+                min_total_reads=5,
+                min_motif_size=1,
+                skip_plots=True,
+            ))
+            self.assertEqual((args.group_a, args.group_b), ("Neuron", "Oligodendrocyte"))
+            self.assertEqual(args.sample_id, "sample1")
+            self.assertEqual(
+                args.group_a_fasta,
+                split_dir / "medaka_tandem" / "Neuron.medaka" / "trimmed_reads.fasta",
+            )
+
+    def test_tr_resolve_args_finds_discover_run_medaka_inputs(self):
+        from sniffcell.discover.tr_post_processing import _resolve_args
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            deconv_dir, _ref, _tr_bed, _tool_paths = _build_minimal_env(root)
+            split_dir = deconv_dir / "deconv_requested_group_splits"
+            stale_run = split_dir / "discover" / "newer_without_medaka"
+            medaka_dir = split_dir / "discover" / "run_with_medaka" / "medaka_tandem"
+            stale_run.mkdir(parents=True)
+            group_a_fasta = medaka_dir / "Neuron.medaka" / "trimmed_reads.fasta"
+            group_b_fasta = medaka_dir / "Oligodendrocyte.medaka" / "trimmed_reads.fasta"
+            self._write_fasta(group_a_fasta, self._records("a", "chr1_100_200", [100]))
+            self._write_fasta(group_b_fasta, self._records("b", "chr1_100_200", [100]))
+
+            args = _resolve_args(SimpleNamespace(
+                split_dir=str(split_dir),
+                groups=None,
+                output_dir=str(root / "out"),
+                sample_id=None,
+                sample_a_label=None,
+                sample_b_label=None,
+                group_a_fasta=None,
+                group_b_fasta=None,
+                discover_run_id=None,
+                group_a_spanning_bam=None,
+                group_b_spanning_bam=None,
+                tr_bed=None,
+                trgt_fallback_flank_bp=50,
+                margin_bp=100,
+                min_supporting_reads=3,
+                min_total_reads=5,
+                min_motif_size=1,
+                skip_plots=True,
+            ))
+            self.assertEqual(args.group_a_fasta, group_a_fasta)
+            self.assertEqual(args.group_b_fasta, group_b_fasta)
+
     def test_tr_post_processing_main_writes_tiered_tr_changes(self):
         from sniffcell.discover.tr_post_processing import tr_post_processing_main
 
@@ -1535,7 +1644,7 @@ class TestTrPostProcessingMain(unittest.TestCase):
             self.assertEqual(summary["n_tr_strong_rows"], 1)
             self.assertEqual(summary["n_tr_supportive_rows"], 1)
             self.assertEqual(summary["n_tr_weak_rows"], 0)
-            self.assertEqual(summary["params"]["margin_bp"], 100)
+            self.assertEqual(summary["params"]["margin_bp"], 50)
             self.assertEqual(summary["params"]["min_supporting_reads"], 3)
             self.assertEqual(summary["params"]["min_total_reads"], 5)
 
@@ -1638,18 +1747,86 @@ class TestTrPostProcessingMain(unittest.TestCase):
                 "--skip-plots",
             ]
 
-            # Default (min-motif-size=3) drops the dinucleotide locus.
+            # Default (min-motif-size=2) keeps the dinucleotide locus: only
+            # homopolymers are dropped by default.
             default = tr_post_processing_main(base + ["--output-dir", str(root / "default")])
-            self.assertEqual(default["n_targets"], 0)
-            self.assertEqual(default["n_tr_motif_filtered"], 1)
-            self.assertEqual(default["params"]["min_motif_size"], 3)
+            self.assertEqual(default["n_targets"], 1)
+            self.assertEqual(default["n_tr_motif_filtered"], 0)
+            self.assertEqual(default["params"]["min_motif_size"], 2)
 
-            # Disabling the filter (=1) recovers the call.
+            # Raising the floor to 3 drops the dinucleotide locus.
+            strict = tr_post_processing_main(
+                base + ["--output-dir", str(root / "strict"), "--min-motif-size", "3"]
+            )
+            self.assertEqual(strict["n_targets"], 0)
+            self.assertEqual(strict["n_tr_motif_filtered"], 1)
+
+            # Disabling the filter (=1) also keeps the call.
             disabled = tr_post_processing_main(
                 base + ["--output-dir", str(root / "off"), "--min-motif-size", "1"]
             )
             self.assertEqual(disabled["n_targets"], 1)
             self.assertEqual(disabled["n_tr_motif_filtered"], 0)
+
+    def test_tr_post_processing_main_flags_haplotype_dropout(self):
+        from sniffcell.discover.tr_post_processing import tr_post_processing_main
+
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            split_dir = root / "sample1" / "deconv" / "deconv_requested_group_splits"
+            medaka_dir = split_dir / "medaka_tandem"
+            group_a_fasta = medaka_dir / "Neuron.medaka" / "trimmed_reads.fasta"
+            group_b_fasta = medaka_dir / "Oligodendrocyte.medaka" / "trimmed_reads.fasta"
+
+            def recs(tag: str, region: str, lengths: list[int], hap: int):
+                return [
+                    (f"{tag}_{i}_{region}_pad_0_0_fwd_hap{hap}_phased-set1_ploidy2", n)
+                    for i, n in enumerate(lengths)
+                ]
+
+            # chr1: Neuron expansion supported only by hap2 reads while the Oligo
+            # baseline has hap1 reads only -> haplotype dropout -> low confidence.
+            a = recs("a_drop", "chr1_100_200", [1300, 1280, 1260, 1240, 1220], 2)
+            b = recs("b_drop", "chr1_100_200", [1000, 1005, 1010, 1008, 995], 1)
+            # chr2: same expansion on hap2 but the baseline also carries hap2 reads
+            # -> not a dropout.
+            a += recs("a_ok", "chr2_200_300", [1300, 1280, 1260, 1240, 1220], 2)
+            b += recs("b_ok", "chr2_200_300", [1000, 1005, 1010, 1008, 995], 2)
+
+            self._write_fasta(group_a_fasta, a)
+            self._write_fasta(group_b_fasta, b)
+
+            summary = tr_post_processing_main([
+                "--split-dir", str(split_dir),
+                "--groups", "Neuron,Oligodendrocyte",
+                "--output-dir", str(root / "out"),
+                "--sample-id", "sample1",
+                "--sample-a-label", "sample1.Neuron",
+                "--sample-b-label", "sample1.Oligodendrocyte",
+                "--group-a-fasta", str(group_a_fasta),
+                "--group-b-fasta", str(group_b_fasta),
+                "--min-motif-size", "1",
+                "--skip-plots",
+            ])
+
+            self.assertEqual(summary["n_targets"], 2)
+            self.assertEqual(summary["n_tr_hap_dropout"], 1)
+
+            tr_bed = pd.read_csv(root / "out" / "tr_changes.bed.tsv", sep="\t")
+            for col in ("change_support_haps", "baseline_haps", "hap_dropout_low_conf"):
+                self.assertIn(col, tr_bed.columns)
+            rows = {r["trid"]: r for _, r in tr_bed.iterrows()}
+
+            drop = rows["chr1_100_200"]
+            self.assertTrue(bool(drop["hap_dropout_low_conf"]))
+            self.assertEqual(str(drop["change_support_haps"]), "2")
+            self.assertEqual(str(drop["baseline_haps"]), "1")
+            self.assertEqual(drop["tr_tier"], "weak")
+            self.assertFalse(bool(drop["tr_pass_for_harmonized"]))
+
+            ok = rows["chr2_200_300"]
+            self.assertFalse(bool(ok["hap_dropout_low_conf"]))
+            self.assertTrue(bool(ok["tr_pass_for_harmonized"]))
 
     def test_tr_post_processing_main_skips_when_fasta_missing(self):
         from sniffcell.discover.tr_post_processing import tr_post_processing_main

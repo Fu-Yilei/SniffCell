@@ -8,8 +8,8 @@ def _build_discover_run_parent_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--deconv-dir", required=True, help="Path to the sample deconv directory.")
     parser.add_argument("--reference", required=True, help="Reference FASTA used by downstream tools.")
-    parser.add_argument("--tr-bed", required=True, help="Tandem repeat BED for medaka tandem.")
-    parser.add_argument("--sex", required=True, choices=["female", "male"], help="Sample sex for medaka tandem.")
+    parser.add_argument("--tr-bed", required=True, help="Tandem repeat BED for TRGT/medaka tandem-repeat calling.")
+    parser.add_argument("--sex", required=True, choices=["female", "male"], help="Sample sex for tandem-repeat calling.")
     parser.add_argument(
         "--scheduler",
         default="local",
@@ -34,7 +34,7 @@ def _build_discover_run_parent_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tdb-bin", default=None, help="Optional tdb executable path.")
     parser.add_argument("--modkit-bin", default=None, help="Optional modkit executable path.")
     parser.add_argument("--tabix-bin", default=None, help="Optional tabix executable path.")
-    parser.add_argument("--threads", type=int, default=16, help="Threads used by all tools (sniffles, kanpig, medaka, modkit, clair3, clairS, tdb merge). Default=16.")
+    parser.add_argument("--threads", type=int, default=16, help="Threads used by all tools (sniffles, kanpig, trgt, medaka, modkit, clair3, tdb merge). Default=16.")
     parser.add_argument(
         "--sniffles-mosaic-filter-expression",
         default="INFO/MOSAIC=1",
@@ -74,10 +74,10 @@ def _build_discover_run_parent_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--tr-margin-bp",
         type=int,
-        default=100,
+        default=50,
         help=(
             "TR read-length scan: minimum bp by which each supporting read of the change group "
-            "must exceed the baseline group's longest read at a locus. Default=100."
+            "must exceed the baseline group's longest read at a locus. Default=50."
         ),
     )
     parser.add_argument(
@@ -101,12 +101,13 @@ def _build_discover_run_parent_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--tr-min-motif-size",
         type=int,
-        default=3,
+        default=2,
         help=(
             "TR read-length scan: drop a called locus when the repeat unit of the change "
-            "group's longest read is shorter than this many bp. Excludes homopolymer and "
-            "dinucleotide (e.g. AT/TA) tracts, where ONT length estimation slips and inflates "
-            "a few reads into spurious multi-kb expansions. Use 1 to disable. Default=3."
+            "group's longest read is shorter than this many bp. The default of 2 excludes "
+            "homopolymer tracts, where ONT length estimation slips and inflates a few reads "
+            "into spurious multi-kb expansions; use 3 to also drop dinucleotide (e.g. AT/TA) "
+            "tracts, or 1 to disable. Default=2."
         ),
     )
     parser.add_argument("--tdb-create-mem", type=int, default=4, help="Memory in GB for tdb create. Default=4.")
@@ -118,9 +119,9 @@ def _build_discover_run_parent_parser() -> argparse.ArgumentParser:
         help="Output mode label for modkit-derived methylation summaries. Default=separate.",
     )
     parser.add_argument("--clair3-bin", default=None, help="Optional run_clair3.sh executable path.")
-    parser.add_argument("--clair3-platform", default="ont", help="Sequencing platform for Clair3 (e.g. ont, hifi). When set to 'hifi', the discover pipeline auto-substitutes trgt for medaka in the TR genotyping stage. Default=ont.")
+    parser.add_argument("--platform", "--clair3-platform", dest="platform", default="ont", help="Sequencing platform (e.g. ont, hifi). TRGT is the default TR genotyper for all platforms; this value is passed through to Clair3 when the opt-in clair3 stage runs. (--clair3-platform is a deprecated alias.) Default=ont.")
     parser.add_argument("--clair3-model-path", default=None, help="Path to Clair3 model directory. Required when running the clair3 stage.")
-    parser.add_argument("--trgt-bin", default=None, help="Optional trgt executable path. Required for the trgt stage (used as the TR genotyper on PacBio HiFi data).")
+    parser.add_argument("--trgt-bin", default=None, help="Optional trgt executable path. Required for the default trgt stage.")
     parser.add_argument("--samtools-bin", default=None, help="Optional samtools executable path. Used by the trgt stage to sort/index the spanning BAM output.")
     parser.add_argument(
         "--trgt-sample-name-template",

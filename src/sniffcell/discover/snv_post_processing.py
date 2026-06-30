@@ -15,6 +15,7 @@ import pysam
 from sniffcell.discover.discover import (
     _expand_path,
     _infer_sample_id,
+    _resolve_two_group_names,
     _sanitize_token,
     _write_json,
 )
@@ -658,7 +659,11 @@ def _build_arg_parser(
         add_help=add_help,
     )
     parser.add_argument("--split-dir", required=True, help="deconv_requested_group_splits directory")
-    parser.add_argument("--groups", required=True, help="Exactly two group names, comma-separated")
+    parser.add_argument(
+        "--groups",
+        default=None,
+        help="Exactly two group names, comma-separated. Default: infer from a two-group split manifest.",
+    )
     parser.add_argument("--group-a-gvcf", required=True, help="gVCF or pileup gVCF for the first group")
     parser.add_argument("--group-b-gvcf", required=True, help="gVCF or pileup gVCF for the second group")
     parser.add_argument("--output-dir", default=None, help="Output directory. Default: <split-dir>/postprocess/snv_post_processing_<timestamp>")
@@ -673,9 +678,7 @@ def _build_arg_parser(
 
 def _resolve_args(raw_args: Any) -> TwoSampleSnvArgs:
     split_dir = _expand_path(raw_args.split_dir)
-    tokens = [x.strip() for x in str(raw_args.groups).split(",") if x.strip()]
-    if len(tokens) != 2:
-        raise ValueError("--groups must contain exactly two group names")
+    group_a, group_b = _resolve_two_group_names(split_dir, raw_args.groups)
     output_dir = (
         _expand_path(raw_args.output_dir)
         if raw_args.output_dir
@@ -684,8 +687,8 @@ def _resolve_args(raw_args: Any) -> TwoSampleSnvArgs:
     return TwoSampleSnvArgs(
         split_dir=split_dir,
         output_dir=output_dir,
-        group_a=tokens[0],
-        group_b=tokens[1],
+        group_a=group_a,
+        group_b=group_b,
         group_a_gvcf=_expand_path(raw_args.group_a_gvcf),
         group_b_gvcf=_expand_path(raw_args.group_b_gvcf),
         sample_id=raw_args.sample_id or _infer_sample_id(split_dir.parent),

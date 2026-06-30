@@ -35,17 +35,15 @@ DEFAULT_STAGE_ORDER = (
     "sniffles_filter",
     "kanpig",
     "collapse",
-    "medaka",
-    "tdb_create",
-    "tdb_merge",
+    "trgt",
     "modkit",
 )
-# `trgt` is the PacBio HiFi-friendly TR genotyper. It sits parallel to `medaka`
-# and is auto-substituted in when --clair3-platform=hifi; kept out of
-# DEFAULT_STAGE_ORDER so the "all" alias stays a single TR-genotyping pass.
+# `trgt` is the default TR genotyper across platforms. `medaka` remains a valid
+# ONT opt-in stage, and the historical Medaka/TDB chain can still be requested
+# explicitly with --stages medaka,tdb_create,tdb_merge.
 # `clair3` is explicit opt-in because it is substantially heavier than the
 # default SV/TR/methylation discovery stages.
-VALID_STAGES = DEFAULT_STAGE_ORDER + ("trgt", "clair3")
+VALID_STAGES = DEFAULT_STAGE_ORDER + ("medaka", "tdb_create", "tdb_merge", "clair3")
 TR_GENOTYPER_STAGES = {"medaka", "trgt"}
 STAGE_ALIASES = {
     "all": set(DEFAULT_STAGE_ORDER),
@@ -374,16 +372,13 @@ def _parse_stages(stage_text: str | None) -> tuple[str, ...]:
 def _apply_platform_tr_substitution(
     stages: tuple[str, ...], platform: str | None
 ) -> tuple[str, ...]:
-    """For HiFi platforms, swap medaka→trgt so a single TR genotyper runs.
+    """Backward-compatible no-op for the old HiFi medaka→trgt substitution.
 
-    Only applies when medaka is present and trgt is not already requested.
-    Returns the stages tuple unchanged when no substitution is needed.
+    TRGT is now the default TR genotyper for all platforms. Medaka is an
+    explicit opt-in stage, including for ONT, so platform selection should not
+    rewrite a user-requested stage list.
     """
-    if not platform or str(platform).lower() != "hifi":
-        return stages
-    if "trgt" in stages or "medaka" not in stages:
-        return stages
-    return tuple("trgt" if stage == "medaka" else stage for stage in stages)
+    return stages
 
 
 def _required_tools_for_stages(stages: Sequence[str]) -> set[str]:
@@ -445,6 +440,19 @@ def _select_groups(discovered: list[SplitGroup], group_text: str | None) -> list
     return requested
 
 
+def _resolve_two_group_names(split_dir: Path, group_text: str | None) -> tuple[str, str]:
+    if group_text is not None:
+        requested = [token.strip() for token in group_text.split(",") if token.strip()]
+        if len(requested) != 2:
+            raise ValueError("--groups must contain exactly two group names")
+        return requested[0], requested[1]
+
+    selected = _select_groups(_discover_groups(split_dir), None)
+    if len(selected) != 2:
+        raise ValueError("--groups must contain exactly two group names")
+    return selected[0], selected[1]
+
+
 def _build_context(args) -> RunContext:
     deconv_dir = _expand_path(args.deconv_dir)
     split_dir = _expand_path(args.split_dir) if args.split_dir else deconv_dir / "deconv_requested_group_splits"
@@ -456,7 +464,7 @@ def _build_context(args) -> RunContext:
     run_id = args.run_id or f"discover_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     run_root = split_dir / "discover" / run_id
     stages = _parse_stages(args.stages)
-    stages = _apply_platform_tr_substitution(stages, getattr(args, "clair3_platform", None))
+    stages = _apply_platform_tr_substitution(stages, getattr(args, "platform", None))
     required_tools = _required_tools_for_stages(stages)
     tool_paths = {
         "bcftools": _resolve_tool_optional("bcftools", args.bcftools_bin, required="bcftools" in required_tools),
@@ -502,14 +510,14 @@ def _build_context(args) -> RunContext:
         "truvari_pctseq": args.truvari_pctseq,
         "truvari_pctsize": args.truvari_pctsize,
         "truvari_refdist": args.truvari_refdist,
-        "clair3_platform": args.clair3_platform,
+        "platform": getattr(args, "platform", "ont"),
         "clair3_model_path": args.clair3_model_path,
         "trgt_sample_name_template": getattr(args, "trgt_sample_name_template", "{sample_id}.{group}"),
         "trgt_karyotype": getattr(args, "trgt_karyotype", None),
-        "tr_margin_bp": getattr(args, "tr_margin_bp", 100),
+        "tr_margin_bp": getattr(args, "tr_margin_bp", 50),
         "tr_min_supporting_reads": getattr(args, "tr_min_supporting_reads", 3),
         "tr_min_total_reads": getattr(args, "tr_min_total_reads", 5),
-        "tr_min_motif_size": getattr(args, "tr_min_motif_size", 3),
+        "tr_min_motif_size": getattr(args, "tr_min_motif_size", 2),
     }
     return RunContext(
         sample_id=sample_id,
@@ -701,7 +709,8 @@ def _tdb_stage_dir(ctx: RunContext) -> Path:
 
 
 def _tr_post_stage_dir(ctx: RunContext) -> Path:
-    return ctx.run_root / "medaka_tandem" / "tr_post_processing" / (
+    tr_root = "trgt" if "trgt" in ctx.stages else "medaka_tandem"
+    return ctx.run_root / tr_root / "tr_post_processing" / (
         f"{_sanitize_token(ctx.selected_groups[0])}_vs_{_sanitize_token(ctx.selected_groups[1])}"
     )
 
@@ -783,16 +792,6 @@ def _resolve_trgt_spanning_input(ctx: RunContext, group_name: str) -> Path:
 
 
 def _tr_post_source_args(ctx: RunContext, group_a: str, group_b: str) -> list[str]:
-    fasta_a = _resolve_trimmed_reads_input(ctx, group_a)
-    fasta_b = _resolve_trimmed_reads_input(ctx, group_b)
-    if fasta_a.exists() and fasta_b.exists():
-        return [
-            "--group-a-fasta",
-            str(fasta_a),
-            "--group-b-fasta",
-            str(fasta_b),
-        ]
-
     spanning_a = _resolve_trgt_spanning_input(ctx, group_a)
     spanning_b = _resolve_trgt_spanning_input(ctx, group_b)
     if spanning_a.exists() and spanning_b.exists():
@@ -803,6 +802,16 @@ def _tr_post_source_args(ctx: RunContext, group_a: str, group_b: str) -> list[st
             str(spanning_b),
             "--tr-bed",
             str(ctx.tr_bed),
+        ]
+
+    fasta_a = _resolve_trimmed_reads_input(ctx, group_a)
+    fasta_b = _resolve_trimmed_reads_input(ctx, group_b)
+    if fasta_a.exists() and fasta_b.exists():
+        return [
+            "--group-a-fasta",
+            str(fasta_a),
+            "--group-b-fasta",
+            str(fasta_b),
         ]
 
     # Preserve the historical skipped-output behavior when neither source is
@@ -1748,8 +1757,13 @@ def _run_tr_post_processing(ctx: RunContext) -> None:
     output_dir = _tr_post_stage_dir(ctx)
     summary_path = output_dir / "summary.json"
     group_a, group_b = ctx.selected_groups
-    sample_a_label = _sample_name(str(ctx.params["medaka_sample_name_template"]), ctx.sample_id, group_a)
-    sample_b_label = _sample_name(str(ctx.params["medaka_sample_name_template"]), ctx.sample_id, group_b)
+    label_template = (
+        str(ctx.params["trgt_sample_name_template"])
+        if "trgt" in ctx.stages
+        else str(ctx.params["medaka_sample_name_template"])
+    )
+    sample_a_label = _sample_name(label_template, ctx.sample_id, group_a)
+    sample_b_label = _sample_name(label_template, ctx.sample_id, group_b)
     cmd = [
         sys.executable,
         "-m",
@@ -1876,7 +1890,7 @@ def _run_clair3(ctx: RunContext, group_name: str) -> None:
         f"--ref_fn={str(ctx.reference)}",
         f"--output={str(stage_dir)}",
         f"--threads={ctx.params['threads']}",
-        f"--platform={ctx.params['clair3_platform']}",
+        f"--platform={ctx.params['platform']}",
         f"--model_path={model_path or 'PLACEHOLDER'}",
         "--gvcf",
         # "--include_all_ctgs",
@@ -1918,8 +1932,13 @@ def _write_harmonized_variant_summary(ctx: RunContext) -> Path | None:
         return None
 
     group_a, group_b = ctx.selected_groups
-    group_a_label = _sample_name(str(ctx.params["medaka_sample_name_template"]), ctx.sample_id, group_a)
-    group_b_label = _sample_name(str(ctx.params["medaka_sample_name_template"]), ctx.sample_id, group_b)
+    label_template = (
+        str(ctx.params["trgt_sample_name_template"])
+        if "trgt" in ctx.stages
+        else str(ctx.params["medaka_sample_name_template"])
+    )
+    group_a_label = _sample_name(label_template, ctx.sample_id, group_a)
+    group_b_label = _sample_name(label_template, ctx.sample_id, group_b)
     include_all_tr_candidates = True
     output_path = ctx.run_root / "harmonized_variants.tsv"
     stats = write_harmonized_variants(
@@ -2084,8 +2103,8 @@ def _build_recursive_cli(
         str(ctx.params["mods_mode"]),
         "--clair3-bin",
         ctx.tool_paths["clair3"],
-        "--clair3-platform",
-        str(ctx.params["clair3_platform"]),
+        "--platform",
+        str(ctx.params["platform"]),
         "--trgt-bin",
         ctx.tool_paths.get("trgt") or "trgt",
         "--samtools-bin",
@@ -2163,6 +2182,7 @@ def _render_slurm(ctx: RunContext) -> None:
         "kanpig": ("pp_kanpig", "12:00:00"),
         "medaka": ("pp_medaka", "24:00:00"),
         "trgt": ("pp_trgt", "06:00:00"),
+        "tr_post_processing": ("pp_trpost", "04:00:00"),
         "tdb_create": ("pp_tdbc", "04:00:00"),
         "clair3": ("pp_clair3", "24:00:00"),
         "snv_post_processing": ("pp_snvpost", "04:00:00"),
@@ -2211,6 +2231,57 @@ def _render_slurm(ctx: RunContext) -> None:
                 script_path=script_path, job_name=job_name, cpus=threads,
                 time_limit=time_limit, body_lines=body, array=None,
             )
+
+    if "trgt" in ctx.stages and len(groups) == 2:
+        script_path = ctx.slurm_dir / "tr_post_processing.sbatch.sh"
+        group_a, group_b = groups
+        label_template = str(ctx.params["trgt_sample_name_template"])
+        tr_post_cmd = [
+            sys.executable,
+            "-m",
+            "sniffcell.main",
+            "discover",
+            "ctprocessing",
+            "tr",
+            "--split-dir",
+            str(ctx.split_dir),
+            "--groups",
+            ",".join(groups),
+            "--output-dir",
+            str(_tr_post_stage_dir(ctx)),
+            "--sample-id",
+            ctx.sample_id,
+            "--sample-a-label",
+            _sample_name(label_template, ctx.sample_id, group_a),
+            "--sample-b-label",
+            _sample_name(label_template, ctx.sample_id, group_b),
+            "--group-a-spanning-bam",
+            str(_resolve_trgt_spanning_input(ctx, group_a)),
+            "--group-b-spanning-bam",
+            str(_resolve_trgt_spanning_input(ctx, group_b)),
+            "--tr-bed",
+            str(ctx.tr_bed),
+            "--margin-bp",
+            str(ctx.params["tr_margin_bp"]),
+            "--min-supporting-reads",
+            str(ctx.params["tr_min_supporting_reads"]),
+            "--min-total-reads",
+            str(ctx.params["tr_min_total_reads"]),
+            "--min-motif-size",
+            str(ctx.params["tr_min_motif_size"]),
+        ]
+        body = [
+            f"export PYTHONPATH={shlex.quote(str(REPO_ROOT / 'src'))}:${{PYTHONPATH:-}}",
+            shlex.join(tr_post_cmd),
+        ]
+        _write_slurm_script(
+            script_path=script_path,
+            job_name=stage_time_map["tr_post_processing"][0],
+            cpus=threads,
+            time_limit=stage_time_map["tr_post_processing"][1],
+            body_lines=body,
+            array=None,
+        )
 
     if "clair3" in ctx.stages and len(groups) == 2:
         script_path = ctx.slurm_dir / "snv_post_processing.sbatch.sh"
@@ -2294,7 +2365,7 @@ def _render_submit_script(ctx: RunContext) -> Path:
     groups = ctx.selected_groups
 
     # First-tier: independent jobs (only need BAMs)
-    first_tier_stages = [s for s in ["sniffles", "clair3", "medaka", "modkit"] if s in stages_set]
+    first_tier_stages = [s for s in ["sniffles", "clair3", "trgt", "medaka", "modkit"] if s in stages_set]
     has_first_tier = bool(first_tier_stages)
     if has_first_tier:
         lines.append("# ---- Concurrent first-tier jobs (submit together, no upstream dependency) ---")
@@ -2311,6 +2382,8 @@ def _render_submit_script(ctx: RunContext) -> Path:
     dep_chain = []
     if "clair3" in stages_set and len(groups) == 2:
         dep_chain.append(("snv_post_processing", "clair3"))
+    if "trgt" in stages_set and len(groups) == 2:
+        dep_chain.append(("tr_post_processing", "trgt"))
     dep_chain.extend([
         ("sniffles_filter", "sniffles"),
         ("kanpig", "sniffles_filter"),
@@ -2320,7 +2393,11 @@ def _render_submit_script(ctx: RunContext) -> Path:
     ])
     dep_section_started = False
     for stage, dep_stage in dep_chain:
-        if stage not in stages_set and not (stage == "snv_post_processing" and "clair3" in stages_set and len(groups) == 2):
+        if (
+            stage not in stages_set
+            and not (stage == "snv_post_processing" and "clair3" in stages_set and len(groups) == 2)
+            and not (stage == "tr_post_processing" and "trgt" in stages_set and len(groups) == 2)
+        ):
             continue
         if not dep_section_started:
             lines.append("# ---- Dependent stages -------------------------------------------------------")

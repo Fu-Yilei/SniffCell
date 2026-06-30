@@ -40,7 +40,7 @@ def _build_two_group_env(root: Path) -> tuple[Path, Path, dict[str, str]]:
     bin_dir = root / "bin"
     bin_dir.mkdir()
     tools = {}
-    for tool in ("bcftools", "truvari", "kanpig"):
+    for tool in ("bcftools", "truvari", "kanpig", "bgzip", "tabix"):
         path = bin_dir / tool
         tools[tool] = str(path)
     _make_exec(
@@ -107,6 +107,26 @@ out.write_text(
     encoding="utf-8"
 )
 rnames.write_text("sv_id\\tread_name\\n", encoding="utf-8")
+""",
+    )
+    _make_exec(
+        Path(tools["bgzip"]),
+        """#!/usr/bin/env python3
+import sys
+from pathlib import Path
+src = Path(sys.argv[-1])
+dst = Path(str(src) + ".gz")
+dst.write_bytes(src.read_bytes())
+src.unlink()
+""",
+    )
+    _make_exec(
+        Path(tools["tabix"]),
+        """#!/usr/bin/env python3
+import sys
+from pathlib import Path
+target = Path(sys.argv[-1])
+Path(str(target) + ".tbi").write_text("idx\\n", encoding="utf-8")
 """,
     )
     return split_dir, reference, tools
@@ -199,8 +219,9 @@ class TestSvPostProcessingMain(unittest.TestCase):
                 [
                     "--split-dir", str(split_dir),
                     "--reference", str(reference),
-                    "--groups", "A,B",
                     "--bcftools-bin", tools["bcftools"],
+                    "--bgzip-bin", tools["bgzip"],
+                    "--tabix-bin", tools["tabix"],
                     "--truvari-bin", tools["truvari"],
                     "--kanpig-bin", tools["kanpig"],
                     "--output-dir", str(Path(td) / "run"),
@@ -213,6 +234,32 @@ class TestSvPostProcessingMain(unittest.TestCase):
             self.assertTrue(Path(summary["shared_vcf"]).exists())
             self.assertEqual(summary["params"]["min_dp"], 5)
             self.assertEqual(summary["params"]["min_target_alt_ad"], 2)
+
+    def test_resolve_args_infers_groups_from_manifest(self):
+        with tempfile.TemporaryDirectory() as td:
+            split_dir, reference, tools = _build_two_group_env(Path(td))
+            parser = type("Args", (), {
+                "split_dir": str(split_dir),
+                "reference": str(reference),
+                "groups": None,
+                "output_dir": str(Path(td) / "run"),
+                "sample_id": None,
+                "mosaic_filter_expression": "INFO/MOSAIC=1",
+                "mosaic_filter": False,
+                "min_dp": 5,
+                "min_target_alt_ad": 2,
+                "other_max_alt_ad": 0,
+                "bcftools_bin": tools["bcftools"],
+                "bgzip_bin": tools["bgzip"],
+                "tabix_bin": tools["tabix"],
+                "truvari_bin": tools["truvari"],
+                "kanpig_bin": tools["kanpig"],
+                "threads": 16,
+                "kanpig_seqsim": 0.8,
+                "kanpig_sizesim": 0.85,
+            })
+            args = _resolve_args(parser)
+            self.assertEqual((args.group_a, args.group_b), ("A", "B"))
 
     def test_resolve_args_requires_two_groups(self):
         parser = type("Args", (), {

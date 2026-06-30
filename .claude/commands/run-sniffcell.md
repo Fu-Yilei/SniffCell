@@ -279,7 +279,8 @@ sniffcell discover tools run \
   --medaka-sample-name-template '{sample_id}.{group}' \
   --tdb-create-mem 4 \
   --mods-mode separate \
-  [--clair3-bin <CLAIR3_BIN> --clair3-platform ont --clair3-model-path <CLAIR3_MODEL> if clair3 available]
+  --platform ont \
+  [--clair3-bin <CLAIR3_BIN> --clair3-model-path <CLAIR3_MODEL> if clair3 available]
 ```
 
 After completion, set `DISCOVER_DIR=${DECONV_DIR}/deconv_requested_group_splits/discover/<run_id>`.

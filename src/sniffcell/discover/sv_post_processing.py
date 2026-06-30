@@ -19,6 +19,7 @@ from sniffcell.discover.discover import (
     _expand_path,
     _infer_sample_id,
     _read_json,
+    _resolve_two_group_names,
     _sanitize_token,
     _write_json,
 )
@@ -568,7 +569,11 @@ def _build_arg_parser(
     )
     parser.add_argument("--split-dir", required=True, help="deconv_requested_group_splits directory")
     parser.add_argument("--reference", required=True, help="Reference FASTA")
-    parser.add_argument("--groups", required=True, help="Exactly two group names, comma-separated")
+    parser.add_argument(
+        "--groups",
+        default=None,
+        help="Exactly two group names, comma-separated. Default: infer from a two-group split manifest.",
+    )
     parser.add_argument("--output-dir", default=None, help="Output directory. Default: <split-dir>/postprocess/sv_post_processing_<timestamp>")
     parser.add_argument("--sample-id", default=None, help="Optional sample ID override")
     parser.add_argument("--mosaic-filter-expression", default=DEFAULT_MOSAIC_FILTER_EXPR)
@@ -597,17 +602,15 @@ def _build_arg_parser(
 def _resolve_args(raw_args) -> TwoSampleSvArgs:
     split_dir = _expand_path(raw_args.split_dir)
     reference = _expand_path(raw_args.reference)
-    tokens = [x.strip() for x in str(raw_args.groups).split(",") if x.strip()]
-    if len(tokens) != 2:
-        raise ValueError("--groups must contain exactly two group names")
+    group_a, group_b = _resolve_two_group_names(split_dir, raw_args.groups)
     sample_id = raw_args.sample_id or _infer_sample_id(split_dir.parent)
     output_dir = _expand_path(raw_args.output_dir) if raw_args.output_dir else split_dir / "postprocess" / f"sv_post_processing_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     return TwoSampleSvArgs(
         split_dir=split_dir,
         reference=reference,
         output_dir=output_dir,
-        group_a=tokens[0],
-        group_b=tokens[1],
+        group_a=group_a,
+        group_b=group_b,
         mosaic_filter_expression=str(raw_args.mosaic_filter_expression),
         apply_mosaic_filter=bool(raw_args.mosaic_filter),
         min_dp=int(raw_args.min_dp),
