@@ -1,0 +1,427 @@
+{
+  "__tissues__": [
+    {
+      "code": "3A",
+      "name": "Blood, Whole",
+      "key": "3A",
+      "usable": true,
+      "confidence": "strong",
+      "notes": "Whole blood mapped to PBMC-like immune methylomes; granulocytes and bulk white-blood-cell samples are excluded to match the immune-cell atlas group."
+    },
+    {
+      "code": "3AC",
+      "name": "Dermal Fibroblast",
+      "key": "",
+      "usable": false,
+      "confidence": "partial",
+      "notes": "Reference atlas has dermal fibroblasts, but a one-celltype entry cannot support differential ctDMR discovery."
+    },
+    {
+      "code": "3AD",
+      "name": "Skin, Calf",
+      "key": "3AD",
+      "usable": true,
+      "confidence": "partial",
+      "notes": "Skin represented by dermal fibroblast and epidermal keratinocyte proxies."
+    },
+    {
+      "code": "3AF",
+      "name": "Skin, Abdomen",
+      "key": "3AF",
+      "usable": true,
+      "confidence": "partial",
+      "notes": "Skin represented by dermal fibroblast and epidermal keratinocyte proxies."
+    },
+    {
+      "code": "3AH",
+      "name": "Muscle",
+      "key": "",
+      "usable": false,
+      "confidence": "partial",
+      "notes": "Reference atlas has skeletal muscle samples, but a one-celltype entry cannot support differential ctDMR discovery."
+    },
+    {
+      "code": "3AK",
+      "name": "Brain, Frontal Lobe (Left)",
+      "key": "3AK",
+      "usable": true,
+      "confidence": "partial",
+      "notes": "Frontal lobe mapped to cortex neuron and oligodendrocyte references."
+    },
+    {
+      "code": "3AL",
+      "name": "Brain, Temporal Lobe (Left)",
+      "key": "3AL",
+      "usable": true,
+      "confidence": "weak",
+      "notes": "No temporal-lobe-specific atlas label; using generic cortex/brain cell types."
+    },
+    {
+      "code": "3AM",
+      "name": "Brain, Cerebellum (Left)",
+      "key": "3AM",
+      "usable": true,
+      "confidence": "partial",
+      "notes": "Includes explicit cerebellum neuron plus oligodendrocyte references."
+    },
+    {
+      "code": "3AN",
+      "name": "Brain, Hippocampus (Left)",
+      "key": "3AN",
+      "usable": true,
+      "confidence": "weak",
+      "notes": "No hippocampus-specific atlas label; using generic cortex/brain cell types."
+    },
+    {
+      "code": "3AO",
+      "name": "Brain, Hippocampus (Right)",
+      "key": "3AO",
+      "usable": true,
+      "confidence": "weak",
+      "notes": "No hippocampus-specific atlas label; using generic cortex/brain cell types."
+    },
+    {
+      "code": "3C",
+      "name": "Esophagus",
+      "key": "",
+      "usable": false,
+      "confidence": "partial",
+      "notes": "Reference atlas has esophagus epithelial samples, but a one-celltype entry cannot support differential ctDMR discovery."
+    },
+    {
+      "code": "3E",
+      "name": "Colon, Ascending",
+      "key": "3E",
+      "usable": true,
+      "confidence": "strong",
+      "notes": "Ascending colon mapped to right-colon epithelial/endocrine plus shared colon stromal and immune references."
+    },
+    {
+      "code": "3G",
+      "name": "Colon, Descending",
+      "key": "3G",
+      "usable": true,
+      "confidence": "strong",
+      "notes": "Descending colon mapped to left-colon epithelial/endocrine plus shared colon stromal and immune references."
+    },
+    {
+      "code": "3I",
+      "name": "Liver",
+      "key": "3I",
+      "usable": true,
+      "confidence": "strong",
+      "notes": "Direct liver cell-type labels."
+    },
+    {
+      "code": "3K",
+      "name": "Adrenal Gland, Left",
+      "key": "",
+      "usable": false,
+      "confidence": "none",
+      "notes": "No adrenal gland cell-type labels found in the reference atlas."
+    },
+    {
+      "code": "3M",
+      "name": "Adrenal Gland, Right",
+      "key": "",
+      "usable": false,
+      "confidence": "none",
+      "notes": "No adrenal gland cell-type labels found in the reference atlas."
+    },
+    {
+      "code": "3O",
+      "name": "Aorta, Abdominal",
+      "key": "3O",
+      "usable": true,
+      "confidence": "partial",
+      "notes": "Aorta endothelial and smooth-muscle labels."
+    },
+    {
+      "code": "3Q",
+      "name": "Lung",
+      "key": "3Q",
+      "usable": true,
+      "confidence": "strong",
+      "notes": "Direct lung epithelial, macrophage, endothelial, pleura, and bronchus smooth-muscle labels."
+    },
+    {
+      "code": "3S",
+      "name": "Heart, LV",
+      "key": "3S",
+      "usable": true,
+      "confidence": "strong",
+      "notes": "Direct heart fibroblast and cardiomyocyte labels."
+    },
+    {
+      "code": "3U",
+      "name": "Testis, Left",
+      "key": "",
+      "usable": false,
+      "confidence": "none",
+      "notes": "No testis cell-type labels found in the reference atlas."
+    },
+    {
+      "code": "3Y",
+      "name": "Ovary, Left",
+      "key": "",
+      "usable": false,
+      "confidence": "partial",
+      "notes": "Reference atlas has ovary epithelial sample, but a one-celltype entry cannot support differential ctDMR discovery."
+    }
+  ],
+  "3A": {
+    "B-cell": [
+      "GSM5652316_Blood-B-Z000000TX.hg38",
+      "GSM5652317_Blood-B-Z000000UB.hg38",
+      "GSM5652318_Blood-B-Z000000UR.hg38",
+      "GSM5652319_Blood-B-Mem-Z0000041J.hg38",
+      "GSM5652320_Blood-B-Mem-Z0000041K.hg38"
+    ],
+    "Monocyte": [
+      "GSM5652302_Blood-Monocytes-Z000000TP.hg38",
+      "GSM5652303_Blood-Monocytes-Z000000U3.hg38",
+      "GSM5652304_Blood-Monocytes-Z000000UH.hg38"
+    ],
+    "NK-cell": [
+      "GSM5652299_Blood-NK-Z000000TM.hg38",
+      "GSM5652300_Blood-NK-Z000000U1.hg38",
+      "GSM5652301_Blood-NK-Z000000UF.hg38"
+    ],
+    "T-cell": [
+      "GSM5652277_Blood-T-CD3-Z000000TV.hg38",
+      "GSM5652278_Blood-T-CD3-Z000000UP.hg38",
+      "GSM5652279_Blood-T-CD4-Z000000TT.hg38",
+      "GSM5652280_Blood-T-CD4-Z000000U7.hg38",
+      "GSM5652281_Blood-T-CD4-Z000000UM.hg38",
+      "GSM5652282_Blood-T-CD8-Z000000TR.hg38",
+      "GSM5652283_Blood-T-CD8-Z000000U5.hg38",
+      "GSM5652284_Blood-T-CD8-Z000000UK.hg38",
+      "GSM5652285_Blood-T-CenMem-CD4-Z00000417.hg38",
+      "GSM5652286_Blood-T-CenMem-CD4-Z0000041D.hg38",
+      "GSM5652287_Blood-T-CenMem-CD4-Z0000041N.hg38",
+      "GSM5652288_Blood-T-Eff-CD8-Z00000419.hg38",
+      "GSM5652289_Blood-T-Eff-CD8-Z0000041F.hg38",
+      "GSM5652290_Blood-T-Eff-CD8-Z0000041Q.hg38",
+      "GSM5652291_Blood-T-EffMem-CD4-Z00000416.hg38",
+      "GSM5652292_Blood-T-EffMem-CD4-Z0000041C.hg38",
+      "GSM5652293_Blood-T-EffMem-CD4-Z0000041M.hg38",
+      "GSM5652294_Blood-T-EffMem-CD8-Z0000041A.hg38",
+      "GSM5652295_Blood-T-EffMem-CD8-Z0000041G.hg38",
+      "GSM5652296_Blood-T-Naive-CD4-Z0000041E.hg38",
+      "GSM5652297_Blood-T-Naive-CD8-Z0000041B.hg38",
+      "GSM5652298_Blood-T-Naive-CD8-Z0000041H.hg38"
+    ]
+  },
+  "3AD": {
+    "Dermal-Fibroblast": [
+      "GSM5652204_Dermal-Fibroblasts-Z00000423.hg38"
+    ],
+    "Epidermal-Keratinocyte": [
+      "GSM5652321_Epidermal-Keratinocytes-Z00000424.hg38"
+    ]
+  },
+  "3AF": {
+    "Dermal-Fibroblast": [
+      "GSM5652204_Dermal-Fibroblasts-Z00000423.hg38"
+    ],
+    "Epidermal-Keratinocyte": [
+      "GSM5652321_Epidermal-Keratinocytes-Z00000424.hg38"
+    ]
+  },
+  "3AK": {
+    "Neuron": [
+      "GSM5652223_Cortex-Neuron-Z000000TF.hg38",
+      "GSM5652224_Neuron-Z000000TH.hg38",
+      "GSM5652225_Cortex-Neuron-Z0000042F.hg38",
+      "GSM5652226_Cortex-Neuron-Z0000042H.hg38",
+      "GSM5652227_Cortex-Neuron-Z0000042J.hg38",
+      "GSM5652228_Cortex-Neuron-Z0000042M.hg38",
+      "GSM5652229_Cortex-Neuron-Z0000042P.hg38",
+      "GSM5652230_Cortex-Neuron-Z0000042K.hg38",
+      "GSM5652232_Cortex-Neuron-Z000000TD.hg38"
+    ],
+    "Oligodendrocyte": [
+      "GSM5652219_Oligodendrocytes-Z000000TK.hg38",
+      "GSM5652220_Oligodendrocytes-Z0000042E.hg38",
+      "GSM5652221_Oligodendrocytes-Z0000042L.hg38",
+      "GSM5652222_Oligodendrocytes-Z0000042N.hg38"
+    ]
+  },
+  "3AL": {
+    "Neuron": [
+      "GSM5652223_Cortex-Neuron-Z000000TF.hg38",
+      "GSM5652224_Neuron-Z000000TH.hg38",
+      "GSM5652225_Cortex-Neuron-Z0000042F.hg38",
+      "GSM5652226_Cortex-Neuron-Z0000042H.hg38",
+      "GSM5652227_Cortex-Neuron-Z0000042J.hg38",
+      "GSM5652228_Cortex-Neuron-Z0000042M.hg38",
+      "GSM5652229_Cortex-Neuron-Z0000042P.hg38",
+      "GSM5652230_Cortex-Neuron-Z0000042K.hg38",
+      "GSM5652232_Cortex-Neuron-Z000000TD.hg38"
+    ],
+    "Oligodendrocyte": [
+      "GSM5652219_Oligodendrocytes-Z000000TK.hg38",
+      "GSM5652220_Oligodendrocytes-Z0000042E.hg38",
+      "GSM5652221_Oligodendrocytes-Z0000042L.hg38",
+      "GSM5652222_Oligodendrocytes-Z0000042N.hg38"
+    ]
+  },
+  "3AM": {
+    "Cerebellum-Neuron": [
+      "GSM5652231_Cerebellum-Neuron-Z000000TB.hg38"
+    ],
+    "Oligodendrocyte": [
+      "GSM5652219_Oligodendrocytes-Z000000TK.hg38",
+      "GSM5652220_Oligodendrocytes-Z0000042E.hg38",
+      "GSM5652221_Oligodendrocytes-Z0000042L.hg38",
+      "GSM5652222_Oligodendrocytes-Z0000042N.hg38"
+    ]
+  },
+  "3AN": {
+    "Neuron": [
+      "GSM5652223_Cortex-Neuron-Z000000TF.hg38",
+      "GSM5652224_Neuron-Z000000TH.hg38",
+      "GSM5652225_Cortex-Neuron-Z0000042F.hg38",
+      "GSM5652226_Cortex-Neuron-Z0000042H.hg38",
+      "GSM5652227_Cortex-Neuron-Z0000042J.hg38",
+      "GSM5652228_Cortex-Neuron-Z0000042M.hg38",
+      "GSM5652229_Cortex-Neuron-Z0000042P.hg38",
+      "GSM5652230_Cortex-Neuron-Z0000042K.hg38",
+      "GSM5652232_Cortex-Neuron-Z000000TD.hg38"
+    ],
+    "Oligodendrocyte": [
+      "GSM5652219_Oligodendrocytes-Z000000TK.hg38",
+      "GSM5652220_Oligodendrocytes-Z0000042E.hg38",
+      "GSM5652221_Oligodendrocytes-Z0000042L.hg38",
+      "GSM5652222_Oligodendrocytes-Z0000042N.hg38"
+    ]
+  },
+  "3AO": {
+    "Neuron": [
+      "GSM5652223_Cortex-Neuron-Z000000TF.hg38",
+      "GSM5652224_Neuron-Z000000TH.hg38",
+      "GSM5652225_Cortex-Neuron-Z0000042F.hg38",
+      "GSM5652226_Cortex-Neuron-Z0000042H.hg38",
+      "GSM5652227_Cortex-Neuron-Z0000042J.hg38",
+      "GSM5652228_Cortex-Neuron-Z0000042M.hg38",
+      "GSM5652229_Cortex-Neuron-Z0000042P.hg38",
+      "GSM5652230_Cortex-Neuron-Z0000042K.hg38",
+      "GSM5652232_Cortex-Neuron-Z000000TD.hg38"
+    ],
+    "Oligodendrocyte": [
+      "GSM5652219_Oligodendrocytes-Z000000TK.hg38",
+      "GSM5652220_Oligodendrocytes-Z0000042E.hg38",
+      "GSM5652221_Oligodendrocytes-Z0000042L.hg38",
+      "GSM5652222_Oligodendrocytes-Z0000042N.hg38"
+    ]
+  },
+  "3E": {
+    "Fibroblast": [
+      "GSM5652198_Colon-Fibroblasts-Z0000042A.hg38",
+      "GSM5652199_Colon-Fibroblasts-Z0000042C.hg38"
+    ],
+    "Macrophage": [
+      "GSM5652305_Colon-Macrophages-Z00000444.hg38",
+      "GSM5652306_Colon-Macrophages-Z00000446.hg38"
+    ],
+    "Right-Endocrine": [
+      "GSM5652372_Colon-Right-Endocrine-Z0000044S.hg38"
+    ],
+    "Right-Epithelial": [
+      "GSM5652370_Colon-Right-Epithelial-Z000000V0.hg38",
+      "GSM5652371_Colon-Right-Epithelial-Z000000V8.hg38"
+    ]
+  },
+  "3G": {
+    "Fibroblast": [
+      "GSM5652198_Colon-Fibroblasts-Z0000042A.hg38",
+      "GSM5652199_Colon-Fibroblasts-Z0000042C.hg38"
+    ],
+    "Left-Endocrine": [
+      "GSM5652374_Colon-Left-Endocrine-Z0000044J.hg38",
+      "GSM5652375_Colon-Left-Endocrine-Z0000044T.hg38"
+    ],
+    "Left-Epithelial": [
+      "GSM5652373_Colon-Left-Epithelial-Z000000VA.hg38",
+      "GSM5652376_Colon-Left-Epithelial-Z0000043B.hg38",
+      "GSM5652377_Colon-Left-Epithelial-Z0000043C.hg38"
+    ],
+    "Macrophage": [
+      "GSM5652305_Colon-Macrophages-Z00000444.hg38",
+      "GSM5652306_Colon-Macrophages-Z00000446.hg38"
+    ]
+  },
+  "3I": {
+    "Endothelial": [
+      "GSM5652190_Liver-Endothelium-Z000000RB.hg38"
+    ],
+    "Hepatocyte": [
+      "GSM5652233_Liver-Hepatocytes-Z000000R3.hg38",
+      "GSM5652234_Liver-Hepatocytes-Z000000T3.hg38",
+      "GSM5652235_Liver-Hepatocytes-Z0000043Q.hg38",
+      "GSM5652236_Liver-Hepatocytes-Z0000044H.hg38",
+      "GSM5652237_Liver-Hepatocytes-Z0000044M.hg38",
+      "GSM5652238_Liver-Hepatocytes-Z00000431.hg38"
+    ],
+    "Macrophage": [
+      "GSM5652307_Liver-Macrophages-Z0000043P.hg38"
+    ]
+  },
+  "3O": {
+    "Endothelial": [
+      "GSM5652179_Aorta-Endothel-Z00000422.hg38",
+      "GSM5652180_Aorta-Endothel-Z0000043G.hg38"
+    ],
+    "Smooth-Muscle": [
+      "GSM5652207_Aorta-Smooth-Muscle-Z0000041U.hg38"
+    ]
+  },
+  "3Q": {
+    "Alveolar-Endothelial": [
+      "GSM5652191_Lung-Alveolar-Endothel-Z000000Q1.hg38",
+      "GSM5652192_Lung-Alveolar-Endothel-Z000000QK.hg38",
+      "GSM5652193_Lung-Alveolar-Endothel-Z0000045H.hg38"
+    ],
+    "Alveolar-Epithelial": [
+      "GSM5652354_Lung-Alveolar-Epithelial-Z000000T1.hg38",
+      "GSM5652355_Lung-Alveolar-Epithelial-Z000000VC.hg38",
+      "GSM5652356_Lung-Alveolar-Epithelial-Z000000VE.hg38"
+    ],
+    "Alveolar-Macrophage": [
+      "GSM5652308_Lung-Alveolar-Macrophages-Z00000448.hg38",
+      "GSM5652309_Lung-Alveolar-Macrophages-Z0000044C.hg38"
+    ],
+    "Bronchus-Epithelial": [
+      "GSM5652335_Lung-Bronchus-Epithelial-Z000000QD.hg38",
+      "GSM5652336_Lung-Bronchus-Epithelial-Z000000RZ.hg38",
+      "GSM5652337_Lung-Bronchus-Epithelial-Z000000S5.hg38"
+    ],
+    "Bronchus-Smooth-Muscle": [
+      "GSM5652211_Lung-Bronchus-Smooth-Muscle-Z00000421.hg38"
+    ],
+    "Interstitial-Macrophage": [
+      "GSM5652310_Lung-Interstitial-Macrophages-Z00000447.hg38",
+      "GSM5652311_Lung-Interstitial-Macrophages-Z0000044D.hg38",
+      "GSM5652312_Lung-Interstitial-Macrophages-Z0000044E.hg38"
+    ],
+    "Pleura": [
+      "GSM5652357_Lung-Pleura-Z0000042B.hg38"
+    ]
+  },
+  "3S": {
+    "Cardiomyocyte": [
+      "GSM5652212_Heart-Cardiomyocyte-Z0000044G.hg38",
+      "GSM5652213_Heart-Cardiomyocyte-Z0000044K.hg38",
+      "GSM5652214_Heart-Cardiomyocyte-Z0000044N.hg38",
+      "GSM5652215_Heart-Cardiomyocyte-Z0000044P.hg38",
+      "GSM5652216_Heart-Cardiomyocyte-Z0000044Q.hg38",
+      "GSM5652217_Heart-Cardiomyocyte-Z0000044R.hg38"
+    ],
+    "Fibroblast": [
+      "GSM5652200_Heart-Fibroblasts-Z0000043R.hg38",
+      "GSM5652201_Heart-Fibroblasts-Z0000041V.hg38",
+      "GSM5652202_Heart-Fibroblasts-Z0000041W.hg38",
+      "GSM5652203_Heart-Fibroblasts-Z0000041X.hg38"
+    ]
+  }
+}

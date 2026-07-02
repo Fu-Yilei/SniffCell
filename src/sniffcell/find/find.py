@@ -8,6 +8,10 @@ import pandas as pd
 
 from sniffcell.find import ctdmr
 from sniffcell.find.ctdmr import means_from_mapping
+from sniffcell.tissue_atlas import (
+    resolve_tissue_key,
+    write_tissue_catalog_manifest,
+)
 
 
 def _dedupe_keep_order(values: Iterable[str]) -> list[str]:
@@ -105,10 +109,10 @@ def find_main(args):
     npy_file = args.npy
     index_file = args.index
     meta_file = args.meta
-    celltypes_file = args.celltypes_file
-    celltypes_key = args.celltypes_keys
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    celltypes_file = args.celltypes_file
+    requested_celltypes_key = args.celltypes_keys
 
     logger.info("Loading atlas matrix from %s", npy_file)
     all_celltype_blocks = np.load(npy_file)
@@ -134,6 +138,10 @@ def find_main(args):
     logger.info("Loading cell type definitions from %s", celltypes_file)
     with open(celltypes_file, "r", encoding="utf-8") as f:
         atlas_mapping = json.load(f)
+
+    celltypes_key, tissue_row = resolve_tissue_key(requested_celltypes_key, atlas_mapping)
+    if celltypes_key != requested_celltypes_key:
+        logger.info("Resolved tissue key '%s' to atlas key '%s'", requested_celltypes_key, celltypes_key)
 
     mapping = _resolve_celltype_mapping(celltypes_key, atlas_mapping)
     logger.info("Using key '%s' with %d declared groups", celltypes_key, len(mapping))
@@ -168,6 +176,14 @@ def find_main(args):
 
     annotated_dmrs.to_csv(output_path, sep="\t", index=False)
     _write_igv_bed(annotated_dmrs, output_path)
+    if tissue_row is not None:
+        write_tissue_catalog_manifest(
+            output_path=output_path,
+            celltypes_file=celltypes_file,
+            requested_key=requested_celltypes_key,
+            resolved_key=celltypes_key,
+            tissue_row=tissue_row,
+        )
 
     logger.info("Wrote annotation-ready ctDMR BED/TSV: %s", output_path)
     logger.info(

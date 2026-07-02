@@ -661,8 +661,8 @@ def assign_sv_celltypes(
       - When use_read_names=True: the spatial window is bypassed entirely. Each
         SV-supporting read is directly joined to its per-read classification using
         all ctDMR evidence genome-wide. This is correct when sv_df already carries
-        explicit read name lists (e.g. harmonized variant tables), because the reads
-        were classified during deconvolution and the classifying ctDMR may lie
+        explicit read name lists, because the reads were classified against
+        targeted ctDMRs and the classifying ctDMR may lie
         anywhere along the read, not necessarily within `window` bp of the SV
         breakpoint.
       - ctDMRs overlapping the SV core expanded by
@@ -725,7 +725,7 @@ def assign_sv_celltypes(
     if "is_best_group" not in assignment.columns:
         assignment["is_best_group"] = False
     else:
-        assignment["is_best_group"] = assignment["is_best_group"].fillna(False).astype(bool)
+        assignment["is_best_group"] = assignment["is_best_group"].astype("boolean").fillna(False).astype(bool)
     if "code_order" not in assignment.columns:
         assignment["code_order"] = pd.Series(pd.NA, index=assignment.index, dtype="string")
     else:
@@ -801,8 +801,8 @@ def assign_sv_celltypes(
         # Bypass spatial window: directly join support reads with their full
         # per-read classification. Every ctDMR a supporting read overlaps
         # (anywhere in the genome) contributes evidence for the SV. This is
-        # correct for harmonized variant sources where reads were already
-        # classified during deconvolution and the classifying ctDMR may be
+        # correct when reads were classified against targeted ctDMRs and the
+        # classifying ctDMR may be
         # far from the SV breakpoint on a long read.
         if support_pairs.empty:
             mapped = assignment.iloc[0:0].copy()
