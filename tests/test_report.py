@@ -1,4 +1,5 @@
 import json
+import logging
 import tarfile
 import tempfile
 import unittest
@@ -8,10 +9,41 @@ from unittest.mock import patch
 
 import pandas as pd
 
-from sniffcell.report.report import _select_high_confidence_svs, report_main
+from sniffcell.report.report import (
+    _backfill_sv_fields_from_manifest_vcf,
+    _select_high_confidence_svs,
+    _viz_supported_for_row,
+    report_main,
+)
 
 
 class TestReportSelection(unittest.TestCase):
+    def test_viz_supports_generic_and_mei_variants(self):
+        self.assertTrue(_viz_supported_for_row({"variant_class": "VAR"}, {}))
+        self.assertTrue(_viz_supported_for_row({"variant_class": "MEI"}, {}))
+
+    def test_non_vcf_variant_table_is_not_parsed_as_vcf(self):
+        with tempfile.TemporaryDirectory() as td:
+            variant_table = Path(td) / "variants.tsv"
+            variant_table.write_text("id\nvar1\n", encoding="utf-8")
+            variants = pd.DataFrame(
+                {
+                    "id": pd.Series(["var1"], dtype="string"),
+                    "sv_type": pd.Series([""], dtype="string"),
+                    "vaf": [pd.NA],
+                    "sv_len": [pd.NA],
+                }
+            )
+            with patch("sniffcell.report.report.read_vcf_to_df") as read_vcf:
+                result = _backfill_sv_fields_from_manifest_vcf(
+                    variants,
+                    {"inputs": {"vcf": str(variant_table)}},
+                    logging.getLogger("test"),
+                )
+
+        read_vcf.assert_not_called()
+        self.assertEqual(result.loc[0, "id"], "var1")
+
     def test_select_high_confidence_defaults(self):
         sv_df = pd.DataFrame(
             {

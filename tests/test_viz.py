@@ -97,6 +97,40 @@ class TestVizSupportingReadAssignment(unittest.TestCase):
         self.assertEqual(summary_df.iloc[0]["assigned_celltypes"], "Neuron")
         self.assertEqual(len(detail_df), 1)
 
+    def test_prescreened_assignment_rows_are_not_distance_filtered_again(self):
+        assignment_df = pd.DataFrame(
+            {
+                "chr": ["1"],
+                "start": [12000],
+                "end": [12045],
+                "code_order": ["Neuron|Oligodendrocyte"],
+                "code": ["10"],
+                "best_group": ["Neuron"],
+                "best_group_leaves": ["Neuron"],
+                "is_best_group": [True],
+            },
+            index=pd.Index(["r1"], name="readname"),
+        )
+        assignment_df["read_name"] = assignment_df.index.astype(str)
+
+        summary_df, detail_df = _summarize_supporting_read_assignments(
+            assignment_df,
+            supporting_reads={"r1"},
+            sv_chrom="1",
+            sv_start=2000,
+            sv_end=2010,
+            window=1000,
+            region_start=1900,
+            region_end=2100,
+            assignment_available=True,
+            clip_to_region=False,
+            prescreened_assignment_rows=True,
+        )
+
+        self.assertTrue(bool(summary_df.iloc[0]["is_assigned"]))
+        self.assertEqual(summary_df.iloc[0]["assigned_celltypes"], "Neuron")
+        self.assertEqual(len(detail_df), 1)
+
 
 class TestVizHeatmapMatrix(unittest.TestCase):
     def test_heatmap_matrix_limits_and_orders(self):
@@ -171,6 +205,55 @@ class TestVizManifestResolution(unittest.TestCase):
             self.assertEqual(resolved["bed_path"], "/tmp/dmrs.tsv")
             self.assertEqual(resolved["window"], 12000)
             self.assertTrue(str(resolved["output_path"]).endswith("sv1.viz.png"))
+
+    def test_resolve_inputs_uses_variant_specific_lite_runtime(self):
+        with tempfile.TemporaryDirectory() as td:
+            anno_dir = Path(td) / "anno_out"
+            anno_dir.mkdir(parents=True, exist_ok=True)
+            runtime_path = anno_dir / "lite_variant_runtime.tsv"
+            pd.DataFrame(
+                [
+                    {
+                        "id": "sv1",
+                        "bam": "/tmp/sv1.bam",
+                        "bed": "/tmp/sv1.ctdmr.tsv",
+                        "reference": "/tmp/sv1.fa",
+                    }
+                ]
+            ).to_csv(runtime_path, sep="\t", index=False)
+            manifest = {
+                "inputs": {
+                    "bam": "/tmp/default.bam",
+                    "vcf": "/tmp/variants.tsv",
+                    "reference": "/tmp/default.fa",
+                    "bed": "/tmp/default.ctdmr.tsv",
+                },
+                "outputs": {"lite_variant_runtime": str(runtime_path)},
+            }
+            (anno_dir / "anno_run_manifest.json").write_text(
+                json.dumps(manifest),
+                encoding="utf-8",
+            )
+
+            class Args:
+                anno_output = str(anno_dir)
+                input = None
+                vcf = None
+                reference = None
+                bed = None
+                read_assignment = None
+                output = None
+                format = "png"
+                window = 5000
+                sv_id = "sv1"
+                kanpig_read_names = None
+
+            resolved = _resolve_viz_runtime_inputs(Args(), logging.getLogger("test"))
+
+        self.assertEqual(resolved["bam_path"], "/tmp/sv1.bam")
+        self.assertEqual(resolved["bed_path"], "/tmp/sv1.ctdmr.tsv")
+        self.assertEqual(resolved["reference_path"], "/tmp/sv1.fa")
+        self.assertTrue(resolved["prescreened_assignment_rows"])
 
 
 class TestVizSupportHaplotypeFiltering(unittest.TestCase):

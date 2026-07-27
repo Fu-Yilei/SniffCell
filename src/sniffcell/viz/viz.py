@@ -263,11 +263,21 @@ def _resolve_viz_runtime_inputs(args, logger: logging.Logger) -> dict:
     manifest_inputs = manifest.get("inputs", {}) if isinstance(manifest, dict) else {}
     manifest_runtime = manifest.get("runtime", {}) if isinstance(manifest, dict) else {}
     manifest_outputs = manifest.get("outputs", {}) if isinstance(manifest, dict) else {}
+    lite_runtime_inputs: dict[str, object] = {}
+    lite_runtime_path = manifest_outputs.get("lite_variant_runtime")
+    if lite_runtime_path and getattr(args, "sv_id", None):
+        runtime_path = Path(str(lite_runtime_path))
+        if runtime_path.exists():
+            runtime_table = pd.read_csv(runtime_path, sep="\t", dtype=str).fillna("")
+            if "id" in runtime_table.columns:
+                runtime_match = runtime_table[runtime_table["id"].astype(str) == str(args.sv_id)]
+                if not runtime_match.empty:
+                    lite_runtime_inputs = runtime_match.iloc[0].to_dict()
 
-    bam_path = args.input or manifest_inputs.get("bam")
+    bam_path = args.input or lite_runtime_inputs.get("bam") or manifest_inputs.get("bam")
     vcf_path = args.vcf or manifest_inputs.get("vcf") or manifest_inputs.get("variants")
-    reference_path = args.reference or manifest_inputs.get("reference")
-    bed_path = args.bed or manifest_inputs.get("bed")
+    reference_path = args.reference or lite_runtime_inputs.get("reference") or manifest_inputs.get("reference")
+    bed_path = args.bed or lite_runtime_inputs.get("bed") or manifest_inputs.get("bed")
 
     read_assignment = args.read_assignment
     if read_assignment is None:
@@ -320,6 +330,7 @@ def _resolve_viz_runtime_inputs(args, logger: logging.Logger) -> dict:
         "output_path": output_path,
         "window": effective_window,
         "assignment_window": assignment_window,
+        "prescreened_assignment_rows": bool(lite_runtime_path),
         "kanpig_read_names": getattr(args, "kanpig_read_names", None),
     }
 
@@ -788,6 +799,7 @@ def _collect_supporting_assignment_evidence(
     link_window: int,
     clip_start: int | None = None,
     clip_end: int | None = None,
+    prescreened_assignment_rows: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     if assignment_df.empty:
         return pd.DataFrame(), pd.DataFrame()
@@ -818,9 +830,12 @@ def _collect_supporting_assignment_evidence(
 
     sv_chrom_norm = _norm_chr(sv_chrom)
     same_chr = evidence["chr_norm"].eq(sv_chrom_norm)
-    overlap_padded = (int(sv_start) < (evidence["end"] + int(link_window))) & (int(sv_end) > (evidence["start"] - int(link_window)))
     overlap_core = (int(sv_start) <= evidence["end"]) & (int(sv_end) >= evidence["start"])
-    in_sv_window = same_chr & overlap_padded & (~overlap_core)
+    if prescreened_assignment_rows:
+        in_sv_window = same_chr & (~overlap_core)
+    else:
+        overlap_padded = (int(sv_start) < (evidence["end"] + int(link_window))) & (int(sv_end) > (evidence["start"] - int(link_window)))
+        in_sv_window = same_chr & overlap_padded & (~overlap_core)
     evidence = evidence[in_sv_window].copy()
 
     if clip_start is not None and clip_end is not None:
@@ -845,6 +860,7 @@ def _summarize_supporting_read_assignments(
     region_end: int,
     assignment_available: bool,
     clip_to_region: bool = True,
+    prescreened_assignment_rows: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     summary_cols = [
         "read_name",
@@ -899,6 +915,7 @@ def _summarize_supporting_read_assignments(
         link_window=window,
         clip_start=(region_start if clip_to_region else None),
         clip_end=(region_end if clip_to_region else None),
+        prescreened_assignment_rows=prescreened_assignment_rows,
     )
     if evidence.empty:
         status = "unassigned_no_overlap_rows"
@@ -1534,18 +1551,42 @@ def _plot_sv_panel(
 
     ref_mean_cols = _reference_celltype_mean_columns(dmr_panel_df)
     ref_celltypes = [c[len("mean_"):] for c in ref_mean_cols]
+    variant_read_names = (
+        support_assignment_df["read_name"].dropna().astype(str).drop_duplicates().tolist()
+        if not support_assignment_df.empty
+        else []
+    )
+    max_distal_read_rows = 8
+    shown_variant_read_names = variant_read_names[:max_distal_read_rows]
 
     fig_height = max(6.4, 5.0 + 0.060 * max(1, len(shown_reads)) + 0.035 * max(1, len(ref_mean_cols)))
-    fig, axes = plt.subplots(
-        2,
-        1,
-        figsize=(18, fig_height),
-        sharex=True,
-        constrained_layout=False,
-        gridspec_kw={"height_ratios": [4.2, 1.8]},
-    )
-    fig.subplots_adjust(left=0.080, right=0.995, top=0.76, bottom=0.08, hspace=0.08)
-    ax_reads, ax_dmrs = axes
+    has_distal_callouts = not linked_ctdmr_callouts.empty
+    if has_distal_callouts:
+        fig = plt.figure(figsize=(18, fig_height), constrained_layout=False)
+        grid = fig.add_gridspec(
+            2,
+            2,
+            height_ratios=[4.2, 1.8],
+            width_ratios=[4.7, 1.3],
+        )
+        ax_reads = fig.add_subplot(grid[0, 0])
+        ax_distal_reads = fig.add_subplot(grid[0, 1], sharey=ax_reads)
+        ax_dmrs = fig.add_subplot(grid[1, 0], sharex=ax_reads)
+        ax_distal = fig.add_subplot(grid[1, 1], sharey=ax_dmrs, sharex=ax_distal_reads)
+        fig.subplots_adjust(left=0.095, right=0.985, top=0.76, bottom=0.10, hspace=0.15, wspace=0.10)
+    else:
+        fig, axes = plt.subplots(
+            2,
+            1,
+            figsize=(18, fig_height),
+            sharex=True,
+            constrained_layout=False,
+            gridspec_kw={"height_ratios": [4.2, 1.8]},
+        )
+        fig.subplots_adjust(left=0.080, right=0.995, top=0.76, bottom=0.08, hspace=0.08)
+        ax_reads, ax_dmrs = axes
+        ax_distal = None
+        ax_distal_reads = None
 
     title_size = 17
     subtitle_size = 11
@@ -1570,7 +1611,13 @@ def _plot_sv_panel(
             .to_dict()
         )
 
-    read_meth_map = _build_read_methylation_map(methyl_df)
+    window_methyl_df = methyl_df
+    if not methyl_df.empty:
+        window_methyl_df = methyl_df[
+            (pd.to_numeric(methyl_df["start"], errors="coerce") < region_end)
+            & (pd.to_numeric(methyl_df["end"], errors="coerce") > region_start)
+        ].copy()
+    read_meth_map = _build_read_methylation_map(window_methyl_df)
     methyl_cmap = plt.cm.bwr
     low_methylation_color = methyl_cmap(0.0)
     mid_methylation_color = methyl_cmap(0.5)
@@ -1666,10 +1713,10 @@ def _plot_sv_panel(
                 )
 
         # Overlay ctDMR-specific methylation directly on supporting-read segments.
-        if not methyl_df.empty:
-            mdf = methyl_df[
-                pd.notna(methyl_df["mean_methylation"])
-                & (pd.to_numeric(methyl_df["n_cpg_observed"], errors="coerce").fillna(0) > 0)
+        if not window_methyl_df.empty:
+            mdf = window_methyl_df[
+                pd.notna(window_methyl_df["mean_methylation"])
+                & (pd.to_numeric(window_methyl_df["n_cpg_observed"], errors="coerce").fillna(0) > 0)
             ].copy()
             for mrow in mdf.itertuples(index=False):
                 read_name = str(mrow.read_name)
@@ -1920,9 +1967,9 @@ def _plot_sv_panel(
         min_dmr_display_bp = max(30, min(300, int(round(max(1, region_end - region_start) * 0.008))))
         if dmrs_plot.empty:
             ax_dmrs.text(
-                0.01,
+                0.02,
                 0.5,
-                "No ctDMRs overlap this window; linked distal ctDMR callouts are shown at the panel edge.",
+                "No ctDMRs overlap the genomic window.",
                 transform=ax_dmrs.transAxes,
                 va="center",
                 fontsize=axis_label_size - 1,
@@ -1968,7 +2015,14 @@ def _plot_sv_panel(
                     zorder=2,
                 )
 
-                center_x = 0.5 * (draw_start + draw_end)
+                label_edge_pad = max(1.0, 0.025 * max(1, region_end - region_start))
+                center_x = float(
+                    np.clip(
+                        0.5 * (draw_start + draw_end),
+                        region_start + label_edge_pad,
+                        region_end - label_edge_pad,
+                    )
+                )
                 label_entries.append(
                     {
                         "x_center": center_x,
@@ -2001,83 +2055,177 @@ def _plot_sv_panel(
                     bbox={"facecolor": (1, 1, 1, 0.22), "edgecolor": "none", "pad": 0.18},
                 )
 
-        if not linked_ctdmr_callouts.empty:
-            edge_transform = transforms.blended_transform_factory(ax_dmrs.transAxes, ax_dmrs.transData)
-            y_center_all = 0.5 * max(1, n_celltypes)
-            side_slots = {
-                "left": linked_ctdmr_callouts[linked_ctdmr_callouts["callout_side"] == "left"].reset_index(drop=True),
-                "right": linked_ctdmr_callouts[linked_ctdmr_callouts["callout_side"] == "right"].reset_index(drop=True),
-            }
-            slot_width = 0.070
-            slot_gap = 0.050
-            for side, side_df in side_slots.items():
-                for slot_idx, row in enumerate(side_df.itertuples(index=False)):
-                    if side == "left":
-                        x1 = -0.045 - (slot_idx * (slot_width + slot_gap))
-                        x0 = x1 - slot_width
-                        connector_x = x1
-                        label_x = x0 - 0.018
-                        label_rotation = 90
+        if ax_distal is not None:
+            left_callouts = linked_ctdmr_callouts[
+                linked_ctdmr_callouts["callout_side"].eq("left")
+            ].sort_values(["callout_distance_bp", "start"], ascending=[False, True], kind="stable")
+            right_callouts = linked_ctdmr_callouts[
+                linked_ctdmr_callouts["callout_side"].eq("right")
+            ].sort_values(["callout_distance_bp", "start"], ascending=[True, True], kind="stable")
+            callout_plot = pd.concat([left_callouts, right_callouts], ignore_index=True)
+            distal_labels: list[str] = []
+            for callout_idx, (_, row) in enumerate(callout_plot.iterrows()):
+                best_dir = str(row.get("best_dir", "")).lower()
+                edge_color = "#2ca25f" if best_dir == "hyper" else "#756bb1"
+                for ct_idx, mean_col in enumerate(ref_mean_cols):
+                    y0 = ct_idx + 0.1
+                    value = pd.to_numeric(row.get(mean_col, pd.NA), errors="coerce")
+                    if pd.notna(value):
+                        v = float(np.clip(float(value), 0.0, 1.0))
+                        face_color = cmap(v)
+                        text_value = f"{v:.2f}"
+                        plotted_reference_methylation = True
                     else:
-                        x0 = 1.045 + (slot_idx * (slot_width + slot_gap))
-                        x1 = x0 + slot_width
-                        connector_x = x0
-                        label_x = x1 + 0.018
-                        label_rotation = 270
-
-                    best_dir = str(getattr(row, "best_dir", "")).lower()
-                    edge_color = "#2ca25f" if best_dir == "hyper" else "#756bb1"
-                    for ct_idx, mean_col in enumerate(ref_mean_cols):
-                        y0 = ct_idx + 0.1
-                        value = pd.to_numeric(getattr(row, mean_col, pd.NA), errors="coerce")
-                        if pd.notna(value):
-                            v = float(np.clip(float(value), 0.0, 1.0))
-                            face_color = cmap(v)
-                            plotted_reference_methylation = True
-                        else:
-                            face_color = "#d9d9d9"
-                        rect = Rectangle(
-                            (x0, y0),
-                            slot_width,
-                            0.8,
-                            transform=edge_transform,
-                            facecolor=face_color,
-                            edgecolor=edge_color,
-                            linewidth=0.9,
-                            alpha=0.96,
-                            clip_on=False,
-                            zorder=3,
-                        )
-                        ax_dmrs.add_patch(rect)
-
-                    ax_dmrs.plot(
-                        [0.0 if side == "left" else 1.0, connector_x],
-                        [y_center_all, y_center_all],
-                        transform=edge_transform,
-                        color="#6b6b6b",
-                        linewidth=1.3,
-                        linestyle=(0, (4, 3)),
-                        alpha=0.95,
-                        clip_on=False,
+                        face_color = "#d9d9d9"
+                        text_value = "NA"
+                    rect = Rectangle(
+                        (callout_idx + 0.08, y0),
+                        0.84,
+                        0.8,
+                        facecolor=face_color,
+                        edgecolor=edge_color,
+                        linewidth=0.9,
+                        alpha=0.96,
+                        clip_on=True,
                         zorder=2,
                     )
-                    coord_label = f"{str(row.chr)}:{int(row.start) + 1}-{int(row.end)}"
-                    support_n = int(getattr(row, "callout_support_count", 0))
-                    support_label = "read" if support_n == 1 else "reads"
-                    distance_bp = int(getattr(row, "callout_distance_bp", 0))
-                    ax_dmrs.text(
-                        label_x,
-                        y_center_all,
-                        f"{coord_label}\n{support_n} {support_label} | {distance_bp} bp",
-                        transform=edge_transform,
+                    ax_distal.add_patch(rect)
+                    ax_distal.text(
+                        callout_idx + 0.5,
+                        ct_idx + 0.5,
+                        text_value,
                         ha="center",
                         va="center",
-                        fontsize=max(7.8, tick_label_size - 4.5),
-                        rotation=label_rotation,
-                        color="#333333",
-                        clip_on=False,
-                        zorder=4,
+                        fontsize=max(7.5, tick_label_size - 4),
+                        color="#111111",
+                        zorder=3,
                     )
+
+                side_label = "L" if str(row.get("callout_side", "")).lower() == "left" else "R"
+                support_n = int(row.get("callout_support_count", 0))
+                support_label = "read" if support_n == 1 else "reads"
+                distance_bp = int(row.get("callout_distance_bp", 0))
+                distal_labels.append(
+                    f"{side_label} {distance_bp:,} bp\n{support_n} {support_label}"
+                )
+
+            n_callouts = len(callout_plot)
+            ax_distal.set_xlim(0, max(1, n_callouts))
+            ax_distal.set_xticks([idx + 0.5 for idx in range(n_callouts)])
+            ax_distal.set_xticklabels(
+                distal_labels,
+                fontsize=max(7.2, tick_label_size - 5),
+                linespacing=1.15,
+            )
+            ax_distal.tick_params(axis="x", length=0, pad=4)
+            ax_distal.tick_params(axis="y", left=False, labelleft=False)
+            ax_distal.set_title("Distal ctDMR reference", fontsize=max(10, axis_label_size - 3), pad=7)
+            ax_distal.grid(False)
+
+            left_count = len(left_callouts)
+            if 0 < left_count < n_callouts:
+                ax_distal.axvline(left_count, color="#bdbdbd", linewidth=1.0, linestyle=(0, (3, 3)))
+
+            methyl_lookup: dict[tuple[str, str, int, int], float] = {}
+            if not methyl_df.empty:
+                methyl_rows = methyl_df[
+                    pd.notna(methyl_df["mean_methylation"])
+                    & (pd.to_numeric(methyl_df["n_cpg_observed"], errors="coerce").fillna(0) > 0)
+                ]
+                for _, methyl_row in methyl_rows.iterrows():
+                    methyl_lookup[
+                        (
+                            str(methyl_row["read_name"]),
+                            _norm_chr(str(methyl_row["chr"])),
+                            int(methyl_row["start"]),
+                            int(methyl_row["end"]),
+                        )
+                    ] = float(methyl_row["mean_methylation"])
+
+            aligned_variant_reads: list[tuple[str, float]] = []
+            for read_name in shown_variant_read_names:
+                track = read_track_map.get(read_name)
+                if track is None:
+                    continue
+                read_y = float(track[0])
+                aligned_variant_reads.append((read_name, read_y))
+                for callout_idx, (_, row) in enumerate(callout_plot.iterrows()):
+                    value = methyl_lookup.get(
+                        (
+                            read_name,
+                            _norm_chr(str(row.get("chr", ""))),
+                            int(row.get("start", 0)),
+                            int(row.get("end", 0)),
+                        )
+                    )
+                    if value is None:
+                        face_color = "#d9d9d9"
+                        text_value = "NA"
+                    else:
+                        v = float(np.clip(value, 0.0, 1.0))
+                        face_color = cmap(v)
+                        text_value = f"{v:.2f}"
+                    rect = Rectangle(
+                        (callout_idx + 0.08, read_y - 0.34),
+                        0.84,
+                        0.68,
+                        facecolor=face_color,
+                        edgecolor="#333333",
+                        linewidth=0.9,
+                        alpha=0.96,
+                        clip_on=True,
+                        zorder=2,
+                    )
+                    ax_distal_reads.add_patch(rect)
+                    ax_distal_reads.text(
+                        callout_idx + 0.5,
+                        read_y,
+                        text_value,
+                        ha="center",
+                        va="center",
+                        fontsize=max(7.5, tick_label_size - 4),
+                        color="#111111",
+                        zorder=3,
+                    )
+
+            ax_distal_reads.set_xlim(0, max(1, n_callouts))
+            ax_distal_reads.set_xticks([idx + 0.5 for idx in range(n_callouts)])
+            ax_distal_reads.tick_params(axis="x", length=0, labelbottom=False)
+            ax_distal_reads.tick_params(axis="y", left=False, labelleft=False)
+            read_label_transform = transforms.blended_transform_factory(
+                ax_distal_reads.transAxes,
+                ax_distal_reads.transData,
+            )
+            for read_name, read_y in aligned_variant_reads:
+                compact_name = read_name if len(read_name) <= 12 else f"{read_name[:8]}..."
+                ax_distal_reads.text(
+                    1.02,
+                    read_y,
+                    compact_name,
+                    transform=read_label_transform,
+                    ha="left",
+                    va="center",
+                    fontsize=max(6.8, tick_label_size - 5.5),
+                    color="#333333",
+                    clip_on=False,
+                )
+            shown_read_count = len(aligned_variant_reads)
+            read_title = f"Distal supporting-read methylation ({shown_read_count})"
+            if shown_read_count < len(variant_read_names):
+                read_title += f" of {len(variant_read_names)} shown"
+            ax_distal_reads.set_title(
+                read_title,
+                fontsize=max(9, axis_label_size - 5),
+                pad=7,
+            )
+            ax_distal_reads.grid(False)
+            if 0 < left_count < n_callouts:
+                ax_distal_reads.axvline(
+                    left_count,
+                    color="#bdbdbd",
+                    linewidth=1.0,
+                    linestyle=(0, (3, 3)),
+                )
 
         ax_dmrs.set_ylim(0, max(1, n_celltypes))
         ax_dmrs.set_yticks([i + 0.5 for i in range(n_celltypes)])
@@ -2173,7 +2321,21 @@ def _plot_sv_panel(
         Patch(facecolor="#f7f7f7", edgecolor="#2ca25f", alpha=0.95, label="ctDMR hyper (edge)"),
         Patch(facecolor="#f7f7f7", edgecolor="#756bb1", alpha=0.95, label="ctDMR hypo/other (edge)"),
     ]
-    ax_reads.legend(handles=legend_handles, loc="upper right", fontsize=tick_label_size, frameon=False)
+    if has_distal_callouts:
+        fig.legend(
+            handles=legend_handles,
+            loc="upper center",
+            bbox_to_anchor=(0.5, 0.855),
+            ncol=5,
+            fontsize=max(7.5, tick_label_size - 4.5),
+            frameon=False,
+            borderaxespad=0.2,
+            handlelength=2.0,
+            columnspacing=1.25,
+            labelspacing=0.4,
+        )
+    else:
+        ax_reads.legend(handles=legend_handles, loc="upper right", fontsize=tick_label_size, frameon=False)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=int(dpi), bbox_inches="tight")
@@ -2239,6 +2401,7 @@ def viz_main(args) -> None:
         region_end=region_end,
         assignment_available=(resolved["read_assignment_path"] is not None),
         clip_to_region=False,
+        prescreened_assignment_rows=bool(resolved.get("prescreened_assignment_rows", False)),
     )
 
     linked_ctdmr_candidates = _build_linked_ctdmr_callouts(
@@ -2289,6 +2452,21 @@ def viz_main(args) -> None:
         overlap_summary = _summarize_ctdmr_overlap(dmrs, all_reads, int(sv["start"]), int(sv["end"]))
     else:
         overlap_summary = pd.DataFrame()
+    methyl_dmrs = dmrs.copy()
+    if not linked_ctdmr_callouts.empty:
+        if methyl_dmrs.empty:
+            methyl_dmrs = linked_ctdmr_callouts.copy()
+        else:
+            methyl_dmrs = pd.concat(
+                [methyl_dmrs, linked_ctdmr_callouts],
+                ignore_index=True,
+                sort=False,
+            )
+        methyl_dmrs = methyl_dmrs.drop_duplicates(
+            subset=["chr", "start", "end"],
+            keep="first",
+            ignore_index=True,
+        )
     if skip_methylation_overlay:
         methyl_df = pd.DataFrame(
             columns=[
@@ -2316,7 +2494,7 @@ def viz_main(args) -> None:
             sv_id=str(sv["id"]),
             bam_path=resolved["bam_path"],
             reference_path=resolved["reference_path"],
-            dmrs=dmrs,
+            dmrs=methyl_dmrs,
             support_assignment_df=support_assignment_df,
             decoded_assignment_df=decoded_assignment_df,
             logger=logger,

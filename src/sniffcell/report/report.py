@@ -283,7 +283,7 @@ def _load_sv_assignment(path: Path) -> pd.DataFrame:
 def _viz_supported_for_row(row: dict[str, object], manifest_payload: dict[str, object]) -> bool:
     del manifest_payload
     variant_class = str(row.get("variant_class", "SV")).strip().upper()
-    return variant_class in {"", "SV", "TR"}
+    return variant_class in {"", "SV", "TR", "VAR", "MEI"}
 
 
 def _backfill_sv_fields_from_manifest_vcf(
@@ -311,6 +311,9 @@ def _backfill_sv_fields_from_manifest_vcf(
     vcf_path = Path(vcf_text)
     if not vcf_path.exists():
         logger.warning("Could not backfill report SV fields because manifest VCF does not exist: %s", vcf_path)
+        return sv_df
+    lower_name = vcf_path.name.lower()
+    if not (lower_name.endswith(".vcf") or lower_name.endswith(".vcf.gz") or lower_name.endswith(".bcf")):
         return sv_df
 
     try:
