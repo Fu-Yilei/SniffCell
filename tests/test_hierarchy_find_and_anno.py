@@ -7,6 +7,7 @@ import pysam
 
 from sniffcell.anno.anno import _run_batch_annotation, _run_compact_annotation
 from sniffcell.find.ctdmr import call_ct_combination_dmrs
+from sniffcell.report.report import _load_excluded_variant_ids, report_main
 from sniffcell.tissue_atlas import resolve_tissue_key
 
 
@@ -229,6 +230,197 @@ class TestCompactAnno(unittest.TestCase):
         self.assertEqual(assignment.loc[0, "id"], "var1")
         self.assertEqual(assignment.loc[0, "linked_celltypes"], "A")
         self.assertEqual(len(mappings), 2)
+
+
+class TestLiteReport(unittest.TestCase):
+    def test_exclusion_table_uses_id_column_and_deduplicates(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            exclusion_file = Path(tmpdir) / "excluded.tsv"
+            pd.DataFrame(
+                {
+                    "id": ["var2", "var1", "var2"],
+                    "tissue_code": ["3E", "3AD", "3E"],
+                }
+            ).to_csv(exclusion_file, sep="\t", index=False)
+
+            excluded = _load_excluded_variant_ids(exclusion_file)
+
+        self.assertEqual(excluded, ["var2", "var1"])
+
+    def test_empty_exclusion_table_is_rejected(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            exclusion_file = Path(tmpdir) / "excluded.tsv"
+            exclusion_file.write_text("id\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "contains no variant IDs"):
+                _load_excluded_variant_ids(exclusion_file)
+
+    def test_report_parser_rejects_include_and_exclude_together(self):
+        from sniffcell.parse_args import parse_args
+
+        with self.assertRaises(SystemExit):
+            parse_args(
+                [
+                    "report",
+                    "--anno_output",
+                    "anno",
+                    "--include_variants",
+                    "include.tsv",
+                    "--exclude_variants",
+                    "exclude.tsv",
+                ]
+            )
+
+    def test_report_writes_html_and_figures_from_lite_batch_output(self):
+        import json
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            anno = tmp / "anno"
+            anno.mkdir()
+            catalog = tmp / "ctdmr.tsv"
+            batch = tmp / "batch.tsv"
+
+            pd.DataFrame(
+                [
+                    {
+                        "chr": "chr1",
+                        "start": 900,
+                        "end": 1200,
+                        "best_group": "A",
+                        "best_dir": "hyper",
+                        "best_group_leaves": "A",
+                        "other_group_leaves": "B",
+                        "code_order": "A|B",
+                        "mean_best_value": 0.85,
+                        "mean_rest_value": 0.15,
+                    }
+                ]
+            ).to_csv(catalog, sep="\t", index=False)
+            pd.DataFrame(
+                [
+                    {
+                        "variant_name": "var1",
+                        "variant_location": "chr1:1001-1001",
+                        "supporting_reads": json.dumps(["read1"]),
+                        "catalog": str(catalog),
+                        "bam": str(tmp / "reads.bam"),
+                        "reference": str(tmp / "ref.fa"),
+                        "donor": "D1",
+                        "tissue_code": "3E",
+                        "tissue_name": "Colon, Ascending",
+                    }
+                ]
+            ).to_csv(batch, sep="\t", index=False)
+            pd.DataFrame(
+                [
+                    {
+                        "id": "var1",
+                        "n_supporting": 1,
+                        "n_overlapped": 1,
+                        "n_mixed_reads": 0,
+                        "overlap_pct": 1.0,
+                        "majority_code": "10",
+                        "majority_pct": 1.0,
+                        "assigned_code": "A|B::10",
+                        "linked_celltypes": "A",
+                        "linked_celltype_counts": "A:1",
+                        "linked_celltype_fractions": "A:1.0",
+                        "has_hard_conflict": False,
+                        "sv_chr": "chr1",
+                        "sv_pos": 1001,
+                        "sv_len": 1,
+                    }
+                ]
+            ).to_csv(anno / "variant_assignment.tsv", sep="\t", index=False)
+            pd.DataFrame(
+                [
+                    {
+                        "readname": "var1::read1",
+                        "chr": "chr1",
+                        "start": 900,
+                        "end": 1200,
+                        "cpgstart": 950,
+                        "cpgend": 1150,
+                        "best_group": "A",
+                        "other_group": "B",
+                        "is_best_group": True,
+                        "code_order": "A|B",
+                        "best_group_leaves": "A",
+                        "other_group_leaves": "B",
+                        "hyper_group_leaves": "A",
+                        "hypo_group_leaves": "B",
+                        "code": "10",
+                    }
+                ]
+            ).to_csv(anno / "reads_classification.tsv", sep="\t", index=False)
+            pd.DataFrame(
+                [
+                    {
+                        "variant_id": "var1",
+                        "readname": "read1",
+                        "internal_readname": "var1::read1",
+                        "bam": str(tmp / "reads.bam"),
+                        "chrom": "chr1",
+                        "start": 800,
+                        "end": 1300,
+                        "mapping_quality": 60,
+                        "is_reverse": False,
+                        "is_mapped": True,
+                    }
+                ]
+            ).to_csv(anno / "support_read_mappings.tsv", sep="\t", index=False)
+            (anno / "anno_batch_manifest.json").write_text(
+                json.dumps(
+                    {
+                        "command": "anno",
+                        "mode": "batch",
+                        "inputs": {"batch": str(batch), "row_count": 1, "reference": str(tmp / "ref.fa")},
+                        "outputs": {},
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            report_dir = tmp / "report"
+            args = SimpleNamespace(
+                anno_output=str(anno),
+                output=str(report_dir),
+                include_unassigned=False,
+                min_overlap_pct=0.0,
+                min_majority_pct=0.0,
+                allow_hard_conflict=False,
+                max_variants=0,
+                with_figures=False,
+                window=100,
+                figure_format="png",
+                figure_dpi=80,
+            )
+            report_main(args)
+
+            manifest = json.loads((report_dir / "report_manifest.json").read_text(encoding="utf-8"))
+            index_exists = (report_dir / "index.html").exists()
+            selected_exists = (report_dir / "high_confidence_variants.tsv").exists()
+            compat_manifest_exists = (anno / ".sniffcell_full_report_compat" / "anno_run_manifest.json").exists()
+            compat_variant_table_exists = (anno / ".sniffcell_full_report_compat" / "lite_variants.tsv").exists()
+            figure_count = len(list((report_dir / "figures").glob("*.png")))
+
+        self.assertEqual(manifest["counts"]["variant_selected"], 1)
+        self.assertEqual(manifest["counts"]["viz_rendered_or_reused"], 0)
+        self.assertTrue(index_exists)
+        self.assertTrue(selected_exists)
+        self.assertTrue(compat_manifest_exists)
+        self.assertTrue(compat_variant_table_exists)
+        self.assertEqual(figure_count, 0)
 
 
 if __name__ == "__main__":

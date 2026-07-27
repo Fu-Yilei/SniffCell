@@ -534,8 +534,8 @@ def _compute_per_read_consensus_df(
     n_ctdmrs = flat.groupby("readname", sort=False).size().rename("read_n_ctdmrs")
 
     split_result = flat["code_token"].map(_split_code_token_schema_bits)
-    flat["_schema"] = [r[0] for r in split_result]
-    flat["_bits"]   = [r[1] for r in split_result]
+    flat["_schema"] = pd.Series([r[0] for r in split_result], index=flat.index, dtype="string")
+    flat["_bits"] = pd.Series([r[1] for r in split_result], index=flat.index, dtype="string")
 
     valid = flat["_bits"].str.match(r"^[01]+$", na=False)
     parsed = flat.loc[valid, ["readname", "_schema", "_bits"]].copy()

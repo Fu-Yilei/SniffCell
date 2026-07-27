@@ -1,11 +1,12 @@
 # SniffCell Lite
 
-SniffCell Lite keeps only two commands:
+SniffCell Lite keeps a compact workflow:
 
 - `sniffcell-lite find`: call ctDMR catalogs from a methylation atlas.
 - `sniffcell-lite anno`: annotate variants from supporting reads, a BAM, a reference FASTA, and a ctDMR catalog.
+- `sniffcell-lite report`: build a lite-native HTML report, optionally with per-variant figures.
 
-This branch intentionally keeps only the lite `find` and `anno` workflow.
+This branch intentionally keeps only the lite `find`, `anno`, and reporting workflow.
 
 ## Install
 
@@ -85,6 +86,59 @@ sniffcell-lite anno --batch variants.tsv -r ref.fa -o anno_out
 - `reads_classification.tsv`
 - `support_read_mappings.tsv`
 - `anno_compact_manifest.json` or `anno_batch_manifest.json`
+
+## Report
+
+`report` reads a `sniffcell-lite anno` output folder directly. Batch reports keep
+the per-row BAM and ctDMR catalog from the original lite batch manifest, so
+multi-tissue/multi-BAM annotation outputs do not need to be coerced into a
+single full-SniffCell manifest.
+
+Table-only report:
+
+```bash
+sniffcell-lite report --anno_output anno_out -o anno_report
+```
+
+Report with lightweight per-variant figures:
+
+```bash
+sniffcell-lite report --anno_output anno_out --with_figures -o anno_report
+```
+
+Useful filters:
+
+```bash
+sniffcell-lite report \
+  --anno_output anno_out \
+  --min_overlap_pct 0 \
+  --min_majority_pct 0 \
+  --max_variants 100 \
+  --with_figures \
+  -o anno_report
+```
+
+To report only listed variants, or to remove listed variants, provide a TSV/CSV
+with an `id` column or a one-ID-per-line file:
+
+```bash
+sniffcell-lite report \
+  --anno_output anno_out \
+  --include_variants selected_ids.tsv \
+  --with_figures \
+  -o selected_report
+
+sniffcell-lite report \
+  --anno_output anno_out \
+  --exclude_variants rejected_ids.tsv \
+  --with_figures \
+  -o filtered_report
+```
+
+`--include_variants` and `--exclude_variants` are mutually exclusive. The report
+writes `index.html`, `high_confidence_variants.tsv`, `report_manifest.json`,
+normalized inclusion/exclusion provenance when used, and optional files under
+`figures/`.
 
 ## Tests
 

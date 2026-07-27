@@ -9,7 +9,7 @@ from sniffcell.tissue_atlas import default_tissue_atlas_path
 def parse_args(argv):
     parser = argparse.ArgumentParser(
         prog="sniffcell-lite",
-        description="Lite SniffCell interface for tissue ctDMR discovery and variant annotation.",
+        description="Lite SniffCell interface for tissue ctDMR discovery, variant annotation, and reporting.",
         epilog=f"Version {version}",
     )
     parser.add_argument("-v", "--version", action="version", version=f"sniffcell-lite {version}")
@@ -47,5 +47,56 @@ def parse_args(argv):
     anno_parser.add_argument("--per_read_min_agreement", type=float, default=0.66, help="Minimum plurality fraction for conflicted per-read consensus, default=0.66")
     anno_parser.add_argument("--window", type=int, default=10000, help="BAM fetch padding around each variant for finding supporting-read alignments. ctDMR evidence is selected from the mapped support-read spans, not limited to this distance. Default=10000")
     anno_parser.add_argument("--breakpoint_exclusion_frac", type=float, default=0.0, help="Breakpoint exclusion fraction retained for assignment compatibility. Default=0.0")
+
+    report_parser = subparsers.add_parser(
+        "report",
+        help=(
+            "Generate a SniffCell report from sniffcell-lite anno outputs. "
+            "The lite command stages SniffCell-compatible inputs and then reuses the SniffCell report/viz code."
+        ),
+    )
+    report_parser.add_argument("--anno_output", required=True, help="sniffcell-lite anno output folder.")
+    report_parser.add_argument("-o", "--output", default=None, help="Report output directory, HTML path, or .tar.gz archive path.")
+    variant_selection = report_parser.add_mutually_exclusive_group()
+    variant_selection.add_argument(
+        "--exclude_variants",
+        default=None,
+        help="TSV/CSV with an id column, or a one-ID-per-line file, listing variants to exclude.",
+    )
+    variant_selection.add_argument(
+        "--include_variants",
+        default=None,
+        help="TSV/CSV with an id column, or a one-ID-per-line file, listing the only variants to include.",
+    )
+    report_parser.add_argument("--include_unassigned", action="store_true", default=False, help="Include variants without assigned_code where supported by the SniffCell report filters.")
+    report_parser.add_argument("--min_overlap_pct", type=float, default=0.0, help="Minimum overlap_pct to include, default=0.0")
+    report_parser.add_argument(
+        "--overlap_filter_mode",
+        choices=["gradient", "hard_clip"],
+        default="hard_clip",
+        help="SniffCell report overlap filter mode, default=hard_clip for lite compatibility.",
+    )
+    report_parser.add_argument("--overlap_gradient_exponent", type=float, default=0.5, help="Exponent for overlap_filter_mode=gradient, default=0.5")
+    report_parser.add_argument("--min_majority_pct", type=float, default=0.0, help="Minimum majority_pct to include, default=0.0")
+    report_parser.add_argument("--allow_hard_conflict", action="store_true", default=False, help="Include rows marked has_hard_conflict.")
+    report_parser.add_argument("--max_sv", type=int, default=None, help="Maximum variants to include after filtering. 0 means no limit.")
+    report_parser.add_argument("--max_variants", type=int, default=0, help="Lite alias for --max_sv. Ignored when --max_sv is supplied.")
+    report_parser.add_argument("--with_figures", action="store_true", default=False, help="Render SniffCell viz panels for selected variants.")
+    report_parser.add_argument("-w", "--window", type=int, default=5000, help="Window size passed through to SniffCell viz, default=5000")
+    report_parser.add_argument("-m", "--max_reads", type=int, default=250, help="Maximum reads per SniffCell viz panel, default=250")
+    report_parser.add_argument("-f", "--format", choices=["png", "pdf"], default=None, help="SniffCell report figure format, default=png")
+    report_parser.add_argument("--figure_format", choices=["png", "pdf"], default="png", help="Lite alias for --format, default=png")
+    report_parser.add_argument("--figure_profile", choices=["fast", "full"], default="full", help="SniffCell report figure profile, default=full")
+    report_parser.add_argument("--figure_dpi", type=int, default=160, help="Figure DPI, default=160")
+    report_parser.add_argument("--reuse_existing_viz", action="store_true", default=False, help="Reuse existing SniffCell viz figure files when present.")
+    report_parser.add_argument("--figure_threads", type=int, default=1, help="Shared thread count for figure and igvviz rendering, default=1")
+    report_parser.add_argument("--with_igvviz", action="store_true", default=False, help="Render SniffCell igvviz screenshots for selected variants.")
+    report_parser.add_argument("--igv_bams", nargs="+", default=None, help="One or more BAM files for igvviz. If omitted, uses the lite per-variant BAMs.")
+    report_parser.add_argument("--igv_cmd", default="igv.sh", help="IGV executable command for igvviz batch rendering, default=igv.sh")
+    report_parser.add_argument("--igv_snapshot_format", choices=["png", "jpg", "svg"], default="png", help="Snapshot format for igvviz outputs, default=png")
+    report_parser.add_argument("--igv_snapshot_width", type=int, default=3600, help="IGV snapshot width in pixels, default=3600")
+    report_parser.add_argument("--igv_snapshot_height", type=int, default=1600, help="IGV snapshot height in pixels, default=1600")
+    report_parser.add_argument("--reuse_existing_igvviz", action="store_true", default=False, help="Reuse existing igvviz manifests/snapshots when available.")
+    report_parser.add_argument("--with_igvreport", action="store_true", default=False, help="Generate the alternate SniffCell IGV report for selected variants.")
 
     return parser.parse_args(argv)

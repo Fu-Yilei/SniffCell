@@ -1,0 +1,1 @@
+"""SniffCell Lite report module."""
