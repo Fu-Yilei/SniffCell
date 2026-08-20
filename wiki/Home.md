@@ -1,6 +1,6 @@
 # SniffCell Wiki
 
-Welcome to the SniffCell documentation. SniffCell annotates somatic structural variants (SVs) with cell-type origin by combining long-read DNA methylation signals with a reference methylation atlas.
+Welcome to the SniffCell documentation. SniffCell links somatic structural variants (SVs) and tandem-repeat (TR) expansions/contractions to cell-type origin by combining long-read DNA methylation signals with a reference methylation atlas.
 
 ---
 
@@ -9,7 +9,7 @@ Welcome to the SniffCell documentation. SniffCell annotates somatic structural v
 | Page | What you will find |
 |------|--------------------|
 | [Installation](Installation) | PyPI, conda, Docker, manual tool setup, and verification |
-| [End-to-End Workflow](End-to-End-Workflow) | Step-by-step walkthrough from atlas to HTML report |
+| [SniffCell Lite](SniffCell-Lite) | Lightweight `find` + `anno` workflow for an existing variant callset with known supporting reads |
 
 ---
 
@@ -29,7 +29,7 @@ Welcome to the SniffCell documentation. SniffCell annotates somatic structural v
 | Command | Purpose |
 |---------|---------|
 | `sniffcell find` | Call cell-type-specific DMRs (ctDMRs) from a reference atlas |
-| `sniffcell anno` | Annotate SVs with read-level methylation and cell-type codes |
+| `sniffcell anno` | Annotate SVs/TRs with read-level methylation and cell-type codes |
 | `sniffcell svanno` | Re-score SV assignments from a saved read table |
 | `sniffcell deconv` | Deconvolve all reads in a BAM by cell type; split into per-group BAMs |
 | `sniffcell discover` | Multi-stage SV / tandem-repeat / SNV pipeline on cell-type-split BAMs |
