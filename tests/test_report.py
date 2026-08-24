@@ -11,6 +11,7 @@ import pandas as pd
 
 from sniffcell.report.report import (
     _backfill_sv_fields_from_manifest_vcf,
+    _load_sv_assignment,
     _select_high_confidence_svs,
     _viz_supported_for_row,
     report_main,
@@ -18,6 +19,22 @@ from sniffcell.report.report import (
 
 
 class TestReportSelection(unittest.TestCase):
+    def test_load_assignment_preserves_leading_zero_codes(self):
+        with tempfile.TemporaryDirectory() as td:
+            assignment_path = Path(td) / "variant_assignment.tsv"
+            pd.DataFrame(
+                {
+                    "id": ["var1", "var2"],
+                    "majority_code": ["001", "011"],
+                    "assigned_code": ["001", "011"],
+                }
+            ).to_csv(assignment_path, sep="\t", index=False)
+
+            assignments = _load_sv_assignment(assignment_path)
+
+        self.assertEqual(assignments["assigned_code"].tolist(), ["001", "011"])
+        self.assertEqual(assignments["majority_code"].tolist(), ["001", "011"])
+
     def test_viz_supports_generic_and_mei_variants(self):
         self.assertTrue(_viz_supported_for_row({"variant_class": "VAR"}, {}))
         self.assertTrue(_viz_supported_for_row({"variant_class": "MEI"}, {}))

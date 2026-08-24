@@ -727,7 +727,15 @@ def _load_read_assignment_table(path: str | None) -> pd.DataFrame:
 
 @lru_cache(maxsize=8)
 def _load_sv_assignment_table_cached(path: str) -> pd.DataFrame:
-    return pd.read_csv(path, sep="\t")
+    return pd.read_csv(
+        path,
+        sep="\t",
+        dtype={
+            "majority_code": "string",
+            "assigned_code": "string",
+            "intersection_code": "string",
+        },
+    )
 
 
 def _load_sv_assignment_table(path: str | None) -> pd.DataFrame:

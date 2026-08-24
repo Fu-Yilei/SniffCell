@@ -220,7 +220,15 @@ def _review_state_label(status: str) -> str:
 
 
 def _load_sv_assignment(path: Path) -> pd.DataFrame:
-    df = pd.read_csv(path, sep="\t")
+    df = pd.read_csv(
+        path,
+        sep="\t",
+        dtype={
+            "majority_code": "string",
+            "assigned_code": "string",
+            "intersection_code": "string",
+        },
+    )
     if "id" not in df.columns and "variant_id" in df.columns:
         df = df.rename(columns={"variant_id": "id"})
     if "id" not in df.columns:
