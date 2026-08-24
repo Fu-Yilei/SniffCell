@@ -7,7 +7,7 @@ import pysam
 
 from sniffcell.anno.anno import _run_batch_annotation, _run_compact_annotation
 from sniffcell.find.ctdmr import call_ct_combination_dmrs
-from sniffcell.report.report import _load_excluded_variant_ids, report_main
+from sniffcell.report.report import _load_excluded_variant_ids, _read_table, report_main
 from sniffcell.tissue_atlas import resolve_tissue_key
 
 
@@ -233,6 +233,26 @@ class TestCompactAnno(unittest.TestCase):
 
 
 class TestLiteReport(unittest.TestCase):
+    def test_report_adapter_preserves_leading_zero_assignment_codes(self):
+        import tempfile
+        from pathlib import Path
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            table_path = Path(tmpdir) / "assignments.tsv"
+            pd.DataFrame(
+                {
+                    "id": ["var1", "var2"],
+                    "majority_code": ["001", "011"],
+                    "assigned_code": ["001", "011"],
+                    "intersection_code": ["001", "011"],
+                }
+            ).to_csv(table_path, sep="\t", index=False)
+
+            assignments = _read_table(table_path)
+
+        self.assertEqual(assignments["assigned_code"].tolist(), ["001", "011"])
+        self.assertEqual(assignments["majority_code"].tolist(), ["001", "011"])
+
     def test_exclusion_table_uses_id_column_and_deduplicates(self):
         import tempfile
         from pathlib import Path

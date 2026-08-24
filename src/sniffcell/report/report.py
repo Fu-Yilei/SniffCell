@@ -19,7 +19,16 @@ LOGGER = logging.getLogger("sniffcell_lite.report")
 def _read_table(path: Path) -> pd.DataFrame:
     if not path.exists():
         return pd.DataFrame()
-    return pd.read_csv(path, sep="\t")
+    return pd.read_csv(
+        path,
+        sep="\t",
+        dtype={
+            "code": "string",
+            "majority_code": "string",
+            "assigned_code": "string",
+            "intersection_code": "string",
+        },
+    )
 
 
 def _load_json(path: Path) -> dict[str, Any]:
