@@ -66,17 +66,27 @@ for Docker, optional tools, and manual setup.
 
 ### SniffCell: discover and annotate SVs/TRs from a BAM
 
-1. Call ctDMRs from an atlas:
+1. Call ctDMRs from an MDB atlas:
 
 ```bash
 sniffcell find \
-  -n atlas/all_celltypes_blocks.npy \
-  -i atlas/all_celltypes_blocks.index.gz \
-  -cf atlas/index_to_major_celltypes.json \
-  -m atlas/all_celltypes.txt \
-  -ck pbmc \
-  -o pbmc_ctdmr.tsv
+  --mdb combined_loyfer_ont.mmdb \
+  --assay dual \
+  -cf atlas/celltypes.json \
+  -ck brain_cereb_ont \
+  -o brain_dual_ctdmr.tsv \
+  --diff_threshold 0.40
 ```
+
+`--assay dual` calls separate 5mC and 5hmC views and records the assay in the
+`modification` column; it does not collapse the two signals. The older
+`--npy/--index/--meta` interface remains available as a legacy compatibility
+path.
+
+See the [custom MDB atlas Wiki tutorial](https://github.com/Fu-Yilei/SniffCell/wiki/Build-a-Custom-MDB-Atlas-from-bedMethyl)
+for the complete bedMethyl-to-ctDMR workflow. The brain modifiedC/5mC/5hmC
+super-union catalog is distributed as
+`atlas/brain_cereb.dual_5mc_5hmc.ctdmr.tsv.gz`.
 
 2. Split the BAM into cell-type groups using those ctDMRs:
 
@@ -174,7 +184,7 @@ for details.
 | Variants | VCF / VCF.GZ, harmonized TSV from `discover`, or a variant + supporting-read names (`sniffcell-lite`) | `anno`, `dmsv`, `viz`, `report` |
 | Reference genome | FASTA plus index | `anno`, `deconv`, `discover`, `dmsv`, `viz` |
 | ctDMR table | TSV from `sniffcell find` | `anno`, `deconv`, `viz` |
-| Methylation atlas | NumPy matrix, CpG index, and metadata | `find` |
+| Methylation atlas | MDB atlas (preferred), or legacy NumPy matrix plus CpG index and metadata | `find` |
 
 ## Outputs
 
