@@ -18,7 +18,7 @@ The bundled BAM is a 45-kb regional slice (`chr2:109180000-109225000`) with
 Neuron and three Oligodendrocyte samples across 164 nearby regions. The normal
 GRCh38 sequence dictionary and genomic coordinates are retained.
 
-![Original IGV review of the SH3RF3 repeat](../tests/data/sh3rf3_dual_sv_tr/assets/SV008_bcontrol1_chr2_109199301_INS.png)
+![Original IGV review of the SH3RF3 repeat](assets/sh3rf3-original-igv.png)
 
 ## Requirements
 
@@ -150,7 +150,7 @@ sniffcell viz \
   -o "$OUT/anno/SH3RF3_TR_expansion.png"
 ```
 
-![Expected SniffCell expansion panel](../tests/data/sh3rf3_dual_sv_tr/expected/SH3RF3_TR_expansion.png)
+![Expected SniffCell expansion panel](assets/sh3rf3-sniffcell-viz.png)
 
 ## 6. Build the report
 
