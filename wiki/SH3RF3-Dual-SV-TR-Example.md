@@ -14,10 +14,9 @@ variation within the same complex repeat locus.
 - Fixture: `tests/data/sh3rf3_dual_sv_tr`
 
 The bundled BAM is a 45-kb regional slice (`chr2:109180000-109225000`) with
-anonymized read names and read-group metadata. It has 976 alignment records
-from 914 reads. The atlas subset contains six cortex Neuron and three
-Oligodendrocyte samples across 164 nearby regions. The normal GRCh38 sequence
-dictionary and genomic coordinates are retained.
+976 alignment records from 914 reads. The atlas subset contains six cortex
+Neuron and three Oligodendrocyte samples across 164 nearby regions. The normal
+GRCh38 sequence dictionary and genomic coordinates are retained.
 
 ![Original IGV review of the SH3RF3 repeat](../tests/data/sh3rf3_dual_sv_tr/assets/SV008_bcontrol1_chr2_109199301_INS.png)
 
@@ -68,11 +67,11 @@ sniffcell find \
   -cf "$EXAMPLE/inputs/celltypes.json" \
   -ck brain_cereb \
   -o "$OUT/brain_cereb.ctdmr.tsv" \
-  --diff_threshold 0.40 \
+  --diff_threshold 0.35 \
   --min_rows 1
 ```
 
-The compact atlas produces nine ctDMRs. `--min_rows 1` is appropriate here
+The compact atlas produces seven ctDMRs. `--min_rows 1` is appropriate here
 because the atlas itself was deliberately reduced to this small regional test.
 
 ## 2. Deconvolve and split the regional BAM
@@ -90,7 +89,7 @@ sniffcell deconv \
   -t 4
 ```
 
-Expected split sizes are 164 Neuron reads and 357 Oligodendrocyte reads.
+Expected split sizes are 182 Neuron reads and 356 Oligodendrocyte reads.
 
 ## 3. Discover SVs and TR changes
 
@@ -103,6 +102,7 @@ sniffcell discover tools run \
   --sample-id SH3RF3_example \
   --run-id dual_sv_tr \
   --stages all \
+  --sniffles-cluster-merge-len 0.31 \
   --threads 4
 ```
 
@@ -112,12 +112,11 @@ The harmonized result is written to:
 output/deconv/deconv_requested_group_splits/discover/dual_sv_tr/harmonized_variants.tsv
 ```
 
-At the target locus, the TR branch reports a 2,585-bp `expansion_all` event as
+At the target locus, the TR branch reports a 2,502-bp `expansion_all` event as
 `group_a_only`, supported by 5 Neuron reads and 0 Oligodendrocyte reads. The SV
-branch reports an overlapping 89-bp shared deletion inside the repeat. The
-different representations are expected for a length-heterogeneous, complex
-repeat: the TR call captures the expansion, while Sniffles records a nested
-alignment-level deletion allele.
+branch independently reports a 726-bp Neuron-only insertion supported by three
+reads with 596-, 726-, and 942-bp insertion alignments. A cluster length ratio
+of `0.31` is used because this repeat has genuine allele-length heterogeneity.
 
 ## 4. Annotate the harmonized variants
 
@@ -130,12 +129,15 @@ sniffcell anno \
   -r "$REF" \
   -b "$OUT/brain_cereb.ctdmr.tsv" \
   -o "$OUT/anno" \
+  --deconv-reads "$OUT/deconv/deconv_reads_classification.tsv" \
+  --evidence_mode per_read \
   -w 10000 \
   -t 4
 ```
 
-The expansion receives a Neuron assignment: all 5 supporting reads overlap
-usable methylation evidence and the assignment majority is 1.0.
+The expansion and insertion both receive Neuron assignments. All 5 expansion
+reads and all 3 insertion reads overlap usable deconvolution evidence, with an
+assignment majority of 1.0 for each call.
 
 ## 5. Visualize the expansion
 
@@ -172,6 +174,6 @@ python tests/data/sh3rf3_dual_sv_tr/validate_outputs.py \
   tests/data/sh3rf3_dual_sv_tr/output
 ```
 
-The validator checks native coordinates, the 2,585-bp Neuron expansion, an
-overlapping SV call, deconvolution split sizes, assignment evidence, the PNG,
-and the HTML report.
+The validator checks native coordinates, the 2,502-bp Neuron expansion, the
+726-bp Neuron insertion, deconvolution split sizes, assignment evidence, the
+PNG, and the HTML report.

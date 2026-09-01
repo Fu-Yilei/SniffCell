@@ -2,9 +2,9 @@
 """Build the public SH3RF3 regional SniffCell example fixture.
 
 This is a maintainer utility. It requires the internal source BAM and legacy
-Loyfer atlas files. The generated fixture stays on native GRCh38 coordinates,
-anonymizes read names and read groups, and retains only the nine atlas columns
-used by the example. Users provide their own indexed GRCh38 FASTA.
+Loyfer atlas files. The generated fixture stays on native GRCh38 coordinates
+and retains only the nine atlas columns used by the example. Users provide
+their own indexed GRCh38 FASTA.
 """
 
 from __future__ import annotations
@@ -42,26 +42,11 @@ def sha256(path: Path) -> str:
 
 
 def build_bam(source_bam: Path, output: Path) -> tuple[int, int]:
-    qname_map: dict[str, str] = {}
     kept = 0
     unique_reads: set[str] = set()
     with pysam.AlignmentFile(str(source_bam), "rb") as source:
-        source_header = source.header.to_dict()
-        header = {
-            "HD": {"VN": "1.6", "SO": "coordinate"},
-            "SQ": source_header["SQ"],
-            "RG": [{"ID": "SH3RF3_example", "SM": "SH3RF3_example", "PL": "ONT"}],
-        }
-        with pysam.AlignmentFile(str(output), "wb", header=header) as target:
+        with pysam.AlignmentFile(str(output), "wb", header=source.header) as target:
             for record in source.fetch(SOURCE_CHROM, FETCH_START, FETCH_END):
-                old_name = record.query_name
-                if old_name not in qname_map:
-                    qname_map[old_name] = f"read_{len(qname_map) + 1:05d}"
-                record.query_name = qname_map[old_name]
-                record.next_reference_id = -1
-                record.next_reference_start = -1
-                record.template_length = 0
-                record.set_tag("RG", "SH3RF3_example", value_type="Z", replace=True)
                 target.write(record)
                 kept += 1
                 unique_reads.add(record.query_name)
@@ -176,7 +161,6 @@ def main() -> None:
         "atlas_rows": atlas_rows,
         "atlas_samples": atlas_columns,
         "tr_catalog_rows": tr_count,
-        "privacy": "Read names and read-group/sample fields were replaced.",
         "reference": "User-supplied indexed GRCh38 no-alt FASTA; no reference sequence is bundled.",
         "sha256": {path.name: sha256(path) for path in outputs},
     }

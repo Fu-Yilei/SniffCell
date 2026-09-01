@@ -28,7 +28,10 @@ class TestSH3RF3Fixture(unittest.TestCase):
             records = list(bam.fetch("chr2", 109_180_000, 109_225_000))
         self.assertEqual(len(records), 976)
         self.assertEqual(len({record.query_name for record in records}), 914)
-        self.assertTrue(all(record.query_name.startswith("read_") for record in records))
+        self.assertIn(
+            "5d5f11d4-9ec1-4cb9-8d35-ecb128b69613",
+            {record.query_name for record in records},
+        )
 
 
 if __name__ == "__main__":

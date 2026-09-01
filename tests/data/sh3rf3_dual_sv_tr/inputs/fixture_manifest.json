@@ -6,11 +6,10 @@
   "fetch_window_grch38": "chr2:109180000-109225000",
   "fixture": "SH3RF3 AATGG repeat expansion detected by SV and TR workflows",
   "fixture_coordinates_grch38": "chr2:109199301-109199876",
-  "privacy": "Read names and read-group/sample fields were replaced.",
   "reference": "User-supplied indexed GRCh38 no-alt FASTA; no reference sequence is bundled.",
   "sha256": {
-    "SH3RF3_example.bam": "55266147c73d9a6d1d6137bd7077dd35eabaecace55506b8714edd420805a13f",
-    "SH3RF3_example.bam.bai": "0f50f5d7311187be6eecdc402156e3e6ceee8a70a34307709924823398365172",
+    "SH3RF3_example.bam": "ad30d1aa902b0a9a99c8ecc390a5d689c048777b73b855f6c6462cd18b6277cf",
+    "SH3RF3_example.bam.bai": "4405e8381586f79c7dbbbac7dc471e1235dbe5243a43b6bd4b2463876191bb49",
     "atlas.index.tsv": "96519a8a9090026fcbd5f169a5715a64a03efbc5bc68f49752857eb40b6d0ce9",
     "atlas.npy": "d73beb7dbaceef3a8c50fd52240df2300a108728ebd896d2b5a59e782eb621d9",
     "atlas.samples.txt": "756253c94987f826eb2724f66ed651f8ed65768c77045ff973411b4985c7abac",

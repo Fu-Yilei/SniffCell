@@ -32,7 +32,7 @@ sniffcell find \
     -cf "${INPUT_DIR}/celltypes.json" \
     -ck brain_cereb \
     -o "${OUTPUT_DIR}/brain_cereb.ctdmr.tsv" \
-    --diff_threshold 0.40 \
+    --diff_threshold 0.35 \
     --min_rows 1
 
 sniffcell deconv \
@@ -54,6 +54,7 @@ sniffcell discover tools run \
     --sample-id SH3RF3_example \
     --run-id dual_sv_tr \
     --stages all \
+    --sniffles-cluster-merge-len 0.31 \
     --threads "${THREADS}"
 
 HARMONIZED="${OUTPUT_DIR}/deconv/deconv_requested_group_splits/discover/dual_sv_tr/harmonized_variants.tsv"
@@ -64,6 +65,8 @@ sniffcell anno \
     -r "${REFERENCE}" \
     -b "${OUTPUT_DIR}/brain_cereb.ctdmr.tsv" \
     -o "${OUTPUT_DIR}/anno" \
+    --deconv-reads "${OUTPUT_DIR}/deconv/deconv_reads_classification.tsv" \
+    --evidence_mode per_read \
     -w 10000 \
     -t "${THREADS}"
 
