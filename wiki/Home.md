@@ -20,6 +20,7 @@ Welcome to the SniffCell documentation. SniffCell links somatic structural varia
 | [Find Workflow](Find-Workflow) | How `sniffcell find` turns an atlas into ctDMRs — scoring, bipartition logic, and region merging |
 | [Methods](Methods-Deconv-Discover-Anno) | Technical methods text for `deconv`, `discover`, and `anno` |
 | [Test Examples](Test-Examples) | Practical validation runs for each command; QA queries and common failure patterns |
+| [SH3RF3 dual SV/TR example](SH3RF3-Dual-SV-TR-Example) | Complete native-GRCh38 workflow from a regional BAM and atlas subset through report |
 | [Deconv and Discover Design](Deconv-Postprocess-Design) | Internal design notes for the deconvolution and discovery pipeline |
 
 ---

@@ -64,19 +64,32 @@ for Docker, optional tools, and manual setup.
 
 ## Example Workflows
 
+For a runnable native-GRCh38 regional example with a bundled subset BAM and
+atlas, see the [SH3RF3 dual SV/TR wiki tutorial](https://github.com/Fu-Yilei/SniffCell/wiki/SH3RF3-Dual-SV-TR-Example).
+
 ### SniffCell: discover and annotate SVs/TRs from a BAM
 
-1. Call ctDMRs from an atlas:
+1. Call ctDMRs from an MDB atlas:
 
 ```bash
 sniffcell find \
-  -n atlas/all_celltypes_blocks.npy \
-  -i atlas/all_celltypes_blocks.index.gz \
-  -cf atlas/index_to_major_celltypes.json \
-  -m atlas/all_celltypes.txt \
-  -ck pbmc \
-  -o pbmc_ctdmr.tsv
+  --mdb combined_loyfer_ont.mmdb \
+  --assay dual \
+  -cf atlas/celltypes.json \
+  -ck brain_cereb_ont \
+  -o brain_dual_ctdmr.tsv \
+  --diff_threshold 0.40
 ```
+
+`--assay dual` calls separate 5mC and 5hmC views and records the assay in the
+`modification` column; it does not collapse the two signals. The older
+`--npy/--index/--meta` interface remains available as a legacy compatibility
+path.
+
+See the [custom MDB atlas Wiki tutorial](https://github.com/Fu-Yilei/SniffCell/wiki/Build-a-Custom-MDB-Atlas-from-bedMethyl)
+for the complete bedMethyl-to-ctDMR workflow. The brain modifiedC/5mC/5hmC
+super-union catalog is distributed as
+`atlas/brain_cereb.dual_5mc_5hmc.ctdmr.tsv.gz`.
 
 2. Split the BAM into cell-type groups using those ctDMRs:
 
@@ -174,7 +187,7 @@ for details.
 | Variants | VCF / VCF.GZ, harmonized TSV from `discover`, or a variant + supporting-read names (`sniffcell-lite`) | `anno`, `dmsv`, `viz`, `report` |
 | Reference genome | FASTA plus index | `anno`, `deconv`, `discover`, `dmsv`, `viz` |
 | ctDMR table | TSV from `sniffcell find` | `anno`, `deconv`, `viz` |
-| Methylation atlas | NumPy matrix, CpG index, and metadata | `find` |
+| Methylation atlas | MDB atlas (preferred), or legacy NumPy matrix plus CpG index and metadata | `find` |
 
 ## Outputs
 
@@ -227,6 +240,7 @@ Full documentation is in the [GitHub Wiki](https://github.com/Fu-Yilei/SniffCell
 | [Methods](https://github.com/Fu-Yilei/SniffCell/wiki/Methods-Deconv-Discover-Anno) | Technical methods for core commands |
 | [CLI Reference](https://github.com/Fu-Yilei/SniffCell/wiki/CLI-Reference) | Command-line options |
 | [Test Examples](https://github.com/Fu-Yilei/SniffCell/wiki/Test-Examples) | Validation and QA examples |
+| [SH3RF3 dual SV/TR example](https://github.com/Fu-Yilei/SniffCell/wiki/SH3RF3-Dual-SV-TR-Example) | Native-GRCh38 regional BAM example from atlas through report |
 
 ## Citation
 
