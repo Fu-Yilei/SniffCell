@@ -1,0 +1,23 @@
+{
+  "alignment_records": 976,
+  "atlas_rows": 164,
+  "atlas_samples": 9,
+  "coordinate_shift": 0,
+  "fetch_window_grch38": "chr2:109180000-109225000",
+  "fixture": "SH3RF3 AATGG repeat expansion detected by SV and TR workflows",
+  "fixture_coordinates_grch38": "chr2:109199301-109199876",
+  "reference": "User-supplied indexed GRCh38 no-alt FASTA; no reference sequence is bundled.",
+  "sha256": {
+    "SH3RF3_example.bam": "ad30d1aa902b0a9a99c8ecc390a5d689c048777b73b855f6c6462cd18b6277cf",
+    "SH3RF3_example.bam.bai": "4405e8381586f79c7dbbbac7dc471e1235dbe5243a43b6bd4b2463876191bb49",
+    "atlas.index.tsv": "96519a8a9090026fcbd5f169a5715a64a03efbc5bc68f49752857eb40b6d0ce9",
+    "atlas.npy": "d73beb7dbaceef3a8c50fd52240df2300a108728ebd896d2b5a59e782eb621d9",
+    "atlas.samples.txt": "756253c94987f826eb2724f66ed651f8ed65768c77045ff973411b4985c7abac",
+    "celltypes.json": "1588453d39e02aaa5f55271e4795de86be54c558673572a193ebdad765109d68",
+    "target.bed": "bfdd3b7f6f75d0cacc9c199fe9fe605db9de3b89300e49382469c50e49c957bc",
+    "tr_catalog.bed": "0a951623f077e4152f8dd5616cd3eaf062085c841b9796b82b2f6cf265b8e11d"
+  },
+  "source_coordinates_grch38": "chr2:109199301-109199876",
+  "tr_catalog_rows": 24,
+  "unique_read_names": 914
+}
