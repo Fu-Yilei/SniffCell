@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import argparse
-import sys, os
+import os
+import sys
 from sniffcell.__init__ import __version__ as version
 
 
@@ -385,6 +386,17 @@ def parse_args(argv):
         help=(
             "Skip writing deconv_summary.tsv. Useful when deconv is only being used to produce "
             "per-read outputs and requested BAM splits, and whole-sample aggregation would add runtime."
+        ),
+    )
+    deconv_parser.add_argument(
+        "--bam_modification",
+        "--bam-modification",
+        choices=["auto", "modifiedC", "5mC", "5hmC"],
+        default="auto",
+        help=(
+            "BAM modification channel used for ctDMR scoring. 'auto' reads the modification column "
+            "per ctDMR row and falls back to legacy modifiedC when the column is absent. "
+            "An explicit value overrides every row. Default=auto."
         ),
     )
 

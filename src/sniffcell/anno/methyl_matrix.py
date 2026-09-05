@@ -1,10 +1,49 @@
 import pandas as pd
-import pysam, re
+import pysam
+import re
 import numpy as np
 from typing import Optional, List, Tuple, Union
 from scipy import sparse
 from math import log, exp
 from contextlib import nullcontext
+
+
+_MODIFICATION_KEYS = {
+    "modifiedC": {
+        ("C", 0, "m"), ("C", 1, "m"),
+        ("C", 0, "h"), ("C", 1, "h"),
+    },
+    "5mC": {("C", 0, "m"), ("C", 1, "m")},
+    "5hmC": {("C", 0, "h"), ("C", 1, "h")},
+}
+
+
+def normalize_modification_label(value, *, allow_auto: bool = False) -> str:
+    """Return the canonical BAM/catalog modification label."""
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return "modifiedC"
+    label = str(value).strip()
+    compact = label.lower().replace("-", "").replace("_", "").replace(" ", "")
+    aliases = {
+        "modifiedc": "modifiedC",
+        "totalmodifiedc": "modifiedC",
+        "combined": "modifiedC",
+        "5mc": "5mC",
+        "m": "5mC",
+        "5hmc": "5hmC",
+        "h": "5hmC",
+    }
+    if allow_auto and compact == "auto":
+        return "auto"
+    if compact not in aliases:
+        allowed = "auto, modifiedC, 5mC, 5hmC" if allow_auto else "modifiedC, 5mC, 5hmC"
+        raise ValueError(f"Unsupported modification label {value!r}; expected one of: {allowed}")
+    return aliases[compact]
+
+
+def wanted_keys_for_modification(value) -> set[tuple[str, int, str]]:
+    return set(_MODIFICATION_KEYS[normalize_modification_label(value)])
+
 
 def _cpg_c_sites(fa: pysam.FastaFile, chrom: str, start: int, end: int):
     return [m.start() + start for m in re.finditer(r"CG", fa.fetch(chrom, start, end))]
@@ -30,8 +69,8 @@ def _combine_m_h(pm: float, ph: float, mode: str = "union") -> float:
         def logit(p):
             p = min(max(p, eps), 1 - eps)
             return log(p / (1 - p))
-        l = logit(pm) + logit(ph)
-        return 1.0 / (1.0 + exp(-l))
+        logit_total = logit(pm) + logit(ph)
+        return 1.0 / (1.0 + exp(-logit_total))
     else:
         # fallback: max
         return pm if pm >= ph else ph
@@ -46,13 +85,13 @@ def methyl_matrix_from_bam(
     combine_mode: str = "union",   # <-- NEW: how to combine m & h
     bam_handle: Optional[pysam.AlignmentFile] = None,
     fasta_handle: Optional[pysam.FastaFile] = None,
+    modification: str = "modifiedC",
 ) -> Union[pd.DataFrame, Tuple[pd.DataFrame, List[int]]]:
 
-    # default: include both 5mC and 5hmC on both strands
-    wanted_keys = wanted_keys or {
-        ('C', 0, 'm'), ('C', 1, 'm'),
-        ('C', 0, 'h'), ('C', 1, 'h'),
-    }
+    # Explicit wanted_keys remains supported for callers needing lower-level
+    # control. Otherwise select m/h BAM tags from the requested assay.
+    if wanted_keys is None:
+        wanted_keys = wanted_keys_for_modification(modification)
     if read_name_whitelist is not None:
         read_name_whitelist = {str(x) for x in read_name_whitelist if str(x).strip()}
         if not read_name_whitelist:
@@ -136,7 +175,9 @@ def methyl_matrix_from_bam(
             for (i, j), (pm, ph) in cell_probs.items():
                 v = _combine_m_h(pm, ph, combine_mode)
                 if not np.isnan(v):
-                    data_i.append(i); data_j.append(j); data_v.append(v)
+                    data_i.append(i)
+                    data_j.append(j)
+                    data_v.append(v)
             coo = sparse.coo_matrix((data_v, (data_i, data_j)), shape=(len(row_ids), len(cpgs)))
         else:
             coo = sparse.coo_matrix((len(row_ids), len(cpgs)))

@@ -94,11 +94,19 @@ super-union catalog is distributed as
 sniffcell deconv \
   -i sample.bam \
   -r ref.fa \
-  -b pbmc_ctdmr.tsv \
+  -b atlas/brain_cereb.dual_5mc_5hmc.ctdmr.tsv.gz \
   -o deconv_out \
+  --bam-modification auto \
   --split_bam_groups "Lymphoid=T-cell,NK-cell,B-cell;Myeloid=Monocyte" \
   -t 8
 ```
+
+With `--bam-modification auto` (the default), each ctDMR uses the channel named
+in its `modification` column: BAM `C+m` calls for `5mC`, `C+h` calls for
+`5hmC`, and both for legacy `modifiedC` rows. Use an explicit `5mC`, `5hmC`,
+or `modifiedC` value only to override every catalog row for a control analysis.
+Catalogs without a `modification` column retain the previous combined-modified-C
+behavior.
 
 3. Discover SVs and tandem repeats from the two cell-type-split BAMs:
 

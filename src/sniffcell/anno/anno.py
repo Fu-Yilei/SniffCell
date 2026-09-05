@@ -5,7 +5,7 @@ import pandas as pd
 import pysam
 from sniffcell.anno.breakpoint_exclusion import validate_breakpoint_exclusion_frac
 from sniffcell.anno.kmeans import kmeans_cluster_cells
-from sniffcell.anno.methyl_matrix import methyl_matrix_from_bam
+from sniffcell.anno.methyl_matrix import methyl_matrix_from_bam, normalize_modification_label
 from sniffcell.anno.filter_bed_based_on_variants import filter_bed_based_on_variants
 from sniffcell.anno.vcf_to_df import read_vcf_to_df
 from sniffcell.anno.variant_assignment import assign_sv_celltypes
@@ -613,9 +613,15 @@ def _one_dmr(args):
     else:
         row, input_file, reference = args
         read_assignment_mode = "closest_reference_mean"
+    bam_modification_mode = args[4] if len(args) >= 5 else "auto"
     read_assignment_mode = str(read_assignment_mode).strip().lower()
     if read_assignment_mode not in {"closest_reference_mean", "kmeans"}:
         raise ValueError("read_assignment_mode must be one of: closest_reference_mean, kmeans")
+    bam_modification_mode = normalize_modification_label(bam_modification_mode, allow_auto=True)
+    catalog_modification = normalize_modification_label(row.get("modification", "modifiedC"))
+    effective_modification = (
+        catalog_modification if bam_modification_mode == "auto" else bam_modification_mode
+    )
 
     chrom = str(row["chr"])
     start = int(row["start"])
@@ -644,6 +650,7 @@ def _one_dmr(args):
             return_positions=True,
             bam_handle=bam_h,
             fasta_handle=fasta_h,
+            modification=effective_modification,
         )
         n_reads_raw = 0 if mm is None else mm.shape[0]
         n_cpgs = len(cpgs)
@@ -672,13 +679,21 @@ def _one_dmr(args):
         # Impute NaN with column means — single array allocation instead of the
         # original three-copy pandas chain (astype→copy→fillna→mean).
         mm_float = mm.to_numpy(dtype=float)
-        col_means = np.nanmean(mm_float, axis=0)
+        valid_per_column = np.sum(~np.isnan(mm_float), axis=0)
+        col_means = np.divide(
+            np.nansum(mm_float, axis=0),
+            valid_per_column,
+            out=np.full(mm_float.shape[1], np.nan, dtype=float),
+            where=valid_per_column > 0,
+        )
         nan_locs = np.isnan(mm_float)
         if nan_locs.any():
             mm_float = mm_float.copy()
             col_idx = np.where(nan_locs)[1]
             mm_float[nan_locs] = col_means[col_idx]
-        read_mean = mm_float.mean(axis=1)
+        # Columns with no calls in any read remain NaN after imputation. Match
+        # pandas' historical row-mean behavior by excluding those columns.
+        read_mean = np.nanmean(mm_float, axis=1)
 
         # Assign each read to best_group vs other_group per ctDMR.
         if read_assignment_mode == "closest_reference_mean":
@@ -741,6 +756,8 @@ def _one_dmr(args):
             "other_group_leaves": str(row.get("other_group_leaves", "")),
             "hyper_group_leaves": str(row.get("hyper_group_leaves", "")),
             "hypo_group_leaves": str(row.get("hypo_group_leaves", "")),
+            "modification": catalog_modification,
+            "bam_modification": effective_modification,
             "code": code_col,
         }, index=pd.Index(readnames, name="readname"))
 
@@ -754,6 +771,8 @@ def _one_dmr(args):
         state_payload = {
             "chr": chrom, "start": start, "end": end,
             "cpgstart": cpgstart, "cpgend": cpgend,
+            "modification": catalog_modification,
+            "bam_modification": effective_modification,
         }
         for ct in cell_types:
             state_payload[f"{ct}_methylation"] = tgt_mean if ct in target_set else oth_mean
@@ -761,7 +780,7 @@ def _one_dmr(args):
 
         return assign_df, state_df
 
-    except Exception as e:
+    except Exception:
         logger.exception(f"[{chrom}:{start}-{end}] failed with error")
         return None
 

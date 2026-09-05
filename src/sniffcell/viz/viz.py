@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import pysam
 
+from sniffcell.anno.anno import _normalize_supporting_read_names
 from sniffcell.anno.methyl_matrix import methyl_matrix_from_bam
 from sniffcell.anno.variant_assignment import (
     _build_group_leaf_sets,
@@ -171,8 +172,15 @@ def _build_variant_payload_from_table_row(row: pd.Series) -> dict:
     end = int(pd.to_numeric(row.get("end"), errors="coerce"))
     if end <= start:
         end = start + 1
-    group_a_reads = _parse_support_read_names(row.get("group_a_read_names", ""))
-    group_b_reads = _parse_support_read_names(row.get("group_b_read_names", ""))
+    variant_class = str(row.get("variant_class", "SV")).strip().upper() or "SV"
+    group_a_reads = _normalize_supporting_read_names(
+        _parse_support_read_names(row.get("group_a_read_names", "")),
+        variant_class=variant_class,
+    )
+    group_b_reads = _normalize_supporting_read_names(
+        _parse_support_read_names(row.get("group_b_read_names", "")),
+        variant_class=variant_class,
+    )
     support_names = set(group_a_reads) | set(group_b_reads)
     svlen = pd.to_numeric(row.get("change_size_bp", pd.NA), errors="coerce")
     return {
@@ -181,7 +189,7 @@ def _build_variant_payload_from_table_row(row: pd.Series) -> dict:
         "start": start,
         "end": end,
         "svtype": str(row.get("variant_subtype", row.get("sv_type", "SV"))),
-        "variant_class": str(row.get("variant_class", "SV")),
+        "variant_class": variant_class,
         "svlen": (_first_scalar(svlen) if pd.notna(svlen) else pd.NA),
         "supporting_reads": support_names,
     }
@@ -1596,10 +1604,11 @@ def _plot_sv_panel(
         ax_distal = None
         ax_distal_reads = None
 
-    title_size = 17
-    subtitle_size = 11
-    axis_label_size = 16
-    tick_label_size = 13
+    title_size = 23
+    subtitle_size = 15
+    axis_label_size = 20
+    tick_label_size = 16
+    legend_size = 12
 
     sv_start = int(sv["start"])
     sv_end = int(sv["end"])
@@ -2301,49 +2310,93 @@ def _plot_sv_panel(
         f"display haplotypes: {'HP' + str(applied_support_haplotype) if applied_support_haplotype is not None else 'all'}"
     )
     fig.text(0.01, 0.952, subtitle, fontsize=subtitle_size, ha="left", va="center")
-    fig.text(0.01, 0.930, f"Locus (IGV): {sv_locus_igv} | Window (IGV): {window_locus_igv}", fontsize=10, ha="left", va="center")
-    fig.text(0.01, 0.909, f"ctDMRs in-window (IGV, {len(dmr_coords_igv)}): {dmr_preview}", fontsize=9, ha="left", va="center")
+    fig.text(0.01, 0.930, f"Locus (IGV): {sv_locus_igv} | Window (IGV): {window_locus_igv}", fontsize=14, ha="left", va="center")
+    fig.text(0.01, 0.909, f"ctDMRs in-window (IGV, {len(dmr_coords_igv)}): {dmr_preview}", fontsize=13, ha="left", va="center")
     if callout_coords_igv:
         fig.text(
             0.01,
             0.888,
             f"winning linked ctDMR callouts outside window ({len(callout_coords_igv)}): {callout_preview}",
-            fontsize=9,
+            fontsize=13,
             ha="left",
             va="center",
         )
 
-    legend_handles = [
-        Line2D([0], [0], color="#d62728", lw=2.6, linestyle="-", label="Supporting read (assigned)"),
-        Line2D([0], [0], color="#ff7f0e", lw=2.6, linestyle="--", label="Supporting read (unassigned)"),
-        Line2D([0], [0], color="#9e9e9e", lw=1.3, label="Other read"),
-        Line2D([0], [0], linestyle="None", marker=">", markerfacecolor="#d62728", markeredgecolor="#111111", markersize=9, label="Assignment pointer"),
-        Line2D([0], [0], color="#6b6b6b", lw=1.3, linestyle=(0, (4, 3)), label="Distal linked ctDMR extension"),
-        Patch(facecolor=insertion_color, edgecolor="#111111", linewidth=1.1, label=f"Insertion >= {indel_min_bp} bp"),
-        Patch(facecolor=deletion_face, edgecolor=deletion_edge, linewidth=1.1, label=f"Deletion >= {indel_min_bp} bp"),
-        Line2D([0], [0], color="#6baed6", lw=5.0, label="Read methylation on ctDMR overlap"),
-        Line2D([0], [0], linestyle="None", marker="o", markerfacecolor=low_methylation_color, markeredgecolor="#111111", markersize=7, label="Methylation 0.0"),
-        Line2D([0], [0], linestyle="None", marker="o", markerfacecolor=mid_methylation_color, markeredgecolor="#111111", markersize=7, label="Methylation 0.5"),
-        Line2D([0], [0], linestyle="None", marker="o", markerfacecolor=high_methylation_color, markeredgecolor="#111111", markersize=7, label="Methylation 1.0"),
-        Patch(facecolor="#3182bd", alpha=0.20, label="Variant interval"),
-        Patch(facecolor="#f7f7f7", edgecolor="#2ca25f", alpha=0.95, label="ctDMR hyper (edge)"),
-        Patch(facecolor="#f7f7f7", edgecolor="#756bb1", alpha=0.95, label="ctDMR hypo/other (edge)"),
-    ]
+    legend_handles = []
+    if n_assigned:
+        legend_handles.append(
+            Line2D(
+                [0],
+                [0],
+                color="#d62728",
+                lw=2.6,
+                linestyle="-",
+                label="Supporting read" if not n_unassigned else "Supporting read (assigned)",
+            )
+        )
+    if n_unassigned:
+        legend_handles.append(
+            Line2D([0], [0], color="#ff7f0e", lw=2.6, linestyle="--", label="Supporting read (unassigned)")
+        )
+    if not shown_reads.empty and (~shown_reads["is_supporting"].astype(bool)).any():
+        legend_handles.append(Line2D([0], [0], color="#9e9e9e", lw=1.3, label="Other read"))
     if has_distal_callouts:
+        legend_handles.append(
+            Line2D(
+                [0],
+                [0],
+                color="#6b6b6b",
+                lw=1.3,
+                linestyle=(0, (4, 3)),
+                label="Distal linked ctDMR extension",
+            )
+        )
+    present_indel_types = (
+        set(large_indels["event_type"].dropna().astype(str))
+        if not large_indels.empty and "event_type" in large_indels.columns
+        else set()
+    )
+    if "INS" in present_indel_types:
+        legend_handles.append(
+            Patch(
+                facecolor=insertion_color,
+                edgecolor="#111111",
+                linewidth=1.1,
+                label=f"Insertion >= {indel_min_bp} bp",
+            )
+        )
+    if "DEL" in present_indel_types:
+        legend_handles.append(
+            Patch(
+                facecolor=deletion_face,
+                edgecolor=deletion_edge,
+                linewidth=1.1,
+                label=f"Deletion >= {indel_min_bp} bp",
+            )
+        )
+    if not methyl_df.empty and methyl_df.get("mean_methylation", pd.Series(dtype=float)).notna().any():
+        legend_handles.append(
+            Line2D([0], [0], color="#6baed6", lw=5.0, label="Read methylation")
+        )
+    legend_handles.append(Patch(facecolor="#3182bd", alpha=0.20, label="Variant interval"))
+    if not dmr_panel_df.empty:
+        legend_handles.append(
+            Patch(facecolor="#f7f7f7", edgecolor="#555555", alpha=0.95, label="ctDMR")
+        )
+
+    if legend_handles:
         fig.legend(
             handles=legend_handles,
             loc="upper center",
-            bbox_to_anchor=(0.5, 0.855),
-            ncol=5,
-            fontsize=max(7.5, tick_label_size - 4.5),
+            bbox_to_anchor=(0.5, 0.865),
+            ncol=min(4, len(legend_handles)),
+            fontsize=legend_size,
             frameon=False,
             borderaxespad=0.2,
-            handlelength=2.0,
-            columnspacing=1.25,
+            handlelength=1.8,
+            columnspacing=1.5,
             labelspacing=0.4,
         )
-    else:
-        ax_reads.legend(handles=legend_handles, loc="upper right", fontsize=tick_label_size, frameon=False)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=int(dpi), bbox_inches="tight")

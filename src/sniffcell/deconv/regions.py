@@ -127,10 +127,14 @@ def select_ctdmrs_for_target(
     right_selected = right.iloc[0:0].copy()
     if left_ctdmrs > 0 and not left.empty:
         left = left.assign(_distance=target.start - left["end"])
-        left_selected = left.nsmallest(left_ctdmrs, "_distance").drop(columns="_distance")
+        left_selected = left.nsmallest(left_ctdmrs, "_distance", keep="all").drop(
+            columns="_distance"
+        )
     if right_ctdmrs > 0 and not right.empty:
         right = right.assign(_distance=right["start"] - target.end)
-        right_selected = right.nsmallest(right_ctdmrs, "_distance").drop(columns="_distance")
+        right_selected = right.nsmallest(right_ctdmrs, "_distance", keep="all").drop(
+            columns="_distance"
+        )
 
     selected = (
         pd.concat([overlaps, left_selected, right_selected], ignore_index=True)
@@ -251,6 +255,7 @@ def _selected_summary_extra_columns(ctdmr_df: pd.DataFrame) -> list[str]:
         "hyper_group_leaves",
         "hypo_group_leaves",
         "code_order",
+        "modification",
     ]
     cols = [col for col in preferred if col in ctdmr_df.columns]
     cols.extend(

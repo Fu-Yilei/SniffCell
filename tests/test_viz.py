@@ -9,6 +9,7 @@ import pysam
 
 from sniffcell.viz.viz import (
     _assign_ctdmr_label_lanes,
+    _build_variant_payload_from_table_row,
     _collect_large_indels_from_cigar,
     _build_methylation_heatmap_matrix,
     _expand_interval_for_visibility,
@@ -18,6 +19,49 @@ from sniffcell.viz.viz import (
     _resolve_viz_runtime_inputs,
     _summarize_supporting_read_assignments,
 )
+
+
+class TestVizVariantPayload(unittest.TestCase):
+    def test_harmonized_tr_payload_normalizes_medaka_read_headers(self):
+        payload = _build_variant_payload_from_table_row(
+            pd.Series(
+                {
+                    "chrom": "chr13",
+                    "start": 102161539,
+                    "end": 102161869,
+                    "variant_class": "TR",
+                    "variant_id": "chr13_102161539_102161869",
+                    "variant_subtype": "expansion_all",
+                    "group_a_read_names": json.dumps(
+                        [
+                            "uuidA_chr13_102161539_102161869_pad_102161289_102162119_fwd_hap2_phased-set1_ploidy2",
+                            "uuidB_chr13_102161539_102161869_pad_102161289_102162119_rev_hap2_phased-set1_ploidy2",
+                        ]
+                    ),
+                    "group_b_read_names": "[]",
+                }
+            )
+        )
+
+        self.assertEqual(payload["variant_class"], "TR")
+        self.assertEqual(payload["supporting_reads"], {"uuidA", "uuidB"})
+
+    def test_non_tr_payload_preserves_read_names_containing_chr(self):
+        payload = _build_variant_payload_from_table_row(
+            pd.Series(
+                {
+                    "chrom": "chr1",
+                    "start": 100,
+                    "end": 200,
+                    "variant_class": "SV",
+                    "variant_id": "sv1",
+                    "group_a_read_names": json.dumps(["sample_chr_read"]),
+                    "group_b_read_names": "[]",
+                }
+            )
+        )
+
+        self.assertEqual(payload["supporting_reads"], {"sample_chr_read"})
 
 
 class TestVizSupportingReadAssignment(unittest.TestCase):

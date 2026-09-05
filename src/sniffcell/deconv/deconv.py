@@ -11,11 +11,11 @@ import pandas as pd
 from tqdm import tqdm
 
 from sniffcell.anno.anno import _one_dmr
+from sniffcell.anno.methyl_matrix import normalize_modification_label
 from sniffcell.anno.variant_assignment import (
     _build_group_leaf_sets,
     _compute_per_read_consensus_df,
     _decode_linked_celltypes_from_row,
-    _normalize_binary_code,
     _resolve_hierarchy_labels,
     _split_code_token_schema_bits,
     _summarize_celltype_links,
@@ -70,12 +70,13 @@ def _write_deconv_run_manifest(
     read_assignment_mode: str,
     split_bam_groups: str | None,
     per_read_min_agreement: float,
+    bam_modification: str,
     outputs: dict[str, str],
 ) -> str:
     manifest_path = outputs["manifest"]
     payload = {
         "command": "deconv",
-        "version": "v1",
+        "version": "v2",
         "inputs": {
             "bam": os.path.abspath(original_bam or bam),
             "reference": os.path.abspath(reference),
@@ -88,6 +89,7 @@ def _write_deconv_run_manifest(
             "read_assignment_mode": str(read_assignment_mode),
             "split_bam_groups": split_bam_groups,
             "per_read_min_agreement": float(per_read_min_agreement),
+            "bam_modification": str(bam_modification),
             "regions": regions,
             "regions_ctdmrs": (None if regions_ctdmrs is None else int(regions_ctdmrs)),
             "regions_left_ctdmrs": (
@@ -124,16 +126,19 @@ def _write_deconv_run_manifest(
 
 
 def _load_ctdmr_bed(bed_path: str) -> pd.DataFrame:
-    bed = pd.read_csv(bed_path, sep="\t")
+    bed = pd.read_csv(bed_path, sep="\t", low_memory=False)
     if not bed.empty and isinstance(bed.columns[0], str) and bed.columns[0].startswith("#"):
         bed.rename(columns={bed.columns[0]: bed.columns[0].lstrip("#")}, inplace=True)
-    bed = bed.drop_duplicates(ignore_index=True)
-    bed = bed.sort_values(["chr", "start"], ignore_index=True)
-
     required = ["chr", "start", "end", "best_group", "best_dir"]
     missing = [col for col in required if col not in bed.columns]
     if missing:
         raise ValueError(f"BED missing required columns: {missing}")
+    if "modification" not in bed.columns:
+        bed["modification"] = "modifiedC"
+    else:
+        bed["modification"] = bed["modification"].map(normalize_modification_label)
+    bed = bed.drop_duplicates(ignore_index=True)
+    bed = bed.sort_values(["chr", "start", "modification"], ignore_index=True)
     return bed
 
 
@@ -153,6 +158,8 @@ def _write_empty_reads_table(path: str) -> None:
             "other_group_leaves",
             "hyper_group_leaves",
             "hypo_group_leaves",
+            "modification",
+            "bam_modification",
             "code",
         ]
     )
@@ -161,7 +168,17 @@ def _write_empty_reads_table(path: str) -> None:
 
 
 def _write_empty_blocks_table(path: str) -> None:
-    pd.DataFrame(columns=["chr", "start", "end", "cpgstart", "cpgend"]).to_csv(
+    pd.DataFrame(
+        columns=[
+            "chr",
+            "start",
+            "end",
+            "cpgstart",
+            "cpgend",
+            "modification",
+            "bam_modification",
+        ]
+    ).to_csv(
         path,
         sep="\t",
         index=False,
@@ -180,12 +197,16 @@ def _stream_ctdmr_classification(
     reference: str,
     threads: int,
     read_assignment_mode: str,
+    bam_modification: str,
     reads_out: str,
     blocks_out: str,
 ) -> pd.DataFrame:
     """Stream ctDMR classification, write TSV outputs, and return the full
     reads DataFrame in memory to avoid a costly re-read of the 2+ GB file."""
-    tasks = [(dict(row), input_bam, reference, read_assignment_mode) for _, row in bed_df.iterrows()]
+    tasks = [
+        (dict(row), input_bam, reference, read_assignment_mode, bam_modification)
+        for _, row in bed_df.iterrows()
+    ]
     open(reads_out, "w").close()
     open(blocks_out, "w").close()
 
@@ -274,6 +295,7 @@ def _stream_ctdmr_classification(
             "best_group", "other_group", "is_best_group",
             "code_order", "best_group_leaves", "other_group_leaves",
             "hyper_group_leaves", "hypo_group_leaves", "code",
+            "modification", "bam_modification",
         ],
         index=pd.Index([], name="readname"),
     )
@@ -321,7 +343,10 @@ def _prepare_read_assignment_df(read_assignment_df: pd.DataFrame, *, copy_df: bo
         if needs_pad.any():
             pad_lens = n_labels[needs_pad]
             code_str = code_str.copy()
-            code_str[needs_pad] = [s.zfill(l) for s, l in zip(code_str[needs_pad], pad_lens)]
+            code_str[needs_pad] = [
+                value.zfill(length)
+                for value, length in zip(code_str[needs_pad], pad_lens)
+            ]
     code_str_result = code_str.astype("string")
     code_str_result[na_mask] = pd.NA
     assignment["code"] = code_str_result
@@ -673,6 +698,9 @@ def deconv_main(args):
     regions_left_ctdmrs = regions_ctdmrs if regions_left_arg is None else int(regions_left_arg)
     regions_right_ctdmrs = regions_ctdmrs if regions_right_arg is None else int(regions_right_arg)
     per_read_min_agreement = float(getattr(args, "per_read_min_agreement", 0.66))
+    bam_modification = normalize_modification_label(
+        getattr(args, "bam_modification", "auto"), allow_auto=True
+    )
     skip_overall_summary = bool(getattr(args, "skip_overall_summary", False))
     regional_inputs: ResolvedRegionalInputs | None = None
     preloaded_bed_df: pd.DataFrame | None = None
@@ -725,13 +753,14 @@ def deconv_main(args):
 
     logger.info(
         "Starting deconvolution: bed=%s bam=%s ref=%s threads=%d read_assignment_mode=%s "
-        "per_read_min_agreement=%.3f out=%s",
+        "per_read_min_agreement=%.3f bam_modification=%s out=%s",
         bed_input,
         input_bam,
         reference,
         threads,
         read_assignment_mode,
         per_read_min_agreement,
+        bam_modification,
         output_arg,
     )
 
@@ -751,6 +780,7 @@ def deconv_main(args):
         read_assignment_mode=read_assignment_mode,
         split_bam_groups=split_bam_groups,
         per_read_min_agreement=per_read_min_agreement,
+        bam_modification=bam_modification,
         outputs=outputs,
     )
     logger.info("Wrote deconv run manifest: %s", manifest_path)
@@ -784,6 +814,10 @@ def deconv_main(args):
 
         bed_df = preloaded_bed_df if preloaded_bed_df is not None else _load_ctdmr_bed(bed_input)
         logger.info("Loaded BED with %d unique ctDMRs", len(bed_df))
+        logger.info(
+            "ctDMR modification rows: %s",
+            bed_df["modification"].value_counts().sort_index().to_dict(),
+        )
 
         # _stream_ctdmr_classification writes the TSV outputs AND returns the full
         # reads DataFrame in memory, eliminating the costly 2+ GB re-read.
@@ -793,6 +827,7 @@ def deconv_main(args):
             reference=reference,
             threads=threads,
             read_assignment_mode=read_assignment_mode,
+            bam_modification=bam_modification,
             reads_out=outputs["reads"],
             blocks_out=outputs["blocks"],
         )
