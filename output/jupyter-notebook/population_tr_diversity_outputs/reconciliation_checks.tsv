@@ -1,0 +1,8 @@
+check	left	right	status
+manifest rows equal loaded variant rows	36388	36388	PASS
+manifest TR rows equal loaded TR calls	165	165	PASS
+subtype calls sum to all TR calls	165	165	PASS
+category calls sum to all TR calls	165	165	PASS
+presence matrix sums to sample-site pairs	165	165	PASS
+per-sample table includes every loaded sample	87	87	PASS
+per-site table includes every exact site	54	54	PASS

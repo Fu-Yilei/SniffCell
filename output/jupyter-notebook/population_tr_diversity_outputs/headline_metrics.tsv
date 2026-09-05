@@ -1,0 +1,15 @@
+metric	value
+input_files	87
+loaded_files	87
+unique_samples	87
+samples_with_any_tr	65
+all_variant_rows	36388
+total_tr_calls	165
+unique_sample_site_pairs	165
+unique_tr_sites	54
+unique_tr_subtypes	1
+unique_change_sizes_bp	153
+singleton_sites	30
+recurrent_sites_ge_2_samples	24
+recurrent_sites_ge_5_samples	9
+maximum_samples_at_one_site	28

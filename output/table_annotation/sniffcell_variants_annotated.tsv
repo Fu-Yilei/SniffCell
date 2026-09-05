@@ -1,0 +1,123 @@
+variant_id	variant_type	tissue	donor	chrom	start	end	locus_id	variant_detail	cell_type	coverages_detected	observed_in_paired_FANS	overlapping_protein_coding_gene_grch38
+TR001	TR	pbmc	pbmc1	chr14	24033681	24033928	chr14_24033681_24033928	expansion in pbmc1.T-cell+NK-cell+B-cell vs pbmc1.Monocyte	T-cell+NK-cell+B-cell	full	Yes	
+TR002	TR	pbmc	pbmc1	chr16	88206644	88207462	chr16_88206644_88207462	expansion in pbmc1.Monocyte vs pbmc1.T-cell+NK-cell+B-cell	Monocyte	full	No	
+TR003	TR	pbmc	pbmc1	chr17	83120328	83120653	chr17_83120328_83120653	expansion in pbmc1.T-cell+NK-cell+B-cell vs pbmc1.Monocyte	T-cell+NK-cell+B-cell	full	Yes	
+TR004	TR	pbmc	pbmc1	chr18	79867339	79867644	chr18_79867339_79867644	expansion in pbmc1.T-cell+NK-cell+B-cell vs pbmc1.Monocyte	T-cell+NK-cell+B-cell	full	Yes	KCNG2
+TR005	TR	pbmc	pbmc1	chr3	130090523	130090887	chr3_130090523_130090887	expansion in pbmc1.T-cell+NK-cell+B-cell vs pbmc1.Monocyte	T-cell+NK-cell+B-cell	full	No	ALG1L2
+TR006	TR	pbmc	pbmc1	chr7	142477412	142477506	chr7_142477412_142477506	expansion in pbmc1.T-cell+NK-cell+B-cell vs pbmc1.Monocyte	T-cell+NK-cell+B-cell	full	No	
+SV001	SV	pbmc	pbmc1	chr7	142785308	142789420	Sniffles2.DEL.14C4	DEL 2045bp	T-cell+NK-cell+B-cell	full	Yes	
+TR007	TR	pbmc	pbmc2	chr1	2691132	2695829	chr1_2691132_2695829	expansion in pbmc2.T-cell+NK-cell+B-cell vs pbmc2.Monocyte	T-cell+NK-cell+B-cell	full	Yes	TTC34
+TR008	TR	pbmc	pbmc2	chr19	51646213	51646939	chr19_51646213_51646939	expansion in pbmc2.T-cell+NK-cell+B-cell vs pbmc2.Monocyte	T-cell+NK-cell+B-cell	full	Yes	SIGLEC14
+TR009	TR	pbmc	pbmc2	chr2	11618067	11618273	chr2_11618067_11618273	expansion in pbmc2.Monocyte vs pbmc2.T-cell+NK-cell+B-cell	Monocyte	full	No	GREB1
+TR010	TR	pbmc	pbmc2	chr3	130090523	130090887	chr3_130090523_130090887	expansion in pbmc2.T-cell+NK-cell+B-cell vs pbmc2.Monocyte	T-cell+NK-cell+B-cell	full	No	ALG1L2
+SV002	SV	pbmc	pbmc2	chr21	46292989	46293058	Sniffles2.DEL.212S14	DEL 69bp	T-cell+NK-cell+B-cell	full	No	C21orf58,YBEY
+SV003	SV	pbmc	pbmc2	chr7	142779264	142812164	Sniffles2.DEL.222S14	DEL 886bp	T-cell+NK-cell+B-cell	full	Yes	
+TR011	TR	brain	bcontrol1	chr1	2691132	2695829	chr1_2691132_2695829	expansion in bcontrol1.Neuron vs bcontrol1.Oligodendrocyte	Neuron	full		TTC34
+TR012	TR	brain	bcontrol1	chr1	230315645	230316252	chr1_230315645_230316252	expansion in bcontrol1.Oligodendrocyte vs bcontrol1.Neuron	Oligodendrocyte	full;30x		PGBD5
+TR013	TR	brain	bcontrol1	chr1	234139924	234140028	chr1_234139924_234140028	expansion in bcontrol1.Oligodendrocyte vs bcontrol1.Neuron	Oligodendrocyte	full		SLC35F3
+TR014	TR	brain	bcontrol1	chr10	132886950	132888121	chr10_132886950_132888121	expansion in bcontrol1.Oligodendrocyte vs bcontrol1.Neuron	Oligodendrocyte	full		CFAP46
+TR015	TR	brain	bcontrol1	chr11	220537	220604	chr11_220537_220604	expansion in bcontrol1.Oligodendrocyte vs bcontrol1.Neuron	Oligodendrocyte	full		SIRT3
+TR016	TR	brain	bcontrol1	chr12	129303793	129303843	chr12_129303793_129303843	expansion in bcontrol1.Oligodendrocyte vs bcontrol1.Neuron	Oligodendrocyte	full	Yes	TMEM132D
+TR017	TR	brain	bcontrol1	chr12	130781732	130782196	chr12_130781732_130782196	expansion in bcontrol1.Oligodendrocyte vs bcontrol1.Neuron	Oligodendrocyte	full;60x;30x	Yes	
+TR018	TR	brain	bcontrol1	chr12	132387417	132387485	chr12_132387417_132387485	expansion in bcontrol1.Oligodendrocyte vs bcontrol1.Neuron	Oligodendrocyte	full		
+TR019	TR	brain	bcontrol1	chr13	22963182	22963669	chr13_22963182_22963669	expansion in bcontrol1.Neuron vs bcontrol1.Oligodendrocyte	Neuron	full		
+TR020	TR	brain	bcontrol1	chr16	21833317	21833364	chr16_21833317_21833364	expansion in bcontrol1.Oligodendrocyte vs bcontrol1.Neuron	Oligodendrocyte	full;60x;30x	Yes	
+TR021	TR	brain	bcontrol1	chr16	21834701	21837624	chr16_21834701_21837624	expansion in bcontrol1.Oligodendrocyte vs bcontrol1.Neuron	Oligodendrocyte	full;60x;30x	Yes	NPIPB4
+TR022	TR	brain	bcontrol1	chr16	90116644	90118559	chr16_90116644_90118559	expansion in bcontrol1.Neuron vs bcontrol1.Oligodendrocyte	Neuron	full;60x;30x	No	
+TR023	TR	brain	bcontrol1	chr17	83031993	83032573	chr17_83031993_83032573	expansion in bcontrol1.Neuron vs bcontrol1.Oligodendrocyte	Neuron	full		QTGAL
+TR024	TR	brain	bcontrol1	chr18	79867339	79867644	chr18_79867339_79867644	expansion in bcontrol1.Neuron vs bcontrol1.Oligodendrocyte	Neuron	full;60x	Yes	KCNG2
+TR025	TR	brain	bcontrol1	chr19	382870	382949	chr19_382870_382949	expansion in bcontrol1.Oligodendrocyte vs bcontrol1.Neuron	Oligodendrocyte	full;30x		
+TR026	TR	brain	bcontrol1	chr19	8656737	8656797	chr19_8656737_8656797	expansion in bcontrol1.Neuron vs bcontrol1.Oligodendrocyte	Neuron	full		NFILZ
+TR027	TR	brain	bcontrol1	chr19	56221036	56221171	chr19_56221036_56221171	expansion in bcontrol1.Oligodendrocyte vs bcontrol1.Neuron	Oligodendrocyte	full;60x;30x		ZSCAN5A
+TR028	TR	brain	bcontrol1	chr2	909634	910358	chr2_909634_910358	expansion in bcontrol1.Oligodendrocyte vs bcontrol1.Neuron	Oligodendrocyte	full		
+TR029	TR	brain	bcontrol1	chr2	109199301	109199876	chr2_109199301_109199876	expansion in bcontrol1.Neuron vs bcontrol1.Oligodendrocyte	Neuron	full;60x	Yes	SH3RF3
+TR030	TR	brain	bcontrol1	chr21	39974107	39974167	chr21_39974107_39974167	expansion in bcontrol1.Neuron vs bcontrol1.Oligodendrocyte	Neuron	full;60x		
+TR031	TR	brain	bcontrol1	chr3	186654081	186654157	chr3_186654081_186654157	expansion in bcontrol1.Neuron vs bcontrol1.Oligodendrocyte	Neuron	full	No	FETUB
+TR032	TR	brain	bcontrol1	chr5	11406788	11406853	chr5_11406788_11406853	expansion in bcontrol1.Oligodendrocyte vs bcontrol1.Neuron	Oligodendrocyte	full;60x	Yes	CTNND2
+TR033	TR	brain	bcontrol1	chr6	909034	910828	chr6_909034_910828	expansion in bcontrol1.Neuron vs bcontrol1.Oligodendrocyte	Neuron	full		
+TR034	TR	brain	bcontrol1	chr7	868169	868237	chr7_868169_868237	expansion in bcontrol1.Oligodendrocyte vs bcontrol1.Neuron	Oligodendrocyte	full;60x	No	SUN1
+TR035	TR	brain	bcontrol1	chr7	142477412	142477506	chr7_142477412_142477506	expansion in bcontrol1.Neuron vs bcontrol1.Oligodendrocyte	Neuron	full	No	
+SV004	SV	brain	bcontrol1	chr12	3318619	3318677	Sniffles2.INS.5ESB	INS 58bp	Neuron	full	No	
+SV005	SV	brain	bcontrol1	chr12	132717335	132717403	Sniffles2.INS.323SB	INS 68bp	Oligodendrocyte	full	No	PGAM5
+TR036	TR	brain	bcontrol2	chr1	1080404	1080470	chr1_1080404_1080470	expansion in bcontrol2.Oligodendrocyte vs bcontrol2.Neuron	Oligodendrocyte	full;60x	Yes	
+TR037	TR	brain	bcontrol2	chr10	3315484	3315552	chr10_3315484_3315552	expansion in bcontrol2.Oligodendrocyte vs bcontrol2.Neuron	Oligodendrocyte	full;60x	Yes	
+TR038	TR	brain	bcontrol2	chr10	37166902	37166986	chr10_37166902_37166986	expansion in bcontrol2.Neuron vs bcontrol2.Oligodendrocyte	Neuron	full		ANKRD30A
+TR039	TR	brain	bcontrol2	chr10	37167262	37167348	chr10_37167262_37167348	expansion in bcontrol2.Neuron vs bcontrol2.Oligodendrocyte	Neuron	full		ANKRD30A
+TR040	TR	brain	bcontrol2	chr12	3745755	3745850	chr12_3745755_3745850	expansion in bcontrol2.Neuron vs bcontrol2.Oligodendrocyte	Neuron	full;60x	Yes	CRACR2A
+TR041	TR	brain	bcontrol2	chr13	31999856	32000722	chr13_31999856_32000722	expansion in bcontrol2.Oligodendrocyte vs bcontrol2.Neuron	Oligodendrocyte	full		FRY
+TR042	TR	brain	bcontrol2	chr13	102161539	102161869	chr13_102161539_102161869	expansion in bcontrol2.Neuron vs bcontrol2.Oligodendrocyte	Neuron	full	Yes	FGF14
+TR043	TR	brain	bcontrol2	chr16	22533804	22536400	chr16_22533804_22536400	expansion in bcontrol2.Neuron vs bcontrol2.Oligodendrocyte	Neuron	full	No	NPIPB5
+TR044	TR	brain	bcontrol2	chr16	87738332	87738403	chr16_87738332_87738403	expansion in bcontrol2.Oligodendrocyte vs bcontrol2.Neuron	Oligodendrocyte	full;60x		KLHDC4
+TR045	TR	brain	bcontrol2	chr17	1306370	1306458	chr17_1306370_1306458	expansion in bcontrol2.Neuron vs bcontrol2.Oligodendrocyte	Neuron	full		
+TR046	TR	brain	bcontrol2	chr17	51717500	51717899	chr17_51717500_51717899	expansion in bcontrol2.Neuron vs bcontrol2.Oligodendrocyte	Neuron	full		CA10
+TR047	TR	brain	bcontrol2	chr17	69463261	69463717	chr17_69463261_69463717	expansion in bcontrol2.Neuron vs bcontrol2.Oligodendrocyte	Neuron	full;60x;30x		MAP2K6
+TR048	TR	brain	bcontrol2	chr19	32503084	32504073	chr19_32503084_32504073	expansion in bcontrol2.Neuron vs bcontrol2.Oligodendrocyte	Neuron	full		
+TR049	TR	brain	bcontrol2	chr2	10291229	10291757	chr2_10291229_10291757	expansion in bcontrol2.Neuron	Neuron	full		
+TR050	TR	brain	bcontrol2	chr2	71768566	71770401	chr2_71768566_71770401	expansion in bcontrol2.Neuron vs bcontrol2.Oligodendrocyte	Neuron	full		
+TR051	TR	brain	bcontrol2	chr2	160622317	160622835	chr2_160622317_160622835	expansion in bcontrol2.Neuron vs bcontrol2.Oligodendrocyte	Neuron	full		
+TR052	TR	brain	bcontrol2	chr21	39974107	39974167	chr21_39974107_39974167	expansion in bcontrol2.Neuron vs bcontrol2.Oligodendrocyte	Neuron	full		
+TR053	TR	brain	bcontrol2	chr22	44302333	44302384	chr22_44302333_44302384	expansion in bcontrol2.Oligodendrocyte vs bcontrol2.Neuron	Oligodendrocyte	full		SHISAL1
+TR054	TR	brain	bcontrol2	chr4	1398745	1398920	chr4_1398745_1398920	expansion in bcontrol2.Oligodendrocyte vs bcontrol2.Neuron	Oligodendrocyte	full;60x		
+TR055	TR	brain	bcontrol2	chr4	1671770	1671837	chr4_1671770_1671837	expansion in bcontrol2.Neuron vs bcontrol2.Oligodendrocyte	Neuron	full;60x;30x		FAM53A
+TR056	TR	brain	bcontrol2	chr6	149964223	149965422	chr6_149964223_149965422	expansion in bcontrol2.Neuron vs bcontrol2.Oligodendrocyte	Neuron	full		ULBP1
+TR057	TR	brain	bcontrol2	chr6	154524514	154525737	chr6_154524514_154525737	expansion in bcontrol2.Neuron vs bcontrol2.Oligodendrocyte	Neuron	full;60x	Yes	
+TR058	TR	brain	bcontrol2	chr7	1445986	1446060	chr7_1445986_1446060	expansion in bcontrol2.Neuron vs bcontrol2.Oligodendrocyte	Neuron	full		MICALL2
+TR059	TR	brain	bcontrol2	chr7	154267268	154268040	chr7_154267268_154268040	expansion in bcontrol2.Oligodendrocyte vs bcontrol2.Neuron	Oligodendrocyte	full;60x;30x		DPP6
+TR060	TR	brain	bcontrol2	chr8	25215907	25217317	chr8_25215907_25217317	expansion in bcontrol2.Neuron vs bcontrol2.Oligodendrocyte	Neuron	full		DOCK5
+TR061	TR	brain	bcontrol2	chr9	132812372	132812618	chr9_132812372_132812618	expansion in bcontrol2.Neuron vs bcontrol2.Oligodendrocyte	Neuron	full		AK8
+TR062	TR	brain	bmsa	chr1	611255	612570	chr1_611255_612570	expansion in bmsa.Oligodendrocyte vs bmsa.Neuron	Oligodendrocyte	full;60x		
+TR063	TR	brain	bmsa	chr1	69781654	69782004	chr1_69781654_69782004	expansion in bmsa.Neuron vs bmsa.Oligodendrocyte	Neuron	full;60x		LRRC7
+TR064	TR	brain	bmsa	chr10	3315484	3315552	chr10_3315484_3315552	expansion in bmsa.Oligodendrocyte vs bmsa.Neuron	Oligodendrocyte	full		
+TR065	TR	brain	bmsa	chr11	1294018	1295145	chr11_1294018_1295145	expansion in bmsa.Oligodendrocyte vs bmsa.Neuron	Oligodendrocyte	full		TOLLIP
+TR066	TR	brain	bmsa	chr11	2005205	2005765	chr11_2005205_2005765	expansion in bmsa.Neuron vs bmsa.Oligodendrocyte	Neuron	full;60x		MRPL23
+TR067	TR	brain	bmsa	chr12	1084934	1090961	chr12_1084934_1090961	expansion in bmsa.Oligodendrocyte vs bmsa.Neuron	Oligodendrocyte	full		ERC1
+TR068	TR	brain	bmsa	chr12	84221074	84221475	chr12_84221074_84221475	expansion in bmsa.Neuron vs bmsa.Oligodendrocyte	Neuron	full;60x		
+TR069	TR	brain	bmsa	chr12	129303793	129303843	chr12_129303793_129303843	expansion in bmsa.Oligodendrocyte vs bmsa.Neuron	Oligodendrocyte	full		TMEM132D
+TR070	TR	brain	bmsa	chr12	132244939	132245062	chr12_132244939_132245062	expansion in bmsa.Oligodendrocyte vs bmsa.Neuron	Oligodendrocyte	full;60x;30x	Yes	GALNT9
+TR071	TR	brain	bmsa	chr13	102161539	102161869	chr13_102161539_102161869	expansion in bmsa.Neuron vs bmsa.Oligodendrocyte	Neuron	full;60x;30x	Yes	FGF14
+TR072	TR	brain	bmsa	chr13	113945514	113945708	chr13_113945514_113945708	expansion in bmsa.Neuron vs bmsa.Oligodendrocyte	Neuron	full	Yes	
+TR073	TR	brain	bmsa	chr16	90116644	90118559	chr16_90116644_90118559	expansion in bmsa.Neuron vs bmsa.Oligodendrocyte	Neuron	full;60x	No	
+TR074	TR	brain	bmsa	chr19	380751	382750	chr19_380751_382750	expansion in bmsa.Oligodendrocyte vs bmsa.Neuron	Oligodendrocyte	full	No	
+TR075	TR	brain	bmsa	chr19	15615671	15615747	chr19_15615671_15615747	expansion in bmsa.Neuron vs bmsa.Oligodendrocyte	Neuron	full;60x	not_in_existing_FANS_table	CYP4F8
+TR076	TR	brain	bmsa	chr19	49462763	49463822	chr19_49462763_49463822	expansion in bmsa.Oligodendrocyte vs bmsa.Neuron	Oligodendrocyte	full	not_in_existing_FANS_table	ALDH16A1
+TR077	TR	brain	bmsa	chr2	94272340	94272427	chr2_94272340_94272427	expansion in bmsa.Oligodendrocyte vs bmsa.Neuron	Oligodendrocyte	full;60x;30x	Yes	
+TR078	TR	brain	bmsa	chr20	61942719	61942800	chr20_61942719_61942800	expansion in bmsa.Oligodendrocyte vs bmsa.Neuron	Oligodendrocyte	full	not_in_existing_FANS_table	
+TR079	TR	brain	bmsa	chr21	5289032	5293205	chr21_5289032_5293205	expansion in bmsa.Neuron vs bmsa.Oligodendrocyte	Neuron	full	not_in_existing_FANS_table	
+TR080	TR	brain	bmsa	chr4	1398745	1398920	chr4_1398745_1398920	expansion in bmsa.Oligodendrocyte vs bmsa.Neuron	Oligodendrocyte	full	not_in_existing_FANS_table	
+TR081	TR	brain	bmsa	chr4	3573532	3573805	chr4_3573532_3573805	expansion in bmsa.Oligodendrocyte vs bmsa.Neuron	Oligodendrocyte	full	not_in_existing_FANS_table	
+TR082	TR	brain	bmsa	chr4	83001822	83002007	chr4_83001822_83002007	expansion in bmsa.Neuron vs bmsa.Oligodendrocyte	Neuron	full	not_in_existing_FANS_table	LIN54
+TR083	TR	brain	bmsa	chr8	658956	659930	chr8_658956_659930	expansion in bmsa.Oligodendrocyte vs bmsa.Neuron	Oligodendrocyte	full	not_in_existing_FANS_table	ERICH1
+TR084	TR	brain	bmsa	chr8	687952	688043	chr8_687952_688043	expansion in bmsa.Neuron vs bmsa.Oligodendrocyte	Neuron	full;60x	No	ERICH1
+TR085	TR	brain	bmsa	chr8	1815760	1815982	chr8_1815760_1815982	expansion in bmsa.Oligodendrocyte vs bmsa.Neuron	Oligodendrocyte	full;60x;30x	not_in_existing_FANS_table	KBTBD11-OT1
+TR086	TR	brain	bmsa	chr8	2192053	2192221	chr8_2192053_2192221	expansion in bmsa.Oligodendrocyte vs bmsa.Neuron	Oligodendrocyte	full	Yes	
+SV006	SV	brain	bmsa	chr16	90122128	90122321	Sniffles2.DEL.522SF	DEL 193bp	Neuron	full	No	
+TR087	TR	brain	bparkinsons	chr1	7902961	7903431	chr1_7902961_7903431	expansion in bparkinsons.Oligodendrocyte vs bparkinsons.Neuron	Oligodendrocyte	full	not_in_existing_FANS_table	
+TR088	TR	brain	bparkinsons	chr1	66440865	66441697	chr1_66440865_66441697	expansion in bparkinsons.Oligodendrocyte vs bparkinsons.Neuron	Oligodendrocyte	full	not_in_existing_FANS_table	
+TR089	TR	brain	bparkinsons	chr10	7564689	7565933	chr10_7564689_7565933	expansion in bparkinsons.Oligodendrocyte vs bparkinsons.Neuron	Oligodendrocyte	full	not_in_existing_FANS_table	ITIH5
+TR090	TR	brain	bparkinsons	chr11	110890250	110891025	chr11_110890250_110891025	expansion in bparkinsons.Oligodendrocyte vs bparkinsons.Neuron	Oligodendrocyte	full;60x	not_in_existing_FANS_table	
+TR091	TR	brain	bparkinsons	chr12	7362075	7362753	chr12_7362075_7362753	expansion in bparkinsons.Oligodendrocyte vs bparkinsons.Neuron	Oligodendrocyte	full	not_in_existing_FANS_table	CD163L1
+TR092	TR	brain	bparkinsons	chr12	131638157	131638844	chr12_131638157_131638844	expansion in bparkinsons.Neuron vs bparkinsons.Oligodendrocyte	Neuron	full	not_in_existing_FANS_table	
+TR093	TR	brain	bparkinsons	chr13	22963182	22963669	chr13_22963182_22963669	expansion in bparkinsons.Oligodendrocyte vs bparkinsons.Neuron	Oligodendrocyte	full;60x	Yes	
+TR094	TR	brain	bparkinsons	chr14	19157315	19159657	chr14_19157315_19159657	expansion in bparkinsons.Oligodendrocyte vs bparkinsons.Neuron	Oligodendrocyte	full;60x	Yes	
+TR095	TR	brain	bparkinsons	chr15	91748746	91751184	chr15_91748746_91751184	expansion in bparkinsons.Neuron vs bparkinsons.Oligodendrocyte	Neuron	full	not_in_existing_FANS_table	
+TR096	TR	brain	bparkinsons	chr15	100709939	100710671	chr15_100709939_100710671	expansion in bparkinsons.Oligodendrocyte vs bparkinsons.Neuron	Oligodendrocyte	full	not_in_existing_FANS_table	
+TR097	TR	brain	bparkinsons	chr16	87738332	87738403	chr16_87738332_87738403	expansion in bparkinsons.Oligodendrocyte vs bparkinsons.Neuron	Oligodendrocyte	full;60x	not_in_existing_FANS_table	KLHDC4
+TR098	TR	brain	bparkinsons	chr16	90116644	90118559	chr16_90116644_90118559	expansion in bparkinsons.Neuron	Neuron	full	No	
+TR099	TR	brain	bparkinsons	chr17	83128023	83128091	chr17_83128023_83128091	expansion in bparkinsons.Oligodendrocyte vs bparkinsons.Neuron	Oligodendrocyte	full;60x	Yes	
+TR100	TR	brain	bparkinsons	chr19	15615671	15615747	chr19_15615671_15615747	expansion in bparkinsons.Neuron vs bparkinsons.Oligodendrocyte	Neuron	full	not_in_existing_FANS_table	CYP4F8
+TR101	TR	brain	bparkinsons	chr2	1489625	1489708	chr2_1489625_1489708	expansion in bparkinsons.Neuron vs bparkinsons.Oligodendrocyte	Neuron	full;60x	Yes	TPO
+TR102	TR	brain	bparkinsons	chr2	1489899	1490558	chr2_1489899_1490558	expansion in bparkinsons.Neuron vs bparkinsons.Oligodendrocyte	Neuron	full	No	TPO
+TR103	TR	brain	bparkinsons	chr2	94272340	94272427	chr2_94272340_94272427	expansion in bparkinsons.Oligodendrocyte	Oligodendrocyte	full;60x;30x	Yes	
+TR104	TR	brain	bparkinsons	chr2	124510199	124510580	chr2_124510199_124510580	expansion in bparkinsons.Neuron vs bparkinsons.Oligodendrocyte	Neuron	full	not_in_existing_FANS_table	CNTNAP5
+TR105	TR	brain	bparkinsons	chr20	30676078	30676308	chr20_30676078_30676308	expansion in bparkinsons.Neuron vs bparkinsons.Oligodendrocyte	Neuron	full;60x;30x	not_in_existing_FANS_table	
+TR106	TR	brain	bparkinsons	chr20	49617990	49618051	chr20_49617990_49618051	expansion in bparkinsons.Neuron vs bparkinsons.Oligodendrocyte	Neuron	full;60x;30x	not_in_existing_FANS_table	
+TR107	TR	brain	bparkinsons	chr20	60410694	60410788	chr20_60410694_60410788	expansion in bparkinsons.Neuron vs bparkinsons.Oligodendrocyte	Neuron	full	not_in_existing_FANS_table	
+TR108	TR	brain	bparkinsons	chr20	63068100	63068192	chr20_63068100_63068192	expansion in bparkinsons.Oligodendrocyte vs bparkinsons.Neuron	Oligodendrocyte	full	not_in_existing_FANS_table	
+TR109	TR	brain	bparkinsons	chr22	50397315	50397385	chr22_50397315_50397385	expansion in bparkinsons.Neuron vs bparkinsons.Oligodendrocyte	Neuron	full;60x;30x	Yes	PPP6R2
+TR110	TR	brain	bparkinsons	chr3	56513296	56516111	chr3_56513296_56516111	expansion in bparkinsons.Oligodendrocyte vs bparkinsons.Neuron	Oligodendrocyte	full;60x	Yes	
+TR111	TR	brain	bparkinsons	chr4	1398745	1398920	chr4_1398745_1398920	expansion in bparkinsons.Oligodendrocyte vs bparkinsons.Neuron	Oligodendrocyte	full	not_in_existing_FANS_table	
+TR112	TR	brain	bparkinsons	chr7	142477412	142477506	chr7_142477412_142477506	expansion in bparkinsons.Neuron	Neuron	full;60x	No	
+TR113	TR	brain	bparkinsons	chr8	107368425	107368934	chr8_107368425_107368934	expansion in bparkinsons.Oligodendrocyte vs bparkinsons.Neuron	Oligodendrocyte	full	not_in_existing_FANS_table	ANGPT1
+TR114	TR	brain	bparkinsons	chr9	43174661	43174820	chr9_43174661_43174820	expansion in bparkinsons.Neuron	Neuron	full	not_in_existing_FANS_table	
+TR115	TR	brain	bparkinsons	chr9	74532646	74532908	chr9_74532646_74532908	expansion in bparkinsons.Oligodendrocyte vs bparkinsons.Neuron	Oligodendrocyte	full	not_in_existing_FANS_table	RORB
+SV007	SV	brain	bparkinsons	chr2	1489933	1490282	Sniffles2.INS.60S1	INS 349bp	Neuron	full	No	TPO

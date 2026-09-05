@@ -71,7 +71,7 @@ or `anno` with `-b` instead of running `find`.
 
 To discuss tissue-specific atlases, additional tissues or cell types, or custom
 atlas support, please [open a GitHub issue](https://github.com/Fu-Yilei/SniffCell/issues)
-or [email us](mailto:yilei.fu@bcm.edu).
+or Email us.
 
 ## Example Workflows
 
@@ -285,5 +285,3 @@ If you use SniffCell in your research, please cite:
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
-
-Developed at Baylor College of Medicine by [Yilei Fu](mailto:yilei.fu@bcm.edu).
