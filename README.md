@@ -40,9 +40,9 @@ pip install sniffcell-lite
 sniffcell-lite --help
 ```
 
-The lite package is maintained on the
-[`sniffcell-lite`](https://github.com/Fu-Yilei/SniffCell/tree/sniffcell-lite)
-branch.
+The lite package is maintained in the separate
+[`Fu-Yilei/SniffCell-lite`](https://github.com/Fu-Yilei/SniffCell-lite)
+repository.
 
 ## Install SniffCell
 
@@ -145,7 +145,7 @@ sniffcell-lite anno \
 
 `sniffcell-lite anno` also supports a `--batch variants.tsv` mode for
 annotating many variants at once. See the
-[sniffcell-lite branch README](https://github.com/Fu-Yilei/SniffCell/tree/sniffcell-lite)
+[SniffCell Lite README](https://github.com/Fu-Yilei/SniffCell-lite)
 for details.
 
 ## Main Commands
