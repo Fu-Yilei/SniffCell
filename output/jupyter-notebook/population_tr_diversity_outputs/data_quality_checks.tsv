@@ -1,9 +1,0 @@
-check	value	expected	status
-input files matched	87	> 0	PASS
-files loaded	87	87	PASS
-duplicate inferred sample IDs (rows in manifest)	0	0	PASS
-duplicate sample-site TR rows	0	0	PASS
-TR rows with missing site fields	0	0	PASS
-TR rows with invalid coordinates	0	0	PASS
-TR rows with non-positive/missing change_size_bp	0	0	PASS
-TR rows with unexpected category	0	0	PASS
