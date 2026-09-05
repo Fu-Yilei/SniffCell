@@ -1,7 +1,8 @@
 # Bioconda recipes
 
-Recipes for the published `sniffcell` and `sniffcell-lite` Python packages live
-under `recipes/`. Each uses a versioned release source archive and SHA-256 checksum,
+The recipe for the published `sniffcell` Python package lives under `recipes/`.
+The lite recipe is maintained in [SniffCell-lite](https://github.com/Fu-Yilei/SniffCell-lite/tree/main/bioconda/recipes/sniffcell-lite).
+Each uses a versioned release source archive and SHA-256 checksum,
 builds as `noarch: python`, and tests imports and command-line entry points.
 
 The packages share the `sniffcell` Python namespace. The reciprocal
@@ -19,12 +20,11 @@ With `conda-build` installed, run from the repository root:
 
 ```bash
 conda build --override-channels -c conda-forge -c bioconda bioconda/recipes/sniffcell
-conda build --override-channels -c conda-forge -c bioconda bioconda/recipes/sniffcell-lite
 ```
 
 ## Submit to Bioconda
 
-Copy the two recipe directories into `recipes/` in a checkout of
+Copy this recipe directory and the lite recipe from its repository into `recipes/` in a checkout of
 [`bioconda/bioconda-recipes`](https://github.com/bioconda/bioconda-recipes).
 Follow the [Bioconda contribution workflow](https://bioconda.github.io/contributor/workflow.html)
 to lint, build, and open a pull request. These files alone do not publish packages
