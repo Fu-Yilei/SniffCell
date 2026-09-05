@@ -83,6 +83,9 @@ performance with the 5hmC-compatible workflow, please
 
 ## Example Workflows
 
+For a runnable native-GRCh38 regional example with a bundled subset BAM and
+atlas, see the [SH3RF3 dual SV/TR wiki tutorial](https://github.com/Fu-Yilei/SniffCell/wiki/SH3RF3-Dual-SV-TR-Example).
+
 ### SniffCell: discover and annotate SVs/TRs from a BAM
 
 1. Call ctDMRs from an MDB atlas:
@@ -257,6 +260,18 @@ anno_out/
 
 For command-line options, run `sniffcell --help` or
 `sniffcell <command> --help` (for example, `sniffcell anno --help`).
+
+Full documentation is in the [GitHub Wiki](https://github.com/Fu-Yilei/SniffCell/wiki):
+
+| Page | Contents |
+|------|----------|
+| [Installation](https://github.com/Fu-Yilei/SniffCell/wiki/Installation) | PyPI, conda, Docker, and tool setup |
+| [SniffCell Lite](https://github.com/Fu-Yilei/SniffCell/wiki/SniffCell-Lite) | Annotating an existing callset with `sniffcell-lite` |
+| [Find Workflow](https://github.com/Fu-Yilei/SniffCell/wiki/Find-Workflow) | ctDMR discovery parameters |
+| [Methods](https://github.com/Fu-Yilei/SniffCell/wiki/Methods-Deconv-Discover-Anno) | Technical methods for core commands |
+| [CLI Reference](https://github.com/Fu-Yilei/SniffCell/wiki/CLI-Reference) | Command-line options |
+| [Test Examples](https://github.com/Fu-Yilei/SniffCell/wiki/Test-Examples) | Validation and QA examples |
+| [SH3RF3 dual SV/TR example](https://github.com/Fu-Yilei/SniffCell/wiki/SH3RF3-Dual-SV-TR-Example) | Native-GRCh38 regional BAM example from atlas through report |
 
 ## Citation
 

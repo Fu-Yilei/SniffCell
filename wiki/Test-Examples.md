@@ -2,6 +2,10 @@
 
 This page focuses on practical validation runs for `sniffcell` in real workflows.
 
+For a checked-in regional BAM and atlas subset that exercise the complete
+`find -> deconv -> discover -> anno -> viz -> report` workflow on native GRCh38,
+see the [SH3RF3 dual SV/TR example](SH3RF3-Dual-SV-TR-Example).
+
 ## 1. Quick Regression Tests (Developer)
 
 Run the full unit test suite:
