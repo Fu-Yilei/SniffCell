@@ -1,9 +1,8 @@
-# SniffCell
+# SniffCell — 5hmC-compatible branch
 
 [![PyPI version](https://img.shields.io/pypi/v/sniffcell.svg)](https://pypi.org/project/sniffcell/)
 [![Python](https://img.shields.io/badge/python-%3E%3D3.10-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Docs](https://img.shields.io/badge/Docs-Wiki-181717?logo=github)](https://github.com/Fu-Yilei/SniffCell/wiki)
 [![Issues](https://img.shields.io/badge/Issues-GitHub-red?logo=github)](https://github.com/Fu-Yilei/SniffCell/issues)
 
 SniffCell links somatic structural variants (SVs) and tandem-repeat (TR)
@@ -13,6 +12,9 @@ methylation. It calls cell-type-specific differentially methylated regions
 from long-read BAMs, extracts read-level methylation, and assigns each
 variant's supporting reads to the cell population whose methylation profile
 they match.
+
+This branch supports separate 5mC and 5hmC atlas signals for cell-type
+deconvolution.
 
 ## Which Package Should I Use?
 
@@ -41,14 +43,14 @@ pip install sniffcell-lite
 sniffcell-lite --help
 ```
 
-The lite package is maintained on the
-[`sniffcell-lite`](https://github.com/Fu-Yilei/SniffCell/tree/sniffcell-lite)
-branch.
+The lite package is maintained in the separate
+[`Fu-Yilei/SniffCell-lite`](https://github.com/Fu-Yilei/SniffCell-lite)
+repository.
 
 ## Install SniffCell
 
 ```bash
-pip install sniffcell
+pip install "git+https://github.com/Fu-Yilei/SniffCell.git@5hmC_compatitible_atlas"
 ```
 
 For the full external-tool environment:
@@ -56,11 +58,28 @@ For the full external-tool environment:
 ```bash
 micromamba env create -f environment.yml
 micromamba activate sniffcell
-pip install sniffcell
+pip install "git+https://github.com/Fu-Yilei/SniffCell.git@5hmC_compatitible_atlas"
 ```
 
-See the [Installation wiki](https://github.com/Fu-Yilei/SniffCell/wiki/Installation)
-for Docker, optional tools, and manual setup.
+## Methylation Atlases
+
+Download the processed methylation atlas inputs and precomputed cell-type-specific
+differentially methylated regions (ctDMRs) from
+[Zenodo](https://zenodo.org/records/22003085). For the legacy NumPy `find` interface, place
+`all_celltypes_blocks.npy`, `all_celltypes_blocks.index.gz`,
+`index_to_major_celltypes.json`, and `all_celltypes.txt` in the `atlas/` directory.
+Precomputed ctDMR tables are available for brain/cerebellum, PBMC, lung, liver,
+pancreas, kidney, breast, and colon, and can be supplied directly to `deconv`
+or `anno` with `-b` instead of running `find`.
+
+To discuss tissue-specific atlases, additional tissues or cell types, or custom
+atlas support, please [open a GitHub issue](https://github.com/Fu-Yilei/SniffCell/issues)
+or [email us](mailto:yilei.fu@bcm.edu).
+
+**Restricted 5hmC data:** The 5hmC signal used in the paper is subject to
+access restrictions. For access inquiries and guidance on achieving better
+performance with the 5hmC-compatible workflow, please
+[email us](mailto:yilei.fu@bcm.edu).
 
 ## Example Workflows
 
@@ -84,9 +103,10 @@ sniffcell find \
 path.
 
 See the [custom MDB atlas Wiki tutorial](https://github.com/Fu-Yilei/SniffCell/wiki/Build-a-Custom-MDB-Atlas-from-bedMethyl)
-for the complete bedMethyl-to-ctDMR workflow. The brain modifiedC/5mC/5hmC
-super-union catalog is distributed as
-`atlas/brain_cereb.dual_5mc_5hmc.ctdmr.tsv.gz`.
+for the complete bedMethyl-to-ctDMR workflow. Use an atlas with separate 5mC
+and 5hmC assays and matching cell-type metadata; replace the example MDB and
+metadata paths with your own inputs. See the access note above for the 5hmC
+signal used in the paper.
 
 2. Split the BAM into cell-type groups using those ctDMRs:
 
@@ -94,10 +114,10 @@ super-union catalog is distributed as
 sniffcell deconv \
   -i sample.bam \
   -r ref.fa \
-  -b atlas/brain_cereb.dual_5mc_5hmc.ctdmr.tsv.gz \
+  -b brain_dual_ctdmr.tsv \
   -o deconv_out \
   --bam-modification auto \
-  --split_bam_groups "Lymphoid=T-cell,NK-cell,B-cell;Myeloid=Monocyte" \
+  --split_bam_groups "Neuron=Neuron;Oligodendrocyte=Oligodendrocyte" \
   -t 8
 ```
 
@@ -134,7 +154,7 @@ sniffcell anno \
   -i sample.bam \
   -v deconv_out/deconv_requested_group_splits/discover/run1/harmonized_variants.tsv \
   -r ref.fa \
-  -b pbmc_ctdmr.tsv \
+  -b brain_dual_ctdmr.tsv \
   -o anno_out \
   -t 8
 ```
@@ -167,7 +187,7 @@ sniffcell-lite anno \
 
 `sniffcell-lite anno` also supports a `--batch variants.tsv` mode for
 annotating many variants at once. See the
-[sniffcell-lite branch README](https://github.com/Fu-Yilei/SniffCell/tree/sniffcell-lite)
+[SniffCell Lite README](https://github.com/Fu-Yilei/SniffCell-lite)
 for details.
 
 ## Main Commands
@@ -192,14 +212,14 @@ for details.
 | Variants | VCF / VCF.GZ, harmonized TSV from `discover`, or a variant + supporting-read names (`sniffcell-lite`) | `anno`, `dmsv`, `viz`, `report` |
 | Reference genome | FASTA plus index | `anno`, `deconv`, `discover`, `dmsv`, `viz` |
 | ctDMR table | TSV from `sniffcell find` | `anno`, `deconv`, `viz` |
-| Methylation atlas | MDB atlas (preferred), or legacy NumPy matrix plus CpG index and metadata | `find` |
+| Methylation atlas | MDB atlas with separate assay views, or legacy NumPy matrix, CpG index, and metadata | `find` |
 
 ## Outputs
 
 A `find -> deconv -> discover -> anno -> report` run produces:
 
 ```text
-pbmc_ctdmr.tsv
+brain_dual_ctdmr.tsv
 deconv_out/
   deconv_summary.tsv
   deconv_reads_classification.tsv
@@ -235,26 +255,16 @@ anno_out/
 
 ## Documentation
 
-Full documentation is in the [GitHub Wiki](https://github.com/Fu-Yilei/SniffCell/wiki):
-
-| Page | Contents |
-|------|----------|
-| [Installation](https://github.com/Fu-Yilei/SniffCell/wiki/Installation) | PyPI, conda, Docker, and tool setup |
-| [SniffCell Lite](https://github.com/Fu-Yilei/SniffCell/wiki/SniffCell-Lite) | Annotating an existing callset with `sniffcell-lite` |
-| [Find Workflow](https://github.com/Fu-Yilei/SniffCell/wiki/Find-Workflow) | ctDMR discovery parameters |
-| [Methods](https://github.com/Fu-Yilei/SniffCell/wiki/Methods-Deconv-Discover-Anno) | Technical methods for core commands |
-| [CLI Reference](https://github.com/Fu-Yilei/SniffCell/wiki/CLI-Reference) | Command-line options |
-| [Test Examples](https://github.com/Fu-Yilei/SniffCell/wiki/Test-Examples) | Validation and QA examples |
+For command-line options, run `sniffcell --help` or
+`sniffcell <command> --help` (for example, `sniffcell anno --help`).
 
 ## Citation
 
 If you use SniffCell in your research, please cite:
 
-> **SniffCell: cell-type annotation of somatic structural variants using long-read methylation**
-> Yilei Fu et al. *(manuscript in preparation)*
+> **[Cell-type-resolved somatic variant discovery from bulk long-read sequencing](https://www.medrxiv.org/content/10.64898/2026.09.01.26361966v1)**
+> Yilei Fu et al. *medRxiv preprint (2026).* DOI: 10.64898/2026.09.01.26361966.
 
 ## License
 
 MIT License. See [LICENSE](LICENSE) for details.
-
-Developed at Baylor College of Medicine by [Yilei Fu](mailto:yilei.fu@bcm.edu).
