@@ -58,6 +58,21 @@ micromamba activate sniffcell
 pip install sniffcell
 ```
 
+## Methylation Atlases
+
+Download the processed methylation atlas inputs and precomputed cell-type-specific
+differentially methylated regions (ctDMRs) from
+[Zenodo](https://zenodo.org/records/22003085). For the `find` example below, place
+`all_celltypes_blocks.npy`, `all_celltypes_blocks.index.gz`,
+`index_to_major_celltypes.json`, and `all_celltypes.txt` in the `atlas/` directory.
+Precomputed ctDMR tables are available for brain/cerebellum, PBMC, lung, liver,
+pancreas, kidney, breast, and colon, and can be supplied directly to `deconv`
+or `anno` with `-b` instead of running `find`.
+
+To discuss tissue-specific atlases, additional tissues or cell types, or custom
+atlas support, please [open a GitHub issue](https://github.com/Fu-Yilei/SniffCell/issues)
+or [email us](mailto:yilei.fu@bcm.edu).
+
 ## Example Workflows
 
 ### SniffCell: discover and annotate SVs/TRs from a BAM
@@ -264,8 +279,8 @@ For command-line options, run `sniffcell --help` or
 
 If you use SniffCell in your research, please cite:
 
-> **SniffCell: cell-type annotation of somatic structural variants using long-read methylation**
-> Yilei Fu et al. *(manuscript in preparation)*
+> **[Cell-type-resolved somatic variant discovery from bulk long-read sequencing](https://www.medrxiv.org/content/10.64898/2026.09.01.26361966v1)**
+> Yilei Fu et al. *medRxiv preprint (2026).* DOI: 10.64898/2026.09.01.26361966.
 
 ## License
 
