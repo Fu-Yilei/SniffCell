@@ -3,7 +3,6 @@
 [![PyPI version](https://img.shields.io/pypi/v/sniffcell.svg)](https://pypi.org/project/sniffcell/)
 [![Python](https://img.shields.io/badge/python-%3E%3D3.10-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Docs](https://img.shields.io/badge/Docs-Wiki-181717?logo=github)](https://github.com/Fu-Yilei/SniffCell/wiki)
 [![Issues](https://img.shields.io/badge/Issues-GitHub-red?logo=github)](https://github.com/Fu-Yilei/SniffCell/issues)
 
 SniffCell links somatic structural variants (SVs) and tandem-repeat (TR)
@@ -58,9 +57,6 @@ micromamba env create -f environment.yml
 micromamba activate sniffcell
 pip install sniffcell
 ```
-
-See the [Installation wiki](https://github.com/Fu-Yilei/SniffCell/wiki/Installation)
-for Docker, optional tools, and manual setup.
 
 ## Example Workflows
 
@@ -215,18 +211,54 @@ anno_out/
   anno_compact_manifest.json
 ```
 
+### Discovery VCF exports
+
+`sniffcell discover tools run` automatically exports matching caller records
+beside `harmonized_variants.tsv`, when the corresponding source VCFs exist:
+
+```text
+harmonized_variants.sv.vcf.gz
+harmonized_variants.tr.<group>.vcf.gz
+harmonized_variants.snv.<group>.vcf.gz
+```
+
+Each VCF is coordinate-sorted, BGZF-compressed, and tabix-indexed. SV records
+come from the joint Sniffles/Truvari/Kanpig postprocessing VCF; TR records come
+from each group's TRGT VCF; SNV records come from each group's Clair3 pileup
+VCF used for comparison. Original caller alleles, genotypes, quality, and
+filters are retained. These are subsets, not copies of the full callsets.
+
+Additional INFO fields describe the SniffCell evidence:
+
+| INFO field | Meaning |
+|------------|---------|
+| `SC_ID`, `SC_ROW` | Harmonized variant ID and one-based data-row number |
+| `SC_CLASS`, `SC_SUBTYPE` | Variant class and change subtype |
+| `SC_CATEGORY` | `group_a_only`, `group_b_only`, `shared`, or `unknown` |
+| `SC_GROUP_A`, `SC_GROUP_B` | Actual comparison-group labels |
+| `SC_TARGET_GROUP` | Group carrying the candidate change; absent for shared/unknown calls |
+| `SC_SUPPORT_A`, `SC_SUPPORT_B` | Support counts from the harmonized TSV |
+| `SC_CHANGE_BP` | SniffCell change size; for TRs, a between-group difference |
+
+String values are percent-encoded so composite cell-type labels remain intact.
+These annotations identify **split-BAM group-specific candidates**, not
+methylation-confirmed assignments from `anno`. Zero support does not establish
+reference genotype or coverage. For TRs, annotations describe a locus-level
+change, not necessarily a particular TRGT ALT allele; `SC_CHANGE_BP` is not
+reference-relative `SVLEN`. Multiple harmonized changes at one locus yield
+separate annotated copies, distinguished by `SC_ROW`.
+
+Missing source records are not reconstructed. Export paths, counts, and
+unmatched data-row numbers are recorded in `harmonized_variants_manifest.json`,
+with warnings for missing matches. Medaka-only TR runs currently have no TRGT
+VCF export. An opposite-group SNV record may be absent even when the target
+group has a matching call. These VCFs preserve caller genotypes rather than
+inferring somatic genotypes; they are not somatic truth sets.
+
 ## Documentation
 
-Full documentation is in the [GitHub Wiki](https://github.com/Fu-Yilei/SniffCell/wiki):
-
-| Page | Contents |
-|------|----------|
-| [Installation](https://github.com/Fu-Yilei/SniffCell/wiki/Installation) | PyPI, conda, Docker, and tool setup |
-| [SniffCell Lite](https://github.com/Fu-Yilei/SniffCell/wiki/SniffCell-Lite) | Annotating an existing callset with `sniffcell-lite` |
-| [Find Workflow](https://github.com/Fu-Yilei/SniffCell/wiki/Find-Workflow) | ctDMR discovery parameters |
-| [Methods](https://github.com/Fu-Yilei/SniffCell/wiki/Methods-Deconv-Discover-Anno) | Technical methods for core commands |
-| [CLI Reference](https://github.com/Fu-Yilei/SniffCell/wiki/CLI-Reference) | Command-line options |
-| [Test Examples](https://github.com/Fu-Yilei/SniffCell/wiki/Test-Examples) | Validation and QA examples |
+For command-line options, run `sniffcell --help` or
+`sniffcell <command> --help` (for example, `sniffcell anno --help`).
 
 ## Citation
 
