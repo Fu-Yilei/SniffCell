@@ -37,9 +37,8 @@ source distribution, then reset the build number to zero. Check dependencies,
 entry points, and the license in that release's archive; they may differ from
 the current upstream branch.
 
-SniffCell 0.9.7 uses the GitHub release source distribution because the PyPI
-upload was rejected by its trusted-publisher configuration. SniffCell-lite 0.9.7
-uses PyPI.
+Both SniffCell 0.9.7 and SniffCell-lite 0.9.7 use verified PyPI source
+distributions.
 
 Validation: source checksums, rendered YAML, source installation, Python imports,
 and all listed CLI help tests were checked locally. A full Conda build and

@@ -6,7 +6,7 @@ package:
   version: {{ version }}
 
 source:
-  url: https://github.com/Fu-Yilei/SniffCell/releases/download/v{{ version }}/sniffcell-{{ version }}.tar.gz
+  url: https://pypi.org/packages/source/s/{{ name }}/sniffcell-{{ version }}.tar.gz
   sha256: c22dde9e12c01261b159a75de174fadac0dbd1c6bd5b965cebc2b677f64ed8bd
 
 build:
