@@ -165,6 +165,12 @@ def parse_args(argv):
         action="version",
         version=f"sniffcell {version}"
     )
+    parser.add_argument(
+        "--old-name",
+        action="version",
+        version="Once upon a time, I was SniffMeth.",
+        help=argparse.SUPPRESS,
+    )
     subparsers = parser.add_subparsers(dest="command", required=True)
     valid_commands = ["find", "regions", "deconv", "discover", "anno", "svanno", "dmsv", "viz", "igvviz", "report"]
     # Subcommand: find
@@ -948,7 +954,7 @@ def parse_args(argv):
         ),
     )
 
-    top_level_passthrough = {"-h", "--help", "-v", "--version"}
+    top_level_passthrough = {"-h", "--help", "-v", "--version", "--old-name"}
 
     if len(argv) == 0:
         parser.print_help(sys.stderr)
