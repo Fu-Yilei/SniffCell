@@ -13,7 +13,8 @@ import pandas as pd
 import pysam
 
 from sniffcell.anno.anno import _normalize_supporting_read_names
-from sniffcell.anno.methyl_matrix import methyl_matrix_from_bam
+from sniffcell.anno.methyl_matrix import methyl_matrix_from_bam, normalize_modification_label
+from . import assay
 from sniffcell.anno.variant_assignment import (
     _build_group_leaf_sets,
     _decode_linked_celltypes_from_row,
@@ -340,6 +341,7 @@ def _resolve_viz_runtime_inputs(args, logger: logging.Logger) -> dict:
         "assignment_window": assignment_window,
         "prescreened_assignment_rows": bool(lite_runtime_path),
         "kanpig_read_names": getattr(args, "kanpig_read_names", None),
+        "per_read_min_agreement": float(manifest_runtime.get("per_read_min_agreement", .66)),
     }
 
 
@@ -597,6 +599,9 @@ def _load_ctdmr_table_cached(bed_path: str) -> pd.DataFrame:
     dmrs = dmrs.sort_values(["chr_norm", "start", "end"], kind="stable", ignore_index=True)
     mean_cols = [c for c in dmrs.columns if isinstance(c, str) and c.startswith("mean_")]
     keep_cols = cols + ["label", "chr_norm"] + [c for c in mean_cols if c not in cols]
+    if 'modification' in dmrs:
+        dmrs['modification'] = dmrs['modification'].map(normalize_modification_label)
+        keep_cols += ['modification']
     return dmrs[keep_cols]
 
 
@@ -777,6 +782,8 @@ def _decode_read_assignment_rows(evidence: pd.DataFrame) -> pd.DataFrame:
         "code",
         "code_order",
     ]
+    if 'modification' in evidence:
+        cols += ['modification']
     if evidence.empty:
         return pd.DataFrame(columns=cols)
 
@@ -793,6 +800,7 @@ def _decode_read_assignment_rows(evidence: pd.DataFrame) -> pd.DataFrame:
         rows.append(
             {
                 "read_name": str(row_s.get("read_name", "")),
+                **({"modification": row_s.get("modification")} if "modification" in evidence else {}),
                 "chr": str(row_s.get("chr", "")),
                 "chr_norm": _norm_chr(row_s.get("chr", "")),
                 "start": int(row_s.get("start")),
@@ -1059,6 +1067,8 @@ def _build_linked_ctdmr_callouts(
         "callout_assigned_celltypes",
         "callout_distance_bp",
     ]
+    assay_keys = ['modification'] if 'modification' in decoded_assignment_df else []
+    base_cols += assay_keys
     if decoded_assignment_df.empty:
         return pd.DataFrame(columns=base_cols)
 
@@ -1086,7 +1096,7 @@ def _build_linked_ctdmr_callouts(
         return pd.DataFrame(columns=base_cols)
 
     region_counts = (
-        selected.groupby(["chr", "chr_norm", "start", "end"], sort=False)
+        selected.groupby(["chr", "chr_norm", "start", "end"] + assay_keys, sort=False)
         .agg(
             callout_support_count=("read_name", lambda s: int(pd.Index(s.astype(str)).nunique())),
             callout_support_reads=("read_name", lambda s: "|".join(sorted(pd.Index(s.astype(str)).unique()))),
@@ -1121,7 +1131,7 @@ def _build_linked_ctdmr_callouts(
 
     merged = full_dmrs.merge(
         region_counts,
-        on=["chr", "chr_norm", "start", "end"],
+        on=["chr", "chr_norm", "start", "end"] + [c for c in assay_keys if c in full_dmrs],
         how="inner",
     )
     if merged.empty:
@@ -1148,7 +1158,7 @@ def _build_linked_ctdmr_callouts(
             remainder = merged.loc[~merged.index.isin(kept.index)].head(max_callouts - len(kept))
             kept = pd.concat([kept, remainder], ignore_index=True)
         merged = kept.drop_duplicates(
-            subset=["chr", "start", "end", "callout_side"],
+            subset=["chr", "start", "end", "callout_side"] + assay_keys,
             keep="first",
             ignore_index=True,
         )
@@ -1273,7 +1283,15 @@ def _assign_ctdmr_label_lanes(
     return assigned, max(1, len(lane_end_positions))
 
 
-def _compute_supporting_read_ctdmr_methylation(
+def _compute_supporting_read_ctdmr_methylation(**kwargs):
+    if assay.has_separate_assays(kwargs['dmrs']):
+        if kwargs['support_assignment_df'].empty or kwargs['dmrs'].empty or not kwargs['reference_path']:
+            return pd.DataFrame()
+        return assay.extract_assay_means(**kwargs)
+    return _compute_legacy_read_ctdmr_methylation(**kwargs)
+
+
+def _compute_legacy_read_ctdmr_methylation(
     *,
     sv_id: str,
     bam_path: str,
@@ -1530,7 +1548,13 @@ def _reference_celltype_mean_columns(dmrs: pd.DataFrame) -> list[str]:
     return all_cols
 
 
-def _plot_sv_panel(
+def _plot_sv_panel(**kwargs):
+    if assay.has_separate_assays(kwargs['dmrs']) or assay.has_separate_assays(kwargs['linked_ctdmr_callouts']):
+        return assay.plot_assay_panel(**kwargs)
+    return _plot_legacy_sv_panel(**kwargs)
+
+
+def _plot_legacy_sv_panel(
     *,
     sv: dict,
     shown_reads: pd.DataFrame,
@@ -1547,6 +1571,9 @@ def _plot_sv_panel(
     output_path: Path,
     dpi: int,
     applied_support_haplotype: int | None = None,
+    _return_axes: bool = False,
+    _read_spacing: float = 1.,
+    _assigned_support_color: str = "#d62728",
 ) -> None:
     try:
         import matplotlib.pyplot as plt
@@ -1664,6 +1691,7 @@ def _plot_sv_panel(
         ax_reads.set_ylim(0, 1)
     else:
         for i, row in enumerate(shown_reads.itertuples(index=False), start=1):
+            i *= _read_spacing
             read_name = str(row.read_name)
             r_start = int(row.start)
             r_end = int(row.end)
@@ -1674,7 +1702,7 @@ def _plot_sv_panel(
                 status = assign_status_map.get(read_name, "assigned")
                 is_assigned = bool(assign_map.get(read_name, status == "assigned"))
                 if is_assigned:
-                    color = "#d62728"
+                    color = _assigned_support_color
                     marker = ">"
                     linestyle = "-"
                 elif status.startswith("unassigned"):
@@ -1913,6 +1941,7 @@ def _plot_sv_panel(
             group_start_y: int | None = None
             prev_y: int | None = None
             for y, row in enumerate(shown_reads.itertuples(index=False), start=1):
+                y *= _read_spacing
                 label = str(getattr(row, "haplotype_label", "unphased"))
                 if prev_label is None:
                     prev_label = label
@@ -1954,7 +1983,7 @@ def _plot_sv_panel(
                     clip_on=False,
                     zorder=12,
                 )
-        ax_reads.set_ylim(0, len(shown_reads) + 1)
+        ax_reads.set_ylim(0, (len(shown_reads) + 1) * _read_spacing)
 
     ax_reads.set_ylabel("Reads", fontsize=axis_label_size)
     ax_reads.set_yticks([])
@@ -2398,6 +2427,10 @@ def _plot_sv_panel(
             labelspacing=0.4,
         )
 
+    if _return_axes:
+        return fig, ax_reads, ax_dmrs, read_track_map
+    if shown_reads.attrs.get('excluded_read_count', 0):
+        fig.text(.01, .005, f"Display-only exclusion: {shown_reads.attrs['excluded_read_count']} read(s); calls unchanged", fontsize=9)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(output_path, dpi=int(dpi), bbox_inches="tight")
     plt.close(fig)
@@ -2419,9 +2452,9 @@ def viz_main(args) -> None:
         raise ValueError("indel_min_bp must be >= 0")
     skip_methylation_overlay = bool(getattr(args, "skip_methylation_overlay", False))
     support_haplotype_only = bool(getattr(args, "support_haplotype_only", True))
-    linked_ctdmr_mode = str(getattr(args, "linked_ctdmr_mode", "distal")).strip().lower()
-    if linked_ctdmr_mode not in {"distal", "extend", "strict"}:
-        raise ValueError("linked_ctdmr_mode must be one of: distal, extend, strict")
+    linked_ctdmr_mode = str(getattr(args, "linked_ctdmr_mode", "auto")).strip().lower()
+    if linked_ctdmr_mode not in {"auto", "genomic", "distal", "extend", "strict"}:
+        raise ValueError("linked_ctdmr_mode must be one of: auto, genomic, distal, extend, strict")
 
     resolved = _resolve_viz_runtime_inputs(args, logger)
     window = int(resolved["window"])
@@ -2440,8 +2473,17 @@ def viz_main(args) -> None:
         window,
         int(resolved["assignment_window"]),
     )
-    sv = _get_sv_payload(resolved["vcf_path"], args.sv_id)
+    sv = dict(_get_sv_payload(resolved["vcf_path"], args.sv_id))
+    full_dmrs = _load_ctdmr_table_cached(_path_cache_key(resolved['bed_path'])) if resolved['bed_path'] else pd.DataFrame()
+    separate_assays = assay.has_separate_assays(full_dmrs)
+    if linked_ctdmr_mode == 'auto':
+        linked_ctdmr_mode = 'genomic' if separate_assays else 'distal'
+    # Separate-assay views keep reference evidence on the genomic track.
+    if separate_assays and linked_ctdmr_mode == 'distal':
+        linked_ctdmr_mode = 'genomic'
 
+    if getattr(args, 'sample_label', None):
+        sv['sample_label'] = str(args.sample_label)
     override_support = _load_kanpig_supporting_reads(resolved["kanpig_read_names"], args.sv_id)
     if override_support:
         sv["supporting_reads"] = override_support
@@ -2449,6 +2491,10 @@ def viz_main(args) -> None:
     region_start = max(0, int(sv["start"]) - window)
     region_end = int(sv["end"]) + window
 
+    if linked_ctdmr_mode == 'genomic':
+        n_flanking = int(getattr(args, 'flanking_ctdmrs', 6))
+        bounds = assay.genomic_window(full_dmrs, sv['chrom'], int(sv['start']), int(sv['end']), n_flanking)
+        region_start, region_end = min(region_start, bounds[0]), max(region_end, bounds[1])
     assignment_df = _load_read_assignment_table(resolved["read_assignment_path"])
     sv_assignment_row = _get_sv_assignment_row(resolved["sv_assignment_path"], str(sv["id"]))
     support_assignment_df, decoded_assignment_df = _summarize_supporting_read_assignments(
@@ -2464,6 +2510,18 @@ def viz_main(args) -> None:
         clip_to_region=False,
         prescreened_assignment_rows=bool(resolved.get("prescreened_assignment_rows", False)),
     )
+
+    if separate_assays and (not assignment_df.empty or getattr(args, 'read_summary', None)):
+        summary_path = getattr(args, 'read_summary', None)
+        if not summary_path and resolved['read_assignment_path']:
+            candidate = Path(resolved['read_assignment_path']).with_name('deconv_read_summary.tsv')
+            if candidate.exists():
+                summary_path = str(candidate)
+        evidence, _ = _collect_supporting_assignment_evidence(
+            assignment_df, set(sv['supporting_reads']), sv['chrom'], int(sv['start']), int(sv['end']),
+            int(resolved['assignment_window']), prescreened_assignment_rows=resolved['prescreened_assignment_rows'])
+        consensus = assay.read_consensus(evidence, summary_path, resolved['per_read_min_agreement'])
+        support_assignment_df = assay.apply_consensus(support_assignment_df, consensus)
 
     linked_ctdmr_candidates = _build_linked_ctdmr_callouts(
         bed_path=resolved["bed_path"],
@@ -2498,6 +2556,14 @@ def viz_main(args) -> None:
         support_haplotype_only=support_haplotype_only,
     )
     applied_support_haplotype = shown_reads.attrs.get("applied_support_haplotype")
+    exclude_path = getattr(args, 'exclude_read_names', None)
+    if exclude_path:
+        excluded = {line.strip() for line in Path(exclude_path).read_text().splitlines() if line.strip()}
+        count = int(shown_reads.read_name.isin(excluded).sum())
+        shown_reads = shown_reads[~shown_reads.read_name.isin(excluded)].copy()
+        shown_reads.attrs['excluded_read_count'] = count
+        support_assignment_df['display_excluded'] = support_assignment_df.read_name.isin(excluded)
+        logger.info('Display-only exclusion: %d reads; variant calls unchanged', count)
     large_indels = _fetch_large_indels(
         resolved["bam_path"],
         sv["chrom"],
@@ -2513,6 +2579,8 @@ def viz_main(args) -> None:
         overlap_summary = _summarize_ctdmr_overlap(dmrs, all_reads, int(sv["start"]), int(sv["end"]))
     else:
         overlap_summary = pd.DataFrame()
+    if export_tables and 'modification' in dmrs and len(overlap_summary) == len(dmrs):
+        overlap_summary['modification'] = dmrs.modification.to_numpy()
     methyl_dmrs = dmrs.copy()
     if not linked_ctdmr_callouts.empty:
         if methyl_dmrs.empty:
@@ -2524,7 +2592,7 @@ def viz_main(args) -> None:
                 sort=False,
             )
         methyl_dmrs = methyl_dmrs.drop_duplicates(
-            subset=["chr", "start", "end"],
+            subset=assay.marker_columns(methyl_dmrs),
             keep="first",
             ignore_index=True,
         )
@@ -2606,6 +2674,8 @@ def viz_main(args) -> None:
                     "callout_distance_bp",
                 ]
             ].copy()
+            if 'modification' in linked_ctdmr_callouts:
+                callout_summary['modification'] = linked_ctdmr_callouts.modification.to_numpy()
             callout_summary = callout_summary.rename(columns={"callout_support_count": "supporting_read_overlap_count"})
             callout_summary["non_supporting_read_overlap_count"] = 0
             callout_summary["read_overlap_count"] = callout_summary["supporting_read_overlap_count"]

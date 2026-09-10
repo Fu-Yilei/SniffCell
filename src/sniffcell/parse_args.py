@@ -676,16 +676,24 @@ def parse_args(argv):
     )
     viz_parser.add_argument(
         "--linked_ctdmr_mode",
-        choices=["distal", "extend", "strict"],
-        default="distal",
+        choices=["auto", "genomic", "distal", "extend", "strict"],
+        default="auto",
         help=(
             "How to handle winning linked ctDMRs outside the local display window: "
             "distal=show side callouts with dashed extensions; "
             "extend=expand to the nearest informative linked ctDMR; "
             "strict=keep the requested window and ignore off-window linked ctDMRs. "
-            "default=distal"
+            "auto (default)=genomic for separate-assay atlases, legacy distal otherwise. "
+            "genomic=include nearby ctDMRs on the bottom genomic track. Separate-assay distal also uses genomic tracks."
         ),
     )
+    viz_parser.add_argument('--flanking_ctdmrs', type=int, default=6,
+                            help='Nearest distinct intervals per variant side for genomic mode (default: 6).')
+    viz_parser.add_argument('--sample_label', default=None, help='Optional sample label printed in the figure title.')
+    viz_parser.add_argument('--read_summary', default=None,
+                            help='Saved deconv read-consensus TSV for assay-aware labels; auto-detects beside read assignments.')
+    viz_parser.add_argument('--exclude_read_names', default=None,
+                            help='Display-only exclusion file, one read ID per line; omission count is printed on the figure. Calls are unchanged.')
     viz_parser.add_argument(
         "--no_distal_ctdmr_callouts",
         dest="linked_ctdmr_mode",

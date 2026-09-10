@@ -57,6 +57,8 @@ pip install 'sniffcell==0.9.8a1'
 
 See the [release notes](https://github.com/Fu-Yilei/SniffCell/releases/tag/v0.9.8a1)
 and the **[benchmark blog, bar plots, and implementation details](https://github.com/Fu-Yilei/SniffCell-analysis/blob/5hmc/analyses/06_06_heldout_validation/BLOG_UPDATE.md)**.
+**New on this branch:** [5hmC-aware viz/report and the bmsa FGF14 example](docs/5hmc-visualization.md) now show proportional m/h ctDMR boxes on genomic tracks. This display update is newer than the published alpha wheel.
+
 The blog evaluates a three-donor atlas with bcontrol1 held out; the downloadable
 atlas uses all four donors. This is an early-testing release.
 
