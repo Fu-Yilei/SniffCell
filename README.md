@@ -61,6 +61,8 @@ micromamba activate sniffcell
 pip install "git+https://github.com/Fu-Yilei/SniffCell.git@5hmC_compatitible_atlas"
 ```
 
+For a versioned test release, see [the prerelease procedure](docs/5hmc-prerelease.md). No alpha tag is published by a branch push.
+
 ## Methylation Atlases
 
 Download the processed methylation atlas inputs and precomputed cell-type-specific
@@ -76,10 +78,13 @@ To discuss tissue-specific atlases, additional tissues or cell types, or custom
 atlas support, please [open a GitHub issue](https://github.com/Fu-Yilei/SniffCell/issues)
 or [email us](mailto:yilei.fu@bcm.edu).
 
-**Restricted 5hmC data:** The 5hmC signal used in the paper is subject to
-access restrictions. For access inquiries and guidance on achieving better
+**Underlying 5hmC data:** Raw 5hmC inputs used in the paper remain subject to
+access restrictions. The derived four-donor scoring catalog is available in
+[the 5hmC atlas directory](atlases/5hmc/README.md). For access inquiries and guidance on achieving better
 performance with the 5hmC-compatible workflow, please
 [email us](mailto:yilei.fu@bcm.edu).
+
+The [held-out benchmark and implementation update](https://github.com/Fu-Yilei/SniffCell-analysis/blob/5hmc/analyses/06_06_heldout_validation/BLOG_UPDATE.md) reports precision and recall on identical FANS reads.
 
 ## Example Workflows
 
@@ -89,12 +94,12 @@ performance with the 5hmC-compatible workflow, please
 
 ```bash
 sniffcell find \
-  -n atlas/all_celltypes_blocks.npy \
-  -i atlas/all_celltypes_blocks.index.gz \
-  -cf atlas/index_to_major_celltypes.json \
-  -m atlas/all_celltypes.txt \
-  -ck pbmc \
-  -o pbmc_ctdmr.tsv
+  --mdb combined_loyfer_ont.mmdb \
+  --assay dual \
+  -cf atlas/celltypes.json \
+  -ck brain_cereb_ont \
+  -o brain_dual_ctdmr.tsv \
+  --diff_threshold 0.40
 ```
 
 `--assay dual` calls separate 5mC and 5hmC views and records the assay in the
@@ -323,4 +328,4 @@ If you use SniffCell in your research, please cite:
 
 ## License
 
-MIT License. See [LICENSE](LICENSE) for details.
+Apache License 2.0. See [LICENSE](LICENSE) for details.

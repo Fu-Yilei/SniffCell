@@ -1,0 +1,41 @@
+{
+  "catalog": "brain_cereb.paper_backbone_plus_5mc_5hmc.four_donors.ctdmr.tsv.gz",
+  "sha256": "4307930ee9812634f6e11913152fbc4df45ecd2b511203a0b2b6335b50c533dd",
+  "rows": 489972,
+  "rows_by_modification": {
+    "modifiedC": 152961,
+    "5mC": 194662,
+    "5hmC": 142349
+  },
+  "donors": [
+    "bcontrol1",
+    "bcontrol2",
+    "bmsa",
+    "bparkinsons"
+  ],
+  "heldout_donor": null,
+  "reference_build": "GRCh38",
+  "policy": "Paper backbone preserved; add ONT markers only outside backbone; separate m and h scoring rows",
+  "inputs": [
+    {
+      "filename": "brain_cereb.maxgap3000_dt04.ctdmr.tsv",
+      "sha256": "b0500774579703c58b37bf1bfc1e4a9ce7b4c772bb93f3466da1a18eb2943631"
+    },
+    {
+      "filename": "brain_cereb.5mc_ont_paired.dt04_rows1_cpg3_gap3000.ctdmr.tsv",
+      "sha256": "1483e08765453810552e9ec62dcd49f6043a1e95a0c2ba4fa66fd817e3cc5c88"
+    },
+    {
+      "filename": "brain_cereb.5hmc_ont_paired.dt04_rows1_cpg3_gap3000.ctdmr.tsv",
+      "sha256": "0f55d6f3ca586552fe3e8a28e4368027d5aba9892400e40e612aab0e624f7f78"
+    }
+  ],
+  "paired_filter": {
+    "donors": 4,
+    "min_support": 3,
+    "support_effect": 0.3,
+    "min_effect": 0.15,
+    "median_effect": 0.4
+  },
+  "validation_scope": "Catalog structure and exact original backbone fields checked; benchmark uses a separate bcontrol1-held-out three-donor atlas"
+}

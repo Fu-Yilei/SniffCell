@@ -11,6 +11,8 @@ permissions:
 jobs:
   build:
     name: Build distributions
+    outputs:
+      prerelease: ${{ steps.release.outputs.prerelease }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,6 +26,26 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install --upgrade build twine
+
+      - name: Validate release version and classify prerelease
+        id: release
+        run: |
+          python - <<'PYVERSION'
+          import ast, configparser, os
+          from pathlib import Path
+          from packaging.version import Version
+          config = configparser.ConfigParser()
+          config.read("setup.cfg")
+          package_version = Version(config["metadata"]["version"])
+          tag_version = Version(os.environ["GITHUB_REF_NAME"].removeprefix("v"))
+          module = ast.parse(Path("src/sniffcell/__init__.py").read_text())
+          source_version = next(ast.literal_eval(node.value) for node in module.body
+                                if isinstance(node, ast.Assign)
+                                and any(isinstance(t, ast.Name) and t.id == "__version__" for t in node.targets))
+          assert tag_version == package_version == Version(source_version), "Tag and package versions differ"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"prerelease={str(tag_version.is_prerelease).lower()}\n")
+          PYVERSION
 
       - name: Build sdist and wheel
         run: python -m build
@@ -61,7 +83,7 @@ jobs:
 
   docker:
     name: Build & Push Docker (GHCR)
-    needs: [publish]
+    needs: [build, publish]
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -99,11 +121,11 @@ jobs:
             VERSION=${{ steps.version.outputs.VERSION }}
           tags: |
             ${{ steps.img.outputs.IMAGE }}:${{ steps.version.outputs.VERSION }}
-            ${{ steps.img.outputs.IMAGE }}:latest
+            ${{ needs.build.outputs.prerelease == 'false' && format('{0}:latest', steps.img.outputs.IMAGE) || '' }}
 
   github_release:
     name: Create GitHub Release
-    needs: [publish]
+    needs: [build, publish]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -120,5 +142,7 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: SniffCell ${{ github.ref_name }}
           generate_release_notes: true
+          prerelease: ${{ needs.build.outputs.prerelease == 'true' }}
+          make_latest: ${{ needs.build.outputs.prerelease == 'true' && 'false' || 'true' }}
           files: |
             dist/*

@@ -140,6 +140,7 @@ def call_ct_combination_dmrs(
     min_bp: int = 0,
     direction: str = "both",
     max_gap_bp: int = 500,
+    row_eligible_mask: Optional[np.ndarray] = None,
     bed_out: Optional[str] = None,
     max_partitions: int = 4096,
 ) -> pd.DataFrame:
@@ -160,6 +161,14 @@ def call_ct_combination_dmrs(
         raise ValueError("Need >= 2 groups in mean_by_group")
 
     n_rows = len(idx_df)
+    if row_eligible_mask is None:
+        eligible_rows = np.ones(n_rows, dtype=bool)
+    else:
+        eligible_rows = np.asarray(row_eligible_mask, dtype=bool)
+        if eligible_rows.shape != (n_rows,):
+            raise ValueError(
+                f"row_eligible_mask must have shape {(n_rows,)}, got {eligible_rows.shape}"
+            )
     for group, series in mean_by_group.items():
         if len(series) != n_rows:
             raise ValueError(f"Length mismatch for group '{group}': {len(series)} != {n_rows}")
@@ -199,11 +208,11 @@ def call_ct_combination_dmrs(
         )
 
         if direction == "both":
-            pass_mask = margin_mag >= diff_threshold
+            pass_mask = (margin_mag >= diff_threshold) & eligible_rows
         elif direction == "hyper":
-            pass_mask = (margin_mag >= diff_threshold) & target_is_hyper
+            pass_mask = (margin_mag >= diff_threshold) & target_is_hyper & eligible_rows
         elif direction == "hypo":
-            pass_mask = (margin_mag >= diff_threshold) & (~target_is_hyper)
+            pass_mask = (margin_mag >= diff_threshold) & (~target_is_hyper) & eligible_rows
         else:
             raise ValueError("direction must be one of {'both','hyper','hypo'}")
 
@@ -393,6 +402,7 @@ def call_ct_specific_dmrs(
     min_bp: int = 0,
     direction: str = "both",
     max_gap_bp: int = 500,
+    row_eligible_mask: Optional[np.ndarray] = None,
     bed_out: Optional[str] = "DMR_celltype_specific.bed",
     per_group_bed_prefix: Optional[str] = None,  # kept for backward compatibility
 ) -> pd.DataFrame:
@@ -411,5 +421,6 @@ def call_ct_specific_dmrs(
         min_bp=min_bp,
         direction=direction,
         max_gap_bp=max_gap_bp,
+        row_eligible_mask=row_eligible_mask,
         bed_out=bed_out,
     )
