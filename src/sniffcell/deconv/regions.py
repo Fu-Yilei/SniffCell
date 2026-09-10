@@ -125,14 +125,20 @@ def select_ctdmrs_for_target(
 
     left_selected = left.iloc[0:0].copy()
     right_selected = right.iloc[0:0].copy()
+    # Legacy catalogs selected exactly N rows at a distance boundary. Only
+    # multi-channel catalogs need to retain tied assay-specific evidence.
+    keep_ties = (
+        "all" if "modification" in same_chrom
+        and same_chrom["modification"].nunique() > 1 else "first"
+    )
     if left_ctdmrs > 0 and not left.empty:
         left = left.assign(_distance=target.start - left["end"])
-        left_selected = left.nsmallest(left_ctdmrs, "_distance", keep="all").drop(
+        left_selected = left.nsmallest(left_ctdmrs, "_distance", keep=keep_ties).drop(
             columns="_distance"
         )
     if right_ctdmrs > 0 and not right.empty:
         right = right.assign(_distance=right["start"] - target.end)
-        right_selected = right.nsmallest(right_ctdmrs, "_distance", keep="all").drop(
+        right_selected = right.nsmallest(right_ctdmrs, "_distance", keep=keep_ties).drop(
             columns="_distance"
         )
 

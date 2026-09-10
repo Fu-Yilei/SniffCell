@@ -691,9 +691,14 @@ def _one_dmr(args):
             mm_float = mm_float.copy()
             col_idx = np.where(nan_locs)[1]
             mm_float[nan_locs] = col_means[col_idx]
-        # Columns with no calls in any read remain NaN after imputation. Match
-        # pandas' historical row-mean behavior by excluding those columns.
-        read_mean = np.nanmean(mm_float, axis=1)
+        # Keep the pre-channel-aware modifiedC result, including its handling
+        # of entirely unobserved CpG columns. Channel-specific calls can have
+        # missing columns independently and use the observed-column mean.
+        read_mean = (
+            mm_float.mean(axis=1)
+            if effective_modification == "modifiedC"
+            else np.nanmean(mm_float, axis=1)
+        )
 
         # Assign each read to best_group vs other_group per ctDMR.
         if read_assignment_mode == "closest_reference_mean":

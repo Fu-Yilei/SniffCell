@@ -90,7 +90,7 @@ def methyl_matrix_from_bam(
 
     # Explicit wanted_keys remains supported for callers needing lower-level
     # control. Otherwise select m/h BAM tags from the requested assay.
-    if wanted_keys is None:
+    if not wanted_keys:
         wanted_keys = wanted_keys_for_modification(modification)
     if read_name_whitelist is not None:
         read_name_whitelist = {str(x) for x in read_name_whitelist if str(x).strip()}

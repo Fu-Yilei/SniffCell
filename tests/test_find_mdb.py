@@ -9,7 +9,36 @@ import pandas as pd
 
 from mdb.schema import TrackKey
 from mdb.storage import create_cohort_store, create_view_store
-from sniffcell.find.find import find_main
+from sniffcell.find.find import find_main, _means_from_mdb_reader, _paired_stability_mask
+
+
+def test_excluded_donor_cannot_change_reference_means_or_selection(tmp_path: Path):
+    sample_ids = [f"d{i}_{cell}" for i in range(4) for cell in ("n", "o")]
+    mapping = {
+        "Neuron": [f"d{i}_n" for i in range(3)],
+        "Oligodendrocyte": [f"d{i}_o" for i in range(3)],
+    }
+    metadata = tmp_path / "training.tsv"
+    pd.DataFrame([
+        {"id": f"d{i}_{cell}", "donor": f"d{i}", "cell_type": cell}
+        for i in range(3) for cell in ("n", "o")
+    ]).to_csv(metadata, sep="\t", index=False)
+    results = []
+    for held_out in ([0.0, 1.0], [1.0, 0.0], [np.nan, np.nan]):
+        values = np.array([[0.8, 0.2] * 3 + held_out, [0.55, 0.45] * 3 + held_out])
+        reader = SimpleNamespace(n_rows=2, get_block=lambda rows: values[rows])
+        means = _means_from_mdb_reader(reader, sample_ids, mapping, 1)
+        mask, donors = _paired_stability_mask(
+            reader, sample_ids, mapping, metadata_path=str(metadata), batch_rows=1,
+            median_effect=0.4, support_effect=0.3, min_support=3,
+            min_effect=0.15, min_donors=3,
+        )
+        assert donors == 3
+        assert mask.tolist() == [True, False]
+        results.append(means)
+    for means in results[1:]:
+        for group in mapping:
+            pd.testing.assert_series_equal(results[0][group], means[group], check_exact=True)
 
 
 def _toy_mdb(path: Path) -> None:

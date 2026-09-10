@@ -102,6 +102,32 @@ class TestModificationLabels(unittest.TestCase):
 
 
 class TestModificationAwareMethylMatrix(unittest.TestCase):
+    def test_empty_wanted_keys_retains_legacy_combined_default(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fixture = ModificationBamFixture(Path(temp_dir))
+            args = (str(fixture.bam), str(fixture.fasta), "chr1", 0, 6)
+            pd.testing.assert_frame_equal(
+                methyl_matrix_from_bam(*args, wanted_keys=set()),
+                methyl_matrix_from_bam(*args),
+                check_exact=True,
+            )
+
+    def test_legacy_missing_column_keeps_pre_channel_assignments(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            fixture = ModificationBamFixture(Path(temp_dir), partial_cpg_calls=True)
+            row = _dmr_row("modifiedC")
+            for explicit_label in (False, True):
+                legacy = dict(row)
+                if not explicit_label:
+                    legacy.pop("modification")
+                assignments, _ = _one_dmr((
+                    legacy, str(fixture.bam), str(fixture.fasta),
+                    "closest_reference_mean",
+                ))
+                # The pre-channel implementation retains an entirely missing
+                # column in the row mean; both distances are NaN, so <= is false.
+                self.assertEqual(assignments["is_best_group"].tolist(), [False, False])
+
     def test_extracts_5mc_and_5hmc_independently(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             fixture = ModificationBamFixture(Path(temp_dir))
@@ -186,6 +212,20 @@ class TestModificationAwareMethylMatrix(unittest.TestCase):
 
 
 class TestDeconvModificationInterface(unittest.TestCase):
+    def test_legacy_regional_distance_ties_keep_exact_requested_count(self):
+        catalog = pd.DataFrame([
+            {"chr": "chr1", "start": 10, "end": 40},
+            {"chr": "chr1", "start": 20, "end": 40},
+            {"chr": "chr1", "start": 70, "end": 80},
+            {"chr": "chr1", "start": 70, "end": 90},
+        ])
+        for frame in (catalog, catalog.assign(modification="modifiedC")):
+            selected = select_ctdmrs_for_target(
+                frame, target=TargetRegion("chr1", 50, 60),
+                left_ctdmrs=1, right_ctdmrs=1,
+            )
+            self.assertEqual(selected[["start", "end"]].values.tolist(), [[10, 40], [70, 80]])
+
     def test_cli_defaults_to_auto_and_accepts_explicit_5hmc(self):
         base = [
             "deconv",
