@@ -1,3 +1,0 @@
-id	sv_chr	sv_pos	sv_len	vaf	n_supporting	n_overlapped	overlap_pct	majority_pct	classified_celltypes	classified_celltype_count	classified_celltype_counts	classified_celltype_fractions	classification_summary	is_multi_celltype_link
-chr2_109199301_109199876	chr2	109199302	2502		5	5	1.0	1.0	Neuron	1	Neuron:5	Neuron:1.000	Neuron (5 reads, 1.000)	False
-Sniffles2.INS.2S1	chr2	109199495	726		3	3	1.0	1.0	Neuron	1	Neuron:3	Neuron:1.000	Neuron (3 reads, 1.000)	False

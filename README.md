@@ -83,21 +83,18 @@ performance with the 5hmC-compatible workflow, please
 
 ## Example Workflows
 
-For a runnable native-GRCh38 regional example with a bundled subset BAM and
-atlas, see the [SH3RF3 dual SV/TR wiki tutorial](https://github.com/Fu-Yilei/SniffCell/wiki/SH3RF3-Dual-SV-TR-Example).
-
 ### SniffCell: discover and annotate SVs/TRs from a BAM
 
-1. Call ctDMRs from an MDB atlas:
+1. Call ctDMRs from an atlas:
 
 ```bash
 sniffcell find \
-  --mdb combined_loyfer_ont.mmdb \
-  --assay dual \
-  -cf atlas/celltypes.json \
-  -ck brain_cereb_ont \
-  -o brain_dual_ctdmr.tsv \
-  --diff_threshold 0.40
+  -n atlas/all_celltypes_blocks.npy \
+  -i atlas/all_celltypes_blocks.index.gz \
+  -cf atlas/index_to_major_celltypes.json \
+  -m atlas/all_celltypes.txt \
+  -ck pbmc \
+  -o pbmc_ctdmr.tsv
 ```
 
 `--assay dual` calls separate 5mC and 5hmC views and records the assay in the
@@ -255,6 +252,50 @@ anno_out/
   reads_classification.tsv
   anno_compact_manifest.json
 ```
+
+### Discovery VCF exports
+
+`sniffcell discover tools run` automatically exports matching caller records
+beside `harmonized_variants.tsv`, when the corresponding source VCFs exist:
+
+```text
+harmonized_variants.sv.vcf.gz
+harmonized_variants.tr.<group>.vcf.gz
+harmonized_variants.snv.<group>.vcf.gz
+```
+
+Each VCF is coordinate-sorted, BGZF-compressed, and tabix-indexed. SV records
+come from the joint Sniffles/Truvari/Kanpig postprocessing VCF; TR records come
+from each group's TRGT VCF; SNV records come from each group's Clair3 pileup
+VCF used for comparison. Original caller alleles, genotypes, quality, and
+filters are retained. These are subsets, not copies of the full callsets.
+
+Additional INFO fields describe the SniffCell evidence:
+
+| INFO field | Meaning |
+|------------|---------|
+| `SC_ID`, `SC_ROW` | Harmonized variant ID and one-based data-row number |
+| `SC_CLASS`, `SC_SUBTYPE` | Variant class and change subtype |
+| `SC_CATEGORY` | `group_a_only`, `group_b_only`, `shared`, or `unknown` |
+| `SC_GROUP_A`, `SC_GROUP_B` | Actual comparison-group labels |
+| `SC_TARGET_GROUP` | Group carrying the candidate change; absent for shared/unknown calls |
+| `SC_SUPPORT_A`, `SC_SUPPORT_B` | Support counts from the harmonized TSV |
+| `SC_CHANGE_BP` | SniffCell change size; for TRs, a between-group difference |
+
+String values are percent-encoded so composite cell-type labels remain intact.
+These annotations identify **split-BAM group-specific candidates**, not
+methylation-confirmed assignments from `anno`. Zero support does not establish
+reference genotype or coverage. For TRs, annotations describe a locus-level
+change, not necessarily a particular TRGT ALT allele; `SC_CHANGE_BP` is not
+reference-relative `SVLEN`. Multiple harmonized changes at one locus yield
+separate annotated copies, distinguished by `SC_ROW`.
+
+Missing source records are not reconstructed. Export paths, counts, and
+unmatched data-row numbers are recorded in `harmonized_variants_manifest.json`,
+with warnings for missing matches. Medaka-only TR runs currently have no TRGT
+VCF export. An opposite-group SNV record may be absent even when the target
+group has a matching call. These VCFs preserve caller genotypes rather than
+inferring somatic genotypes; they are not somatic truth sets.
 
 ## Documentation
 

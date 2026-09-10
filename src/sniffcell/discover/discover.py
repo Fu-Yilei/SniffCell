@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Iterable, Sequence
 
 from sniffcell.discover.harmonize_variants import write_harmonized_variants
+from sniffcell.discover.export_variants import export_harmonized_vcfs
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
@@ -1928,7 +1929,7 @@ def _write_harmonized_variant_summary(ctx: RunContext) -> Path | None:
     sv_bed = Path(sv_bed_text) if sv_bed_text else None
     tr_bed = Path(tr_bed_text) if tr_bed_text else None
     snv_tsv = Path(snv_tsv_text) if snv_tsv_text else None
-    if (sv_bed is None or not sv_bed.exists()) and (tr_bed is None or not tr_bed.exists()):
+    if not any(path is not None and path.exists() for path in (sv_bed, tr_bed, snv_tsv)):
         return None
 
     group_a, group_b = ctx.selected_groups
@@ -1951,6 +1952,24 @@ def _write_harmonized_variant_summary(ctx: RunContext) -> Path | None:
         include_all_tr_candidates=include_all_tr_candidates,
     )
 
+    vcf_exports = {}
+    if not ctx.dry_run:
+        sv_vcf = sv_payload.get("kanpig_merged_vcf") if isinstance(sv_payload, dict) else None
+        sources = {"sv": ("SV", Path(sv_vcf) if sv_vcf else None)}
+        for group in ctx.selected_groups:
+            token = _sanitize_token(group)
+            if f"tr.{token}" in sources:
+                raise ValueError("Selected group names produce identical VCF output filenames")
+            sample_name = _sample_name(str(ctx.params["trgt_sample_name_template"]), ctx.sample_id, group)
+            sources[f"tr.{token}"] = (
+                "TR", _trgt_output_vcf(ctx, group, sample_name) if "trgt" in ctx.stages else None,
+            )
+            sources[f"snv.{token}"] = ("SNV", _clair3_pileup_output_path(ctx, group))
+        vcf_exports = export_harmonized_vcfs(
+            output_path, sources=sources, group_a=group_a, group_b=group_b,
+            tr_bed=_resolve_targeted_tr_bed(ctx) if "trgt" in ctx.stages else None,
+        )
+
     _write_json(
         ctx.run_root / "harmonized_variants_manifest.json",
         {
@@ -1963,6 +1982,7 @@ def _write_harmonized_variant_summary(ctx: RunContext) -> Path | None:
             "snv_tsv": (str(snv_tsv) if snv_tsv is not None and snv_tsv.exists() else ""),
             "include_all_tr_candidates": include_all_tr_candidates,
             "counts": stats,
+            "vcf_exports": vcf_exports,
         },
     )
     return output_path
