@@ -130,6 +130,16 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
+      - name: Select version-specific release notes
+        id: notes
+        run: |
+          notes="docs/releases/${GITHUB_REF_NAME}.md"
+          if [ -f "$notes" ]; then
+            echo "path=$notes" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Download dist artifacts
         uses: actions/download-artifact@v4
         with:
@@ -141,6 +151,7 @@ jobs:
         with:
           tag_name: ${{ github.ref_name }}
           name: SniffCell ${{ github.ref_name }}
+          body_path: ${{ steps.notes.outputs.path }}
           generate_release_notes: true
           prerelease: ${{ needs.build.outputs.prerelease == 'true' }}
           make_latest: ${{ needs.build.outputs.prerelease == 'true' && 'false' || 'true' }}

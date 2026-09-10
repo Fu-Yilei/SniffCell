@@ -49,6 +49,19 @@ repository.
 
 ## Install SniffCell
 
+**5hmC alpha: v0.9.8a1.** Install the prerelease explicitly:
+
+```bash
+pip install 'sniffcell==0.9.8a1'
+```
+
+See the [release notes](https://github.com/Fu-Yilei/SniffCell/releases/tag/v0.9.8a1)
+and the **[benchmark blog, bar plots, and implementation details](https://github.com/Fu-Yilei/SniffCell-analysis/blob/5hmc/analyses/06_06_heldout_validation/BLOG_UPDATE.md)**.
+The blog evaluates a three-donor atlas with bcontrol1 held out; the downloadable
+atlas uses all four donors. This is an early-testing release.
+
+To install the branch directly instead:
+
 ```bash
 pip install "git+https://github.com/Fu-Yilei/SniffCell.git@5hmC_compatitible_atlas"
 ```
@@ -61,7 +74,7 @@ micromamba activate sniffcell
 pip install "git+https://github.com/Fu-Yilei/SniffCell.git@5hmC_compatitible_atlas"
 ```
 
-For a versioned test release, see [the prerelease procedure](docs/5hmc-prerelease.md). No alpha tag is published by a branch push.
+Maintainers can follow [the prerelease procedure](docs/5hmc-prerelease.md). Only release tags trigger package publication.
 
 ## Methylation Atlases
 
