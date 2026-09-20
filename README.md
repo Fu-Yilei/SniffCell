@@ -89,7 +89,7 @@ Precomputed ctDMR tables are available for brain/cerebellum, PBMC, lung, liver,
 pancreas, kidney, breast, and colon, and can be supplied directly to `deconv`
 or `anno` with `-b` instead of running `find`.
 
-A [sperm-versus-blood ctDMR catalog](atlases/sniffcell_find/sperm_vs_blood/README.md)
+A [sperm-versus-blood ctDMR catalog](atlases/sperm_vs_blood/README.md)
 adds five normal-control sperm references alongside the PBMC groups. Its README
 includes the standard `sniffcell find` command used to generate it.
 
@@ -99,7 +99,7 @@ or [email us](mailto:yilei.fu@bcm.edu).
 
 **Underlying 5hmC data:** Raw 5hmC inputs used in the paper remain subject to
 access restrictions. The derived four-donor scoring catalog is available in
-[the 5hmC atlas directory](atlases/5hmc/README.md). For access inquiries and guidance on achieving better
+[the 5hmC atlas directory](atlases/brain_5hmc/README.md). For access inquiries and guidance on achieving better
 performance with the 5hmC-compatible workflow, please
 [email us](mailto:yilei.fu@bcm.edu).
 

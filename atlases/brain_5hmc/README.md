@@ -23,7 +23,7 @@ four effects >=0.15. Discovery uses >=3 CpGs and a 3,000-bp merge gap.
 ```bash
 sniffcell deconv \
   -i sample.bam -r GRCh38.fa \
-  -b atlases/5hmc/brain_cereb.paper_backbone_plus_5mc_5hmc.four_donors.ctdmr.tsv.gz \
+  -b atlases/brain_5hmc/brain_cereb.paper_backbone_plus_5mc_5hmc.four_donors.ctdmr.tsv.gz \
   -o deconv_out --bam-modification auto \
   --read_assignment_mode closest_reference_mean \
   --per_read_min_agreement 0.66 -t 8
@@ -34,7 +34,7 @@ BAM, h-specific markers have no evidence. The m tag alone does not establish
 whether the basecaller signal is separately measured 5mC or an older combined
 modifiedC signal. Catalogs without modification labels still use the legacy
 modifiedC path. The original precomputed tissue atlases from `main` remain
-under `../sniffcell_find/`.
+alongside this directory under [`atlases/`](../README.md).
 
 The [held-out benchmark](https://github.com/Fu-Yilei/SniffCell-analysis/blob/5hmc/analyses/06_06_heldout_validation/BLOG_UPDATE.md)
 uses a distinct three-donor atlas that excludes bcontrol1. Its results must

@@ -29,7 +29,7 @@ and pushes a versioned Docker image without moving Docker `latest`. Stable
 version tags retain the normal latest-release behavior. PyPI environment
 protection and Trusted Publishing configuration still apply.
 
-The atlas is a separate download under `atlases/5hmc/`; it is not bundled into
+The atlas is a separate download under `atlases/brain_5hmc/`; it is not bundled into
 the Python wheel. Existing modifiedC atlases remain usable. The published
 benchmark is a single-donor held-out test; the four-donor atlas is a distinct
 artifact and has not been independently evaluated on those same four donors.
