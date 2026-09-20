@@ -1,11 +1,15 @@
 # Precomputed ctDMR atlases
 
 This directory contains the supplied `sniffcell_find` ctDMR tables and BED files
-for brain/cerebellum, PBMC, breast, colon, kidney, liver, lung, and pancreas.
+for brain/cerebellum, PBMC, breast, colon, kidney, liver, lung, pancreas, and
+[sperm versus blood](sperm_vs_blood/README.md).
 Both `combined_dt04` and `default035_gap2000_direct` file sets are preserved
 as supplied, including their tissue-specific BED filenames.
 
-All 32 source files are stored with lossless gzip compression. To extract an
+The original 32 source files and two sperm-versus-blood catalog files are stored
+with lossless gzip compression. The sperm catalog uses the updated CLI defaults
+(0.40 methylation difference, one-row minimum, three-CpG minimum, 2 kb gap); its directory documents the exact
+`sniffcell find` command and reference provenance. To extract an
 individual file while retaining the compressed copy:
 
 ```bash

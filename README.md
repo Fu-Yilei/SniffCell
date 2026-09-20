@@ -89,6 +89,10 @@ Precomputed ctDMR tables are available for brain/cerebellum, PBMC, lung, liver,
 pancreas, kidney, breast, and colon, and can be supplied directly to `deconv`
 or `anno` with `-b` instead of running `find`.
 
+A [sperm-versus-blood ctDMR catalog](atlases/sniffcell_find/sperm_vs_blood/README.md)
+adds five normal-control sperm references alongside the PBMC groups. Its README
+includes the standard `sniffcell find` command used to generate it.
+
 To discuss tissue-specific atlases, additional tissues or cell types, or custom
 atlas support, please [open a GitHub issue](https://github.com/Fu-Yilei/SniffCell/issues)
 or [email us](mailto:yilei.fu@bcm.edu).
@@ -106,6 +110,10 @@ The [held-out benchmark and implementation update](https://github.com/Fu-Yilei/S
 ### SniffCell: discover and annotate SVs/TRs from a BAM
 
 1. Call ctDMRs from an atlas:
+
+The defaults are a 0.40 methylation difference, one atlas row, three CpGs,
+and a maximum 2 kb gap. A single-row region is eligible when it meets the
+CpG and methylation requirements.
 
 ```bash
 sniffcell find \

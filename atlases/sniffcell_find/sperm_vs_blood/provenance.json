@@ -1,0 +1,254 @@
+{
+  "generator": "sniffcell find",
+  "sniffcell_source_commit": "de9796676af78f5f0497275fdec0864ebde501a9",
+  "genome": "hg38",
+  "modification": "modifiedC",
+  "celltypes_key": "sperm_vs_blood",
+  "celltype_samples": {
+    "Sperm": [
+      "ERR3523436_Sperm-NC002.hg38",
+      "ERR3523444_Sperm-NC004.hg38",
+      "ERR3523437_Sperm-NC005.hg38",
+      "ERR3523445_Sperm-NC007.hg38",
+      "ERR3523438_Sperm-NC008.hg38"
+    ],
+    "T-cell": [
+      "GSM5652277_Blood-T-CD3-Z000000TV.hg38",
+      "GSM5652278_Blood-T-CD3-Z000000UP.hg38",
+      "GSM5652279_Blood-T-CD4-Z000000TT.hg38",
+      "GSM5652280_Blood-T-CD4-Z000000U7.hg38",
+      "GSM5652281_Blood-T-CD4-Z000000UM.hg38",
+      "GSM5652282_Blood-T-CD8-Z000000TR.hg38",
+      "GSM5652283_Blood-T-CD8-Z000000U5.hg38",
+      "GSM5652284_Blood-T-CD8-Z000000UK.hg38",
+      "GSM5652285_Blood-T-CenMem-CD4-Z00000417.hg38",
+      "GSM5652286_Blood-T-CenMem-CD4-Z0000041D.hg38",
+      "GSM5652287_Blood-T-CenMem-CD4-Z0000041N.hg38",
+      "GSM5652288_Blood-T-Eff-CD8-Z00000419.hg38",
+      "GSM5652289_Blood-T-Eff-CD8-Z0000041F.hg38",
+      "GSM5652290_Blood-T-Eff-CD8-Z0000041Q.hg38",
+      "GSM5652291_Blood-T-EffMem-CD4-Z00000416.hg38",
+      "GSM5652292_Blood-T-EffMem-CD4-Z0000041C.hg38",
+      "GSM5652293_Blood-T-EffMem-CD4-Z0000041M.hg38",
+      "GSM5652294_Blood-T-EffMem-CD8-Z0000041A.hg38",
+      "GSM5652295_Blood-T-EffMem-CD8-Z0000041G.hg38",
+      "GSM5652296_Blood-T-Naive-CD4-Z0000041E.hg38",
+      "GSM5652297_Blood-T-Naive-CD8-Z0000041B.hg38",
+      "GSM5652298_Blood-T-Naive-CD8-Z0000041H.hg38"
+    ],
+    "NK-cell": [
+      "GSM5652299_Blood-NK-Z000000TM.hg38",
+      "GSM5652300_Blood-NK-Z000000U1.hg38",
+      "GSM5652301_Blood-NK-Z000000UF.hg38"
+    ],
+    "Monocyte": [
+      "GSM5652302_Blood-Monocytes-Z000000TP.hg38",
+      "GSM5652303_Blood-Monocytes-Z000000U3.hg38",
+      "GSM5652304_Blood-Monocytes-Z000000UH.hg38"
+    ],
+    "B-cell": [
+      "GSM5652316_Blood-B-Z000000TX.hg38",
+      "GSM5652317_Blood-B-Z000000UB.hg38",
+      "GSM5652318_Blood-B-Z000000UR.hg38",
+      "GSM5652319_Blood-B-Mem-Z0000041J.hg38",
+      "GSM5652320_Blood-B-Mem-Z0000041K.hg38"
+    ]
+  },
+  "parameters": {
+    "diff_threshold": 0.4,
+    "min_rows": 1,
+    "min_cpgs": 3,
+    "max_gap_bp": 2000
+  },
+  "used_cli_defaults": true,
+  "n_ctdmrs": 260399,
+  "n_single_row_ctdmrs": 99133,
+  "best_group_counts": {
+    "Sperm": 186277,
+    "Monocyte": 25904,
+    "B-cell": 14965,
+    "NK-cell": 7422,
+    "T-cell": 5412,
+    "Monocyte+B-cell": 4371,
+    "Sperm+Monocyte": 4265,
+    "T-cell+NK-cell": 3239,
+    "T-cell+B-cell": 2888,
+    "Sperm+T-cell": 2109,
+    "Sperm+B-cell": 1234,
+    "NK-cell+Monocyte": 1117,
+    "Sperm+NK-cell": 573,
+    "NK-cell+B-cell": 489,
+    "T-cell+Monocyte": 134
+  },
+  "input_atlas_sha256": {
+    "sperm_samples.tsv": "728e5f04c0a9f20a3cc043f9ba6469b14a2eaa091a23dcadbb649dcaff1b68fc",
+    "all_celltypes_blocks.npy": "068822255c049ca1fc55296a3836afd1e7e85791b3a02b5d3bb9c4df7a175f07",
+    "all_celltypes_blocks.index.gz": "6a5bfb3ee00c9a8b57785bbd7beaf015cc4ad1a6822820a208e2f04e1d3e1aff",
+    "all_celltypes.txt": "90257f91bfb7c86120040f33feb0b7349f38f52dbcd561cc86fe5692ef0c50ce",
+    "panel_qc.json": "4cbf4930205742af9c3aec1480998a61de0c5afcccfd6d68779fb9df0f74b03d",
+    "index_to_major_celltypes.json": "8490a211202b27078d3196afe790baa13cad5a45686ecc0c6809ea9a845dab2d"
+  },
+  "reference_qc": {
+    "n_original_samples": 253,
+    "n_added_samples": 5,
+    "n_blocks": 7990609,
+    "n_sperm_reference_blocks": 6918718,
+    "minimum_donors": 3,
+    "correlations": [
+      {
+        "donor1": "NC004",
+        "donor2": "NC002",
+        "n_blocks": 5613017,
+        "pearson_r": 0.8448964988523524
+      },
+      {
+        "donor1": "NC005",
+        "donor2": "NC002",
+        "n_blocks": 6246246,
+        "pearson_r": 0.8495980351287928
+      },
+      {
+        "donor1": "NC005",
+        "donor2": "NC004",
+        "n_blocks": 5458041,
+        "pearson_r": 0.8232692252330137
+      },
+      {
+        "donor1": "NC007",
+        "donor2": "NC002",
+        "n_blocks": 5684262,
+        "pearson_r": 0.8489272494375177
+      },
+      {
+        "donor1": "NC007",
+        "donor2": "NC004",
+        "n_blocks": 5056283,
+        "pearson_r": 0.8359049947337268
+      },
+      {
+        "donor1": "NC007",
+        "donor2": "NC005",
+        "n_blocks": 5527663,
+        "pearson_r": 0.8311569320730937
+      },
+      {
+        "donor1": "NC008",
+        "donor2": "NC002",
+        "n_blocks": 6386872,
+        "pearson_r": 0.85580732089764
+      },
+      {
+        "donor1": "NC008",
+        "donor2": "NC004",
+        "n_blocks": 5540373,
+        "pearson_r": 0.8392412975056709
+      },
+      {
+        "donor1": "NC008",
+        "donor2": "NC005",
+        "n_blocks": 6144788,
+        "pearson_r": 0.8420843560303996
+      },
+      {
+        "donor1": "NC008",
+        "donor2": "NC007",
+        "n_blocks": 5610832,
+        "pearson_r": 0.8442663221459171
+      }
+    ],
+    "supported_block_correlations": [
+      {
+        "donor1": "NC004",
+        "donor2": "NC002",
+        "n_blocks": 742071,
+        "pearson_r": 0.9673463863045894
+      },
+      {
+        "donor1": "NC005",
+        "donor2": "NC002",
+        "n_blocks": 949749,
+        "pearson_r": 0.9679266561989832
+      },
+      {
+        "donor1": "NC005",
+        "donor2": "NC004",
+        "n_blocks": 700565,
+        "pearson_r": 0.9537785837650411
+      },
+      {
+        "donor1": "NC007",
+        "donor2": "NC002",
+        "n_blocks": 758187,
+        "pearson_r": 0.9670036084775409
+      },
+      {
+        "donor1": "NC007",
+        "donor2": "NC004",
+        "n_blocks": 602148,
+        "pearson_r": 0.9675309724159988
+      },
+      {
+        "donor1": "NC007",
+        "donor2": "NC005",
+        "n_blocks": 718026,
+        "pearson_r": 0.9555483400494442
+      },
+      {
+        "donor1": "NC008",
+        "donor2": "NC002",
+        "n_blocks": 1009503,
+        "pearson_r": 0.9696055936459984
+      },
+      {
+        "donor1": "NC008",
+        "donor2": "NC004",
+        "n_blocks": 718713,
+        "pearson_r": 0.9658678272089998
+      },
+      {
+        "donor1": "NC008",
+        "donor2": "NC005",
+        "n_blocks": 908414,
+        "pearson_r": 0.9624852674983382
+      },
+      {
+        "donor1": "NC008",
+        "donor2": "NC007",
+        "n_blocks": 735879,
+        "pearson_r": 0.9672237530638949
+      }
+    ],
+    "donor_agreement_review": {
+      "initial_all_block_cutoff_passed": false,
+      "review_date": "2026-09-19",
+      "min_supported_cpgs_per_donor": 5,
+      "min_observations_per_donor": 50,
+      "min_shared_blocks": 100000,
+      "min_pearson_r": 0.9,
+      "rationale": "Coverage-stratified review shows lower agreement at low count support. Acceptance check revised after review; primary eligibility unchanged."
+    },
+    "blood_separation": {
+      "jointly_covered_blocks": 6918709,
+      "sperm_hypomethylated_ge0.4": 505447,
+      "sperm_hypermethylated_ge0.4": 670593
+    },
+    "assay": "modifiedC",
+    "note": "Technical reference QC; blood comparison is descriptive, not held-out validation."
+  },
+  "sources": [
+    "https://www.nature.com/articles/s41467-025-65248-3",
+    "https://doi.org/10.1186/s13148-020-00854-0",
+    "https://www.ebi.ac.uk/ena/browser/view/PRJEB34432"
+  ],
+  "validation": {
+    "unique_rows": true,
+    "positive_interval_lengths": true,
+    "minimum_rows_and_cpgs": true,
+    "minimum_mean_margin": true,
+    "finite_group_means_within_unit_interval": true,
+    "coordinate_sorted": true,
+    "bed9_coordinates_match": true,
+    "gzip_roundtrip_sha256_matches": true,
+    "sniffcell_deconv_loader_passed": true
+  }
+}
