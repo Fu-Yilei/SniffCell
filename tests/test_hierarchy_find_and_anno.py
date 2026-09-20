@@ -8,10 +8,38 @@ from sniffcell.anno.anno import (
     _find_dmr_query_interval,
     _resolve_cell_types_and_targets,
 )
-from sniffcell.find.ctdmr import call_ct_combination_dmrs
+from sniffcell.find.ctdmr import call_ct_combination_dmrs, call_ct_specific_dmrs
+from sniffcell.parse_args import parse_args
 
 
 class TestFindCombinations(unittest.TestCase):
+    def test_default_single_row_call_keeps_effect_and_cpg_requirements(self):
+        idx_df = pd.DataFrame({
+            "chr": ["chr1"] * 3,
+            "start": [100, 10000, 20000],
+            "end": [150, 10050, 20050],
+            "startCpG": [1, 4, 7],
+            "endCpG": [4, 7, 9],
+        })
+        means = {"A": pd.Series([0.8, 0.58, 0.9]),
+                 "B": pd.Series([0.2, 0.2, 0.1])}
+        args = parse_args(["find", "-ck", "example", "-o", "unused.tsv"])
+        from_cli = call_ct_combination_dmrs(
+            idx_df=idx_df, mean_by_group=means,
+            diff_threshold=args.diff_threshold, min_rows=args.min_rows,
+            min_cpgs=args.min_cpgs, max_gap_bp=args.max_gap_bp, bed_out=None,
+        )
+        self.assertEqual(from_cli["start"].tolist(), [100])
+        self.assertEqual(from_cli["n_rows"].tolist(), [1])
+        for caller in (call_ct_combination_dmrs, call_ct_specific_dmrs):
+            with self.subTest(caller=caller.__name__):
+                actual = caller(idx_df=idx_df, mean_by_group=means, bed_out=None)
+                pd.testing.assert_frame_equal(actual, from_cli)
+        strict = parse_args(["find", "-ck", "example", "-o", "unused.tsv", "--min_rows", "2"])
+        self.assertTrue(call_ct_combination_dmrs(
+            idx_df=idx_df, mean_by_group=means, min_rows=strict.min_rows, bed_out=None,
+        ).empty)
+
     def test_call_ct_combination_dmrs_detects_multi_group_patterns(self):
         idx_df = pd.DataFrame(
             {

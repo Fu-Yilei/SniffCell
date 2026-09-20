@@ -135,7 +135,7 @@ def call_ct_combination_dmrs(
     idx_df: pd.DataFrame,
     mean_by_group: Dict[str, pd.Series],
     diff_threshold: float = 0.40,
-    min_rows: int = 2,
+    min_rows: int = 1,
     min_cpgs: int = 3,
     min_bp: int = 0,
     direction: str = "both",
@@ -397,7 +397,7 @@ def call_ct_specific_dmrs(
     mean_by_group: Dict[str, pd.Series],
     diff_threshold: float = 0.40,
     rest_std_threshold: float = 0.10,  # kept for backward compatibility
-    min_rows: int = 2,
+    min_rows: int = 1,
     min_cpgs: int = 3,
     min_bp: int = 0,
     direction: str = "both",

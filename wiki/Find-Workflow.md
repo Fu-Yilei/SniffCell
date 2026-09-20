@@ -6,6 +6,11 @@ Structured workflow view:
 
 `sniffcell find` converts atlas methylation blocks into annotation-ready ctDMRs by scoring group bipartitions at each atlas row and then merging consistent winning rows into regions.
 
+The CLI defaults are `--diff_threshold 0.40`, `--min_rows 1`,
+`--min_cpgs 3`, and `--max_gap_bp 2000`. A single atlas row may form a ctDMR
+when it contains at least three CpGs and meets the methylation difference
+threshold. Set `--min_rows 2` explicitly to require multiple atlas rows.
+
 Shape-first visual intuition view:
 
 ![SniffCell find visual intuition](assets/find-illustration.svg)
