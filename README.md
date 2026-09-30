@@ -120,7 +120,7 @@ sniffcell find \
   --mdb combined_loyfer_ont.mmdb \
   --assay dual \
   -cf atlas/celltypes.json \
-  -ck brain_cereb_ont \
+  -ck brain_universal_ont \
   -o brain_dual_ctdmr.tsv \
   --diff_threshold 0.40
 ```

@@ -1,6 +1,6 @@
-# Brain modifiedC + 5mC + 5hmC scoring atlas
+# Brain universal modifiedC + 5mC + 5hmC scoring atlas
 
-[Download the compressed ctDMR catalog](brain_cereb.paper_backbone_plus_5mc_5hmc.four_donors.ctdmr.tsv.gz).
+[Download the compressed ctDMR catalog](brain_universal.paper_backbone_plus_5mc_5hmc.four_donors.ctdmr.tsv.gz).
 This GRCh38 atlas distinguishes Neuron and Oligodendrocyte and is intended
 for the `5hmC_compatitible_atlas` branch of SniffCell.
 
@@ -23,7 +23,7 @@ four effects >=0.15. Discovery uses >=3 CpGs and a 3,000-bp merge gap.
 ```bash
 sniffcell deconv \
   -i sample.bam -r GRCh38.fa \
-  -b atlases/brain_5hmc/brain_cereb.paper_backbone_plus_5mc_5hmc.four_donors.ctdmr.tsv.gz \
+  -b atlases/brain_5hmc/brain_universal.paper_backbone_plus_5mc_5hmc.four_donors.ctdmr.tsv.gz \
   -o deconv_out --bam-modification auto \
   --read_assignment_mode closest_reference_mean \
   --per_read_min_agreement 0.66 -t 8

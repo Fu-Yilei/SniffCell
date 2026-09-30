@@ -224,13 +224,13 @@ def main() -> None:
     ]
     overlap_links = pd.concat(link_frames, ignore_index=True, sort=False)
 
-    legacy.to_csv(output_dir / "brain_cereb.legacy.annotated.tsv.gz", sep="\t", index=False)
-    additional.to_csv(output_dir / "brain_cereb.additional_ont_ctdmr.tsv.gz", sep="\t", index=False)
-    dual_catalog.to_csv(output_dir / "brain_cereb.dual_catalog.tsv.gz", sep="\t", index=False)
-    all_evidence.to_csv(output_dir / "brain_cereb.all_channel_evidence.tsv.gz", sep="\t", index=False)
-    overlap_links.to_csv(output_dir / "brain_cereb.overlap_links.tsv.gz", sep="\t", index=False)
+    legacy.to_csv(output_dir / "brain_universal.legacy.annotated.tsv.gz", sep="\t", index=False)
+    additional.to_csv(output_dir / "brain_universal.additional_ont_ctdmr.tsv.gz", sep="\t", index=False)
+    dual_catalog.to_csv(output_dir / "brain_universal.dual_catalog.tsv.gz", sep="\t", index=False)
+    all_evidence.to_csv(output_dir / "brain_universal.all_channel_evidence.tsv.gz", sep="\t", index=False)
+    overlap_links.to_csv(output_dir / "brain_universal.overlap_links.tsv.gz", sep="\t", index=False)
     dual_catalog[["chr", "start", "end", "evidence_id", "modification", "effect_direction"]].to_csv(
-        output_dir / "brain_cereb.dual_catalog.bed",
+        output_dir / "brain_universal.dual_catalog.bed",
         sep="\t",
         index=False,
         header=False,
@@ -243,7 +243,7 @@ def main() -> None:
         summarize_effects(novel_mc, "ONT_5mC_novel_to_legacy"),
         summarize_effects(novel_hmc, "ONT_5hmC_novel_to_legacy"),
     ]
-    pd.DataFrame(summary_rows).to_csv(output_dir / "brain_cereb.effect_quality_summary.tsv", sep="\t", index=False)
+    pd.DataFrame(summary_rows).to_csv(output_dir / "brain_universal.effect_quality_summary.tsv", sep="\t", index=False)
 
     cross_same = sum(
         novel_mc.iloc[left_idx]["effect_direction"] == novel_hmc.iloc[right_idx]["effect_direction"]
@@ -285,7 +285,7 @@ def main() -> None:
             "5hmC": str(Path(args.five_hmc).resolve()),
         },
     }
-    with (output_dir / "brain_cereb.dual_catalog_summary.json").open("w", encoding="utf-8") as handle:
+    with (output_dir / "brain_universal.dual_catalog_summary.json").open("w", encoding="utf-8") as handle:
         json.dump(summary, handle, indent=2)
         handle.write("\n")
     print(json.dumps(summary["counts"], indent=2))

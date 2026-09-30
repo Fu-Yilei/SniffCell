@@ -1,5 +1,5 @@
 {
-  "catalog": "brain_cereb.paper_backbone_plus_5mc_5hmc.four_donors.ctdmr.tsv.gz",
+  "catalog": "brain_universal.paper_backbone_plus_5mc_5hmc.four_donors.ctdmr.tsv.gz",
   "sha256": "4307930ee9812634f6e11913152fbc4df45ecd2b511203a0b2b6335b50c533dd",
   "rows": 489972,
   "rows_by_modification": {

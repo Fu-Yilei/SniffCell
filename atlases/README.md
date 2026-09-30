@@ -1,7 +1,7 @@
 # Precomputed ctDMR atlases
 
 This directory contains the supplied `sniffcell find` ctDMR tables and BED files
-for brain/cerebellum, PBMC, breast, colon, kidney, liver, lung, pancreas, and
+for brain universal, PBMC, breast, colon, kidney, liver, lung, pancreas, and
 [sperm versus blood](sperm_vs_blood/README.md).
 The [brain 5hmC catalog](brain_5hmc/README.md) provides separate modifiedC,
 5mC and 5hmC scoring rows.
@@ -21,5 +21,5 @@ gzip -dk pbmc/pbmc.combined_dt04.ctdmr.tsv.gz
 
 `manifest.tsv` records compressed and uncompressed sizes and the SHA-256
 checksum of uncompressed contents for the 34 standard tissue catalog files.
-The brain 5hmC catalog has its own `brain_5hmc/manifest.json`. The brain/cerebellum and PBMC
+The brain 5hmC catalog has its own `brain_5hmc/manifest.json`. The brain universal and PBMC
 directories contain copies of the source data resolved from directory symlinks.

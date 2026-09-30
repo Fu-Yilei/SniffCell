@@ -16,7 +16,7 @@ def main():
   with src.open() as f:
    for row in csv.DictReader(f,delimiter='\t'):
     assert row['paired_donors']=='4' and row['paired_min_support'] in ['3','3.0'], 'Expected four-donor paired source'
- dest=a.output_dir/'brain_cereb.paper_backbone_plus_5mc_5hmc.four_donors.ctdmr.tsv.gz'
+ dest=a.output_dir/'brain_universal.paper_backbone_plus_5mc_5hmc.four_donors.ctdmr.tsv.gz'
  assert not dest.exists(),dest
  counts={};legacy_i=0;seen=set()
  with gzip.open(a.integrated,'rt') as inp,dest.open('wb') as raw:
