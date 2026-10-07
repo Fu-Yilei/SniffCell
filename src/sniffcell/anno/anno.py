@@ -159,83 +159,6 @@ def _normalize_supporting_read_names(read_names: list[str], *, variant_class: st
     return normalized
 
 
-def _extract_support_reads_from_variant_df(variant_df: pd.DataFrame) -> set:
-    """Return the set of normalized read UUIDs for all supporting reads in variant_df."""
-    reads: set = set()
-    for col in ("supporting_reads", "group_a_read_names", "group_b_read_names"):
-        if col not in variant_df.columns:
-            continue
-        for val in variant_df[col]:
-            if isinstance(val, (list, tuple)):
-                reads.update(str(v).strip() for v in val if str(v).strip())
-            elif pd.notna(val) and str(val).strip() not in ("", "[]"):
-                reads.update(str(v).strip() for v in _parse_json_read_names(val) if str(v).strip())
-    reads.discard("")
-    return reads
-
-
-def _write_reads_from_deconv(
-    *,
-    deconv_reads_path: str,
-    variant_df: pd.DataFrame,
-    reads_out: str,
-    blocks_out: str,
-    logger,
-) -> int:
-    """Filter deconv_reads_classification.tsv to variant support reads and write to reads_out.
-
-    Returns the number of read-classification rows written.
-    """
-    support_reads = _extract_support_reads_from_variant_df(variant_df)
-    logger.info(
-        "Filtering deconv reads classification (%s) to %d unique support reads",
-        deconv_reads_path,
-        len(support_reads),
-    )
-
-    _CHUNK = 500_000
-    chunks = []
-    for chunk in pd.read_csv(
-        deconv_reads_path,
-        sep="\t",
-        index_col=0,
-        chunksize=_CHUNK,
-        dtype={
-            "code": "string",
-            "code_order": "string",
-            "best_group": "string",
-            "best_group_leaves": "string",
-        },
-    ):
-        filtered = chunk[chunk.index.astype(str).isin(support_reads)]
-        if not filtered.empty:
-            chunks.append(filtered)
-
-    if chunks:
-        reads_df = pd.concat(chunks)
-    else:
-        reads_df = pd.DataFrame(
-            columns=[
-                "chr", "start", "end", "cpgstart", "cpgend",
-                "best_group", "other_group", "is_best_group",
-                "code_order", "best_group_leaves", "other_group_leaves",
-                "hyper_group_leaves", "hypo_group_leaves", "code",
-            ]
-        )
-        reads_df.index.name = "readname"
-
-    reads_df.to_csv(reads_out, sep="\t", index=True)
-    pd.DataFrame(columns=["chr", "start", "end", "cpgstart", "cpgend"]).to_csv(
-        blocks_out, sep="\t", index=False
-    )
-    logger.info(
-        "Wrote %d read-classification rows from deconv data (%d unique reads)",
-        len(reads_df),
-        reads_df.index.nunique(),
-    )
-    return len(reads_df)
-
-
 def read_harmonized_variants_to_df(path: str) -> pd.DataFrame:
     df = pd.read_csv(path, sep="\t")
     required = {"chrom", "start", "end", "variant_id"}
@@ -925,24 +848,7 @@ def _run_annotation_pipeline(args, *, variant_source: str):
     )
     logger.info("Wrote anno run manifest: %s", manifest_path)
 
-    deconv_reads_path = getattr(args, "deconv_reads", None)
     variant_df = _load_variant_table(args.vcf, variant_source)
-
-    if deconv_reads_path and variant_source == "harmonized":
-        logger.info(
-            "Using deconv reads classification from %s — skipping BAM scan",
-            deconv_reads_path,
-        )
-        _write_reads_from_deconv(
-            deconv_reads_path=deconv_reads_path,
-            variant_df=variant_df,
-            reads_out=reads_out,
-            blocks_out=blocks_out,
-            logger=logger,
-        )
-        _variant_anno_from_reads(args, variant_source=variant_source)
-        logger.info("Annotation complete")
-        return
 
     bed = pd.read_csv(bed_input, sep="\t")
     if not bed.empty and isinstance(bed.columns[0], str) and bed.columns[0].startswith("#"):

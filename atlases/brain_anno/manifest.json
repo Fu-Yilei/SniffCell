@@ -1,0 +1,186 @@
+{
+  "catalog": "brain_universal.expanded9.modifiedC.ctdmr.tsv.gz",
+  "status": "experimental_annotation_candidate",
+  "intended_command": "sniffcell anno",
+  "reference_build": "GRCh38",
+  "rows": 155108,
+  "classes": [
+    "CorticalHippocampalNeuron",
+    "CerebellarNeuron",
+    "Astrocyte",
+    "Oligodendrocyte",
+    "OPC",
+    "Microglia",
+    "Endothelial",
+    "Perivascular",
+    "VLMC"
+  ],
+  "modification": "modifiedC",
+  "sha256": "876f80cd20e1e36afb7ba2ce078e43aa5220e8713f9eb117e77b2ffffdf0c2af",
+  "sha256_uncompressed": "eaf700d9f540ea0844fa386c86cd4109e4295d7fdde4dd6cd72fc666a4e7b7f5",
+  "compressed_bytes": 25699979,
+  "uncompressed_bytes": 147275439,
+  "columns": [
+    "chr",
+    "start",
+    "end",
+    "name",
+    "score",
+    "strand",
+    "n_rows",
+    "n_cpgs",
+    "bp_len",
+    "best_group",
+    "other_group",
+    "best_dir",
+    "mean_margin",
+    "second_best_margin",
+    "rest_std_mean",
+    "mean_best_value",
+    "mean_rest_value",
+    "best_group_leaves",
+    "other_group_leaves",
+    "hyper_group_leaves",
+    "hypo_group_leaves",
+    "code_order",
+    "mean_CorticalHippocampalNeuron",
+    "mean_CerebellarNeuron",
+    "mean_Astrocyte",
+    "mean_Oligodendrocyte",
+    "mean_OPC",
+    "mean_Microglia",
+    "mean_Endothelial",
+    "mean_Perivascular",
+    "mean_VLMC",
+    "source_dmr_id",
+    "source_number_of_dms",
+    "source_min_distance_to_midpoint",
+    "modification",
+    "evidence_id"
+  ],
+  "source_candidate_filename": "brain_universal.legacy_anchored.expanded9.candidate.ctdmr.tsv.gz",
+  "source_candidate_sha256": "876f80cd20e1e36afb7ba2ce078e43aa5220e8713f9eb117e77b2ffffdf0c2af",
+  "source_build_date": "2026-10-06",
+  "packaged_date": "2026-10-07",
+  "discovery": {
+    "function": "call_ct_combination_dmrs",
+    "diff_threshold": 0.4,
+    "min_rows": 1,
+    "min_cpgs": 3,
+    "max_gap_bp": 0
+  },
+  "marker_QC": ">=3 reference CpGs; all included profiles finite; GRCh38 CpG-anchored endpoints; standard SniffCell mean difference >=0.4; every constituent profile stays on the assigned side of the comparison midpoint. HBA ODC must also agree with the legacy oligodendrocyte side.",
+  "projection": "CpG-count-weighted overlap of original reference blocks with author HBA DMRs. Partial blocks use the source block mean. No raw counts are reconstructed.",
+  "projection_QC": "Project using genomic positions on the actual GRCh38 FASTA CpG axis, not a chromosome-wide offset from original CpG IDs. Exclude source blocks with a CpG-count or endpoint mismatch. Each of the three legacy profiles needs finite block means covering >=80% of reference CpGs in each DMR.",
+  "reference_mapping": {
+    "CorticalHippocampalNeuron": [
+      "LegacyCortical",
+      "HippocampalMean"
+    ],
+    "CerebellarNeuron": [
+      "LegacyCerebellar"
+    ],
+    "Astrocyte": [
+      "ASC"
+    ],
+    "Oligodendrocyte": [
+      "LegacyOligodendrocyte"
+    ],
+    "OPC": [
+      "OPC"
+    ],
+    "Microglia": [
+      "MGC"
+    ],
+    "Endothelial": [
+      "EC"
+    ],
+    "Perivascular": [
+      "PC"
+    ],
+    "VLMC": [
+      "VLMC"
+    ]
+  },
+  "legacy_mapping": {
+    "LegacyCortical": [
+      "GSM5652225_Cortex-Neuron-Z0000042F.hg38",
+      "GSM5652226_Cortex-Neuron-Z0000042H.hg38",
+      "GSM5652227_Cortex-Neuron-Z0000042J.hg38",
+      "GSM5652228_Cortex-Neuron-Z0000042M.hg38",
+      "GSM5652229_Cortex-Neuron-Z0000042P.hg38",
+      "GSM5652230_Cortex-Neuron-Z0000042K.hg38"
+    ],
+    "LegacyCerebellar": [
+      "GSM5652231_Cerebellum-Neuron-Z000000TB.hg38"
+    ],
+    "LegacyOligodendrocyte": [
+      "GSM5652220_Oligodendrocytes-Z0000042E.hg38",
+      "GSM5652221_Oligodendrocytes-Z0000042L.hg38",
+      "GSM5652222_Oligodendrocytes-Z0000042N.hg38"
+    ]
+  },
+  "hippocampal_major_types": [
+    "CA1",
+    "CA3",
+    "DG",
+    "HiF1",
+    "HiF2"
+  ],
+  "neuronal_merge": "Equal 50:50 average of the legacy cortical profile and the equal-major-type hippocampal mean. This is a declared reference weighting, not a count-based pool.",
+  "sources": [
+    {
+      "role": "Original brain reference",
+      "filenames": [
+        "all_celltypes_blocks.npy",
+        "all_celltypes_blocks.index.gz",
+        "all_celltypes.txt"
+      ],
+      "matrix_shape": [
+        7990609,
+        253
+      ]
+    },
+    {
+      "role": "Pooled major-cell-type DMR profiles",
+      "filename": "dmr.MajorType.rho08.dist250.filter1.repflt.tsv.gz",
+      "url": "https://neomorph.salk.edu/hba/"
+    },
+    {
+      "role": "Cerebellar reference sample",
+      "accession": "GSM5652231",
+      "url": "https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSM5652231",
+      "sample_title": "Cerebellum-Neuron",
+      "description": "not sorted",
+      "interpretation": "Single sample; do not assume a purified neuronal reference from the title alone."
+    },
+    {
+      "role": "Projection reference FASTA",
+      "filename": "GCA_000001405.15_GRCh38_no_alt_analysis_set.fna"
+    }
+  ],
+  "build_counts": {
+    "source_DMRs": 1657732,
+    "legacy_source_blocks": 7990591,
+    "legacy_blocks_failed_CpG_count": 18563,
+    "legacy_blocks_failed_anchor": 18563,
+    "legacy_blocks_excluded": 18563,
+    "coverage_pass": 1656543,
+    "eligible": 1108036,
+    "called": 326024,
+    "candidate_DMRs": 155108
+  },
+  "validation": {
+    "source_copy": "Compressed bytes match the candidate checksum exactly.",
+    "catalog_structure": "Row count, unique evidence IDs and intervals, common cell-type schema, complete complementary groups, finite methylation means, effect and CpG thresholds checked.",
+    "existing_pilot_scope": "901 molecule-by-locus observations, five frontal-cortex donors, 24 sample/locus combinations; cell-of-origin truth unavailable.",
+    "accuracy": "Improved assignment accuracy and regional generalization have not been established."
+  },
+  "limitations": [
+    "Restricted to published HBA DMR intervals; does not preserve all original atlas markers.",
+    "Combined modifiedC reference; no separate 5mC or 5hmC profiles for the added cell types.",
+    "Cortical/hippocampal grouping and partial-block projection are explicit approximations.",
+    "Use the original atlas for read splitting; annotation with this catalog does not automatically retain or combine original labels.",
+    "Unexpected cerebellar-reference-like assignments in the frontal-cortex pilot require regional validation."
+  ]
+}

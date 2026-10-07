@@ -5,6 +5,9 @@ for brain universal, PBMC, breast, colon, kidney, liver, lung, pancreas, and
 [sperm versus blood](sperm_vs_blood/README.md).
 The [brain 5hmC catalog](brain_5hmc/README.md) provides separate modifiedC,
 5mC and 5hmC scoring rows.
+The [experimental brain annotation catalog](brain_anno/README.md) supplies
+nine-class modifiedC profiles for `anno`, while retaining the original catalogs
+for deconvolution and read splitting.
 
 Both `combined_dt04` and `default035_gap2000_direct` file sets are preserved
 as supplied, including their tissue-specific BED filenames.
@@ -21,5 +24,6 @@ gzip -dk pbmc/pbmc.combined_dt04.ctdmr.tsv.gz
 
 `manifest.tsv` records compressed and uncompressed sizes and the SHA-256
 checksum of uncompressed contents for the 34 standard tissue catalog files.
-The brain 5hmC catalog has its own `brain_5hmc/manifest.json`. The brain universal and PBMC
-directories contain copies of the source data resolved from directory symlinks.
+The brain 5hmC and brain annotation catalogs have their own `manifest.json`
+files in `brain_5hmc/` and `brain_anno/`. The brain universal and PBMC directories
+contain copies of the source data resolved from directory symlinks.

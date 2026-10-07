@@ -93,6 +93,11 @@ A [sperm-versus-blood ctDMR catalog](atlases/sperm_vs_blood/README.md)
 adds five normal-control sperm references alongside the PBMC groups. Its README
 includes the standard `sniffcell find` command used to generate it.
 
+The [experimental brain annotation atlas](atlases/brain_anno/README.md)
+provides 155,108 modifiedC regions across nine brain cell types for `anno -b`.
+Keep the original atlas for deconvolution and read splitting; annotation can
+use this separate catalog to assess additional cell-type detail.
+
 To discuss tissue-specific atlases, additional tissues or cell types, or custom
 atlas support, please [open a GitHub issue](https://github.com/Fu-Yilei/SniffCell/issues)
 or [email us](mailto:yilei.fu@bcm.edu).
@@ -176,6 +181,10 @@ Tool binaries are resolved from `PATH` by default, or pass explicit
 to preflight-check dependencies first.
 
 4. Annotate the discovered SVs/TRs with cell-type methylation evidence:
+
+`anno` always rescans the input BAM using the ctDMR catalog supplied with `-b`.
+Use the original unsplit BAM; the annotation catalog can differ from the one
+used for deconvolution and read splitting.
 
 ```bash
 sniffcell anno \

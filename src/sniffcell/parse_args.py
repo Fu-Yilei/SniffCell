@@ -426,18 +426,6 @@ def parse_args(argv):
     anno_parser.add_argument("-t", "--threads", type=int, default=1, help="Number of threads to use, default=1")
     anno_parser.add_argument("-w", "--window", type=int, default=10000, help="Window size for filtering BED based on variants, default=10000")
     anno_parser.add_argument(
-        "--deconv-reads",
-        type=str,
-        default=None,
-        dest="deconv_reads",
-        help=(
-            "Path to deconv_reads_classification.tsv from a prior sniffcell deconv run. "
-            "When provided with a harmonized variant source, skips the BAM re-scan and uses "
-            "pre-computed read classifications from deconvolution. Requires --vcf to point to "
-            "a harmonized variants TSV. The BAM (--input) and BED (--bed) are not used."
-        ),
-    )
-    anno_parser.add_argument(
         "--breakpoint_exclusion_frac",
         type=float,
         default=0.0,
