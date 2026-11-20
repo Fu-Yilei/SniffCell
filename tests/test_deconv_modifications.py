@@ -112,7 +112,7 @@ class TestModificationAwareMethylMatrix(unittest.TestCase):
                 check_exact=True,
             )
 
-    def test_legacy_missing_column_keeps_pre_channel_assignments(self):
+    def test_unobserved_cpg_columns_do_not_force_other_group(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             fixture = ModificationBamFixture(Path(temp_dir), partial_cpg_calls=True)
             row = _dmr_row("modifiedC")
@@ -124,9 +124,10 @@ class TestModificationAwareMethylMatrix(unittest.TestCase):
                     legacy, str(fixture.bam), str(fixture.fasta),
                     "closest_reference_mean",
                 ))
-                # The pre-channel implementation retains an entirely missing
-                # column in the row mean; both distances are NaN, so <= is false.
-                self.assertEqual(assignments["is_best_group"].tolist(), [False, False])
+                # Both reads have high combined modified-C evidence at the
+                # observed CpG. A wholly missing second CpG must not turn their
+                # means into NaN and send them to the other reference group.
+                self.assertEqual(assignments["is_best_group"].tolist(), [True, True])
 
     def test_extracts_5mc_and_5hmc_independently(self):
         with tempfile.TemporaryDirectory() as temp_dir:

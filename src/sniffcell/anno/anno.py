@@ -614,14 +614,11 @@ def _one_dmr(args):
             mm_float = mm_float.copy()
             col_idx = np.where(nan_locs)[1]
             mm_float[nan_locs] = col_means[col_idx]
-        # Keep the pre-channel-aware modifiedC result, including its handling
-        # of entirely unobserved CpG columns. Channel-specific calls can have
-        # missing columns independently and use the observed-column mean.
-        read_mean = (
-            mm_float.mean(axis=1)
-            if effective_modification == "modifiedC"
-            else np.nanmean(mm_float, axis=1)
-        )
+        # Entirely unobserved columns carry no methylation evidence. Retain
+        # column-mean imputation for partially observed columns, but exclude
+        # wholly unobserved columns from every assay's read mean. All-empty
+        # reads were removed above, so each remaining read has evidence.
+        read_mean = np.nanmean(mm_float, axis=1)
 
         # Assign each read to best_group vs other_group per ctDMR.
         if read_assignment_mode == "closest_reference_mean":
@@ -665,6 +662,12 @@ def _one_dmr(args):
             target_bits[idx] = "1"
             target_set = {best_group}
         other_bits = ["0" if bit == "1" else "1" for bit in target_bits]
+        unprofiled = set(_parse_pipe_values(row.get("unprofiled_celltypes")))
+        assert unprofiled <= set(cell_types)
+        for i, ct in enumerate(cell_types):
+            if ct in unprofiled:
+                target_bits[i] = other_bits[i] = "0"
+
         target_code = "".join(target_bits)
         other_code  = "".join(other_bits)
         code_col = np.where(mask_target, target_code, other_code)
@@ -687,6 +690,7 @@ def _one_dmr(args):
             "modification": catalog_modification,
             "bam_modification": effective_modification,
             "code": code_col,
+            "unprofiled_celltypes": "|".join(ct for ct in cell_types if ct in unprofiled),
         }, index=pd.Index(readnames, name="readname"))
 
         # per-block means (per-read mean methylation, then avg by target vs other)
@@ -703,7 +707,7 @@ def _one_dmr(args):
             "bam_modification": effective_modification,
         }
         for ct in cell_types:
-            state_payload[f"{ct}_methylation"] = tgt_mean if ct in target_set else oth_mean
+            state_payload[f"{ct}_methylation"] = np.nan if ct in unprofiled else (tgt_mean if ct in target_set else oth_mean)
         state_df = pd.DataFrame([state_payload])
 
         return assign_df, state_df

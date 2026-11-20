@@ -502,7 +502,7 @@ def _summarize_celltype_links(
 
     return pd.DataFrame(rows).set_index(sv_id_col)
 
-def _compute_per_read_consensus_df(
+def _compute_complete_reference_consensus_df(
     assignment_df: pd.DataFrame,
     per_read_min_agreement: float = 0.66,
 ) -> pd.DataFrame:
@@ -628,6 +628,12 @@ def _compute_per_read_consensus_df(
     result["read_used_intersection"] = result["read_used_intersection"].astype(bool)
     result["read_agreement_pct"]   = result["read_agreement_pct"].astype(float)
     return result
+
+
+def _compute_per_read_consensus_df(assignment_df, per_read_min_agreement=0.66):
+    from sniffcell.anno.partial_atlas import consensus_with_partial_profiles
+    return consensus_with_partial_profiles(assignment_df, per_read_min_agreement,
+                                            _compute_complete_reference_consensus_df)
 
 
 def assign_sv_celltypes(
@@ -916,6 +922,17 @@ def assign_sv_celltypes(
         .rename("_n_vote_units")
     )
 
+    # Per-read reports must decode the same consensus used for SV voting.
+    # Raw ctDMR codes omit unprofiled classes and can disagree with the final
+    # candidate set (e.g. m/h-only B-cell evidence also leaves Granulocyte open).
+    # Keep all-row reports as an explicit summary of the underlying row evidence.
+    readable_evidence = evidence
+    if unique_reads_for_overlap:
+        readable_evidence = non_mixed.drop_duplicates(subset=[sv_id_col, "read"]).copy()
+        readable_evidence["code"] = readable_evidence["code_token"].map(
+            lambda token: _split_code_token_schema_bits(token)[1]
+        )
+
     # ---- code counts & majority ----
     if read_votes.empty:
         code_counts_str = pd.Series(dtype="string", name="code_counts")
@@ -924,7 +941,7 @@ def assign_sv_celltypes(
         )
         conflict_summary = _summarize_code_conflicts(read_votes, sv_id_col=sv_id_col)
         readable_summary = _summarize_celltype_links(
-            evidence,
+            readable_evidence,
             sv_id_col=sv_id_col,
             unique_reads_for_overlap=unique_reads_for_overlap,
         )
@@ -948,7 +965,7 @@ def assign_sv_celltypes(
         majority["majority_code"] = majority["majority_code"].astype("string")
         conflict_summary = _summarize_code_conflicts(read_votes, sv_id_col=sv_id_col)
         readable_summary = _summarize_celltype_links(
-            evidence,
+            readable_evidence,
             sv_id_col=sv_id_col,
             unique_reads_for_overlap=unique_reads_for_overlap,
         )

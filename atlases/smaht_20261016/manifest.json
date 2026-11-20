@@ -1,0 +1,275 @@
+{
+  "release": "SMaHT 2026-10-16 production catalogs",
+  "reference_build": "GRCh38",
+  "original_code_commit": "26e0ad9f6b5ebfd853910feacc9fa50037872861",
+  "catalogs": [
+    {
+      "tissue": "colon_ascending",
+      "tissue_codes": [
+        "3E"
+      ],
+      "file": "colon_ascending.ctdmr.tsv.gz",
+      "compressed_sha256": "937d26178337ea665e7ff0a24bc4b53851509b5e756c82810dcebbcc07398e3b",
+      "uncompressed_sha256": "038a7d9e166ae62b72b0803e2d7add29492cc3b1783ef9f0fa5e8fdeb2b23ee6",
+      "source_filename": "3E.ctdmr.tsv",
+      "source_sha256": "038a7d9e166ae62b72b0803e2d7add29492cc3b1783ef9f0fa5e8fdeb2b23ee6",
+      "source_content_preserved": true,
+      "rows": 215427,
+      "rows_by_modification": {
+        "modifiedC": 215427
+      },
+      "classes": [
+        "Fibroblast",
+        "Macrophage",
+        "Right-Endocrine",
+        "Right-Epithelial"
+      ]
+    },
+    {
+      "tissue": "colon_descending",
+      "tissue_codes": [
+        "3G"
+      ],
+      "file": "colon_descending.ctdmr.tsv.gz",
+      "compressed_sha256": "b05546102ec7a0989b31006a2adbcae89cc6092380eaccf6522c8ab7e26323a4",
+      "uncompressed_sha256": "eedc30db0cac04d0719b0cd53fc3047777a9d66aaf2b4e59538bf058511ef88d",
+      "source_filename": "3G.ctdmr.tsv",
+      "source_sha256": "eedc30db0cac04d0719b0cd53fc3047777a9d66aaf2b4e59538bf058511ef88d",
+      "source_content_preserved": true,
+      "rows": 206659,
+      "rows_by_modification": {
+        "modifiedC": 206659
+      },
+      "classes": [
+        "Fibroblast",
+        "Left-Endocrine",
+        "Left-Epithelial",
+        "Macrophage"
+      ]
+    },
+    {
+      "tissue": "liver",
+      "tissue_codes": [
+        "3I"
+      ],
+      "file": "liver.ctdmr.tsv.gz",
+      "compressed_sha256": "04f58660be02d3de858e59fc9965cc76416dcb3550ff232e80b925fc2b10d793",
+      "uncompressed_sha256": "94a5ee766ad1fbdff24be3bc49fb5818e39eff3f7b5b122eb8bc9008af166d54",
+      "source_filename": "3I.ctdmr.tsv",
+      "source_sha256": "94a5ee766ad1fbdff24be3bc49fb5818e39eff3f7b5b122eb8bc9008af166d54",
+      "source_content_preserved": true,
+      "rows": 164906,
+      "rows_by_modification": {
+        "modifiedC": 164906
+      },
+      "classes": [
+        "Endothelial",
+        "Hepatocyte",
+        "Macrophage"
+      ]
+    },
+    {
+      "tissue": "aorta",
+      "tissue_codes": [
+        "3O"
+      ],
+      "file": "aorta.ctdmr.tsv.gz",
+      "compressed_sha256": "5cf3c99085cc49b39d75059fa59b48b2e4480cb6a29bf49f309998f5ec517fe7",
+      "uncompressed_sha256": "cca2c5ce3354fb97c8b1cdbfc9675595df7e717c21ef5871262b37d184e6782c",
+      "source_filename": "3O.ctdmr.tsv",
+      "source_sha256": "cca2c5ce3354fb97c8b1cdbfc9675595df7e717c21ef5871262b37d184e6782c",
+      "source_content_preserved": true,
+      "rows": 96574,
+      "rows_by_modification": {
+        "modifiedC": 96574
+      },
+      "classes": [
+        "Endothelial",
+        "Smooth-Muscle"
+      ]
+    },
+    {
+      "tissue": "lung",
+      "tissue_codes": [
+        "3Q"
+      ],
+      "file": "lung.ctdmr.tsv.gz",
+      "compressed_sha256": "5b6ac1e423001a428e79f1423969f4d98bfc3adf99516305d6d8618abfd8a816",
+      "uncompressed_sha256": "84ff8703f096fd5103f9ce950bf3e640c7571043da97338ef3685c1da07a55d2",
+      "source_filename": "3Q.ctdmr.tsv",
+      "source_sha256": "84ff8703f096fd5103f9ce950bf3e640c7571043da97338ef3685c1da07a55d2",
+      "source_content_preserved": true,
+      "rows": 508163,
+      "rows_by_modification": {
+        "modifiedC": 508163
+      },
+      "classes": [
+        "Alveolar-Endothelial",
+        "Alveolar-Epithelial",
+        "Alveolar-Macrophage",
+        "Bronchus-Epithelial",
+        "Bronchus-Smooth-Muscle",
+        "Interstitial-Macrophage",
+        "Pleura"
+      ]
+    },
+    {
+      "tissue": "heart",
+      "tissue_codes": [
+        "3S"
+      ],
+      "file": "heart.ctdmr.tsv.gz",
+      "compressed_sha256": "076b2929178ff7c459e4983fd1a379762b2d4cfccb2fdcf7954df67d8c8929ad",
+      "uncompressed_sha256": "1a729bb9de1f599d98f870773e51259db98481474b4136f8926e762cb4456638",
+      "source_filename": "3S.ctdmr.tsv",
+      "source_sha256": "1a729bb9de1f599d98f870773e51259db98481474b4136f8926e762cb4456638",
+      "source_content_preserved": true,
+      "rows": 389884,
+      "rows_by_modification": {
+        "modifiedC": 389884
+      },
+      "classes": [
+        "Cardiomyocyte",
+        "Fibroblast"
+      ]
+    },
+    {
+      "tissue": "skin",
+      "tissue_codes": [
+        "3AD",
+        "3AF"
+      ],
+      "file": "skin.ctdmr.tsv.gz",
+      "compressed_sha256": "0bee41697ea66dc377d65638dc4a37675992a3f263e773e740892628165867f5",
+      "uncompressed_sha256": "9b73ccc69e5230e4f17d449b4983c3202855089356712d426b66637ac34cb764",
+      "source_filename": "3AD.ctdmr.tsv",
+      "source_sha256": "9b73ccc69e5230e4f17d449b4983c3202855089356712d426b66637ac34cb764",
+      "source_content_preserved": true,
+      "rows": 169421,
+      "rows_by_modification": {
+        "modifiedC": 169421
+      },
+      "classes": [
+        "Dermal-Fibroblast",
+        "Epidermal-Keratinocyte"
+      ]
+    },
+    {
+      "tissue": "whole_blood",
+      "tissue_codes": [
+        "3A"
+      ],
+      "file": "../blood_5hmc/blood_universal.modifiedC_plus_5mc_5hmc.ctdmr.tsv.gz",
+      "source_filename": "blood_universal.modifiedC_plus_5mc_5hmc.ctdmr.tsv.gz",
+      "source_compressed_sha256": "cb36b5a6c0f60a16bc82116bbd8bf998b7c8bbc5d767c1f08c958242d64311ce",
+      "compressed_sha256": "b400fccac929a09d16b180f6240775c0d3723d3b5a115535747f7746d85b5e21",
+      "scoring_fields": [
+        "chr",
+        "start",
+        "end",
+        "name",
+        "score",
+        "strand",
+        "n_rows",
+        "n_cpgs",
+        "bp_len",
+        "best_group",
+        "other_group",
+        "best_dir",
+        "mean_margin",
+        "second_best_margin",
+        "rest_std_mean",
+        "mean_best_value",
+        "mean_rest_value",
+        "best_group_leaves",
+        "other_group_leaves",
+        "hyper_group_leaves",
+        "hypo_group_leaves",
+        "code_order",
+        "mean_B-cell",
+        "mean_Granulocyte",
+        "mean_Monocyte",
+        "mean_NK-cell",
+        "mean_T-cell",
+        "modification",
+        "reference_scope",
+        "unprofiled_celltypes",
+        "evidence_source",
+        "donor_stability_rule",
+        "evidence_id"
+      ],
+      "scoring_fields_sha256": "f00552d02a8df17611b47d4c3385c3485b896dcdd3ff54d899450dd9ccaadc79",
+      "scoring_fields_preserved": true,
+      "metadata_changes": {
+        "atlas_source": "basename only",
+        "paired_stability_filter": "True on FANS m/h rows",
+        "paired_donors": "2 on FANS m/h rows"
+      },
+      "rows": 105281,
+      "rows_by_modification": {
+        "modifiedC": 90216,
+        "5mC": 15025,
+        "5hmC": 40
+      },
+      "classes": [
+        "B-cell",
+        "Granulocyte",
+        "Monocyte",
+        "NK-cell",
+        "T-cell"
+      ]
+    },
+    {
+      "tissue": "brain",
+      "tissue_codes": [
+        "3AK",
+        "3AL",
+        "3AM",
+        "3AN",
+        "3AO"
+      ],
+      "file": "../brain_5hmc/brain_universal.paper_backbone_plus_5mc_5hmc.four_donors.ctdmr.tsv.gz",
+      "compressed_sha256": "4307930ee9812634f6e11913152fbc4df45ecd2b511203a0b2b6335b50c533dd",
+      "source_content_preserved": true,
+      "rows": 489972,
+      "rows_by_modification": {
+        "modifiedC": 152961,
+        "5mC": 194662,
+        "5hmC": 142349
+      },
+      "classes": [
+        "Neuron",
+        "Oligodendrocyte"
+      ]
+    }
+  ],
+  "tissue_discovery_parameters": {
+    "diff_threshold": 0.4,
+    "min_rows": 1,
+    "min_cpgs": 3,
+    "max_gap_bp": 2000
+  },
+  "required_scoring_fixes": [
+    "observed-CpG means for all assays",
+    "explicit missing granulocyte m/h profiles"
+  ],
+  "scope": {
+    "original_inventory": 560,
+    "completed": 407,
+    "blood": 34,
+    "nonblood": 373,
+    "existing_callset_annotations": 405,
+    "without_callset": 2
+  },
+  "not_run": {
+    "missing_tissue_catalogs": {
+      "esophagus": 44,
+      "muscle": 35,
+      "testis": 37,
+      "adrenal": 22,
+      "ovary": 8
+    },
+    "fibroblast_controls": 7
+  },
+  "additional_reporting_correction": "Per-read variant readable labels now use consensus codes; historical readable outputs were not regenerated"
+}
