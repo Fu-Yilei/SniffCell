@@ -381,6 +381,7 @@ def _build_read_summary(
     cols = [
         "readname",
         "n_ctdmrs",
+        "assay_consensus_rule",
         "consensus_code",
         "agreement_pct",
         "is_mixed",

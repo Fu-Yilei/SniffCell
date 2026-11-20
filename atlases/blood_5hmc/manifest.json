@@ -1,0 +1,117 @@
+{
+  "reference_build": "GRCh38",
+  "file": "blood_universal.modifiedC_plus_5mc_5hmc.ctdmr.tsv.gz",
+  "source_filename": "blood_universal.modifiedC_plus_5mc_5hmc.ctdmr.tsv.gz",
+  "source_compressed_sha256": "cb36b5a6c0f60a16bc82116bbd8bf998b7c8bbc5d767c1f08c958242d64311ce",
+  "compressed_sha256": "b400fccac929a09d16b180f6240775c0d3723d3b5a115535747f7746d85b5e21",
+  "scoring_fields": [
+    "chr",
+    "start",
+    "end",
+    "name",
+    "score",
+    "strand",
+    "n_rows",
+    "n_cpgs",
+    "bp_len",
+    "best_group",
+    "other_group",
+    "best_dir",
+    "mean_margin",
+    "second_best_margin",
+    "rest_std_mean",
+    "mean_best_value",
+    "mean_rest_value",
+    "best_group_leaves",
+    "other_group_leaves",
+    "hyper_group_leaves",
+    "hypo_group_leaves",
+    "code_order",
+    "mean_B-cell",
+    "mean_Granulocyte",
+    "mean_Monocyte",
+    "mean_NK-cell",
+    "mean_T-cell",
+    "modification",
+    "reference_scope",
+    "unprofiled_celltypes",
+    "evidence_source",
+    "donor_stability_rule",
+    "evidence_id"
+  ],
+  "scoring_fields_sha256": "f00552d02a8df17611b47d4c3385c3485b896dcdd3ff54d899450dd9ccaadc79",
+  "scoring_fields_preserved": true,
+  "metadata_changes": {
+    "atlas_source": "basename only",
+    "paired_stability_filter": "True on FANS m/h rows",
+    "paired_donors": "2 on FANS m/h rows"
+  },
+  "rows": 105281,
+  "rows_by_modification": {
+    "modifiedC": 90216,
+    "5mC": 15025,
+    "5hmC": 40
+  },
+  "classes": [
+    "B-cell",
+    "Granulocyte",
+    "Monocyte",
+    "NK-cell",
+    "T-cell"
+  ],
+  "source_backbone_sha256": "59cd2309b150eb89242784f270922851a3ec8b4cc1530a3284baf88814d57201",
+  "source_fans_sha256": "ddded7fbde6c28e13c6e0e8d9fb94c4d1917a1ca6b5665b51ed358465a2036ac",
+  "discovery_parameters": {
+    "diff_threshold": 0.4,
+    "min_rows": 1,
+    "min_cpgs": 3,
+    "max_gap_bp": 2000
+  },
+  "reference_profile_counts": {
+    "B-cell": 5,
+    "Granulocyte": 3,
+    "Monocyte": 3,
+    "NK-cell": 3,
+    "T-cell": 22
+  },
+  "minimum_finite_backbone_references_per_class": 2,
+  "source_files": {
+    "all_celltypes_blocks.npy": "e0bd54d643bb72685f5d2a71f87bbe1c55b1fad298a6efd6e3d0a7a8f1ba622c",
+    "all_celltypes_blocks.index.gz": "6a5bfb3ee00c9a8b57785bbd7beaf015cc4ad1a6822820a208e2f04e1d3e1aff",
+    "all_celltypes.txt": "c4cd3aa64759e9e2f73fbcc22ee4d61a1737c86bc130ee334a73b14180a4ab2e",
+    "blood_5class_modifiedC_celltypes.json": "5a7da795f4b472cca22a628c9ae855046bb9969ff1a6e674ce3e92d6328b8baa"
+  },
+  "fans_reference": {
+    "donors": 2,
+    "sorted_samples": 8,
+    "classes": [
+      "B-cell",
+      "Monocyte",
+      "NK-cell",
+      "T-cell"
+    ],
+    "all_blocks_observed": true,
+    "same_effect_direction_both_donors": true,
+    "minimum_effect_each_donor": 0.3,
+    "minimum_median_effect": 0.4,
+    "candidate_rows": {
+      "5mC": 73676,
+      "5hmC": 55
+    },
+    "stable_rows": {
+      "5mC": 71846,
+      "5hmC": 48
+    }
+  },
+  "integration": "Preserve modifiedC backbone; add stable m/h rows outside its extraction intervals",
+  "granulocyte_mh_profiles_available": false,
+  "validation": {
+    "platform_smoke_checks": 2,
+    "reciprocal_donor_checks": 8,
+    "expected_class_compatible_fraction_range": [
+      0.7087122627797849,
+      0.8361400457828332
+    ],
+    "scope": "Bounded known-origin read checks; compatible multiple labels count; no granulocyte FANS control; not genome-wide accuracy"
+  }
+}

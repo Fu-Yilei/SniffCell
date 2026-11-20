@@ -5,6 +5,12 @@ for brain universal, PBMC, breast, colon, kidney, liver, lung, pancreas, and
 [sperm versus blood](sperm_vs_blood/README.md).
 The [brain 5hmC catalog](brain_5hmc/README.md) provides separate modifiedC,
 5mC and 5hmC scoring rows.
+The [whole-blood 5hmC catalog](blood_5hmc/README.md) adds granulocytes and
+two-donor FANS PBMC m/h markers in one shared five-class schema.
+The [SMaHT production release](smaht_20261016/README.md) maps tissue codes to
+the exact scoring catalogs used for the completed 407-sample run, including
+expanded lung and segment-specific colon catalogs. It retains the existing
+brain 5hmC file and documents the differences from the original tissue files.
 The [experimental brain annotation catalog](brain_anno/README.md) supplies
 nine-class modifiedC profiles for `anno`, while retaining the original catalogs
 for deconvolution and read splitting.
@@ -24,6 +30,7 @@ gzip -dk pbmc/pbmc.combined_dt04.ctdmr.tsv.gz
 
 `manifest.tsv` records compressed and uncompressed sizes and the SHA-256
 checksum of uncompressed contents for the 34 standard tissue catalog files.
-The brain 5hmC and brain annotation catalogs have their own `manifest.json`
-files in `brain_5hmc/` and `brain_anno/`. The brain universal and PBMC directories
+The brain 5hmC, blood 5hmC, SMaHT production, and brain annotation catalogs have
+their own `manifest.json` files in their respective directories.
+The brain universal and PBMC directories
 contain copies of the source data resolved from directory symlinks.
